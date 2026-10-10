@@ -1,0 +1,38 @@
+# Secrets — never commit (live values stay in the cluster / out-of-band)
+# Single local store for all credentials; the .example template IS tracked.
+.secrets.env
+!.secrets.env.example
+
+# Local host inventory (real IPs) — tracked files carry node names/placeholders only
+.hosts.env
+!.hosts.env.example
+manifests/**/secret.yaml
+**/secret.yaml
+*.env
+.env*
+*.pem
+*.key
+kubeconfig*
+*.kubeconfig
+
+# Scripts that embed the Grafana admin password (rotate, then rewrite to read an env var)
+validation/grafana/
+
+# Large / unrelated binaries (Telegram Desktop installer lives in docs/ by accident)
+docs/td-setup-*
+*.tar.xz
+*.tar.gz
+*.tgz
+
+# Generated
+__pycache__/
+*.pyc
+out/
+.venv/
+*.log
+
+# Editors / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/

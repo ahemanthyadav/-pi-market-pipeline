@@ -1,0 +1,76 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  // OpenCode V2 project config — market-data pipeline.
+  // Core servers (context7, playwright, sequential-thinking, memory) live in the
+  // global config (~/.config/opencode/opencode.json) and are not duplicated here.
+
+  "mcp": {
+    "servers": {
+      // Local SQL over CSV/Parquet/JSON plus ad-hoc in-memory analysis.
+      // Can also read external files directly, e.g. read_csv_auto('/path/x.csv').
+      // --read-write is required for :memory: (server defaults to read-only;
+      // in-memory data is never persisted either way).
+      "duckdb": {
+        "type": "local",
+        "command": ["uvx", "mcp-server-motherduck", "--db-path", ":memory:", "--read-write"],
+        "timeout": { "startup": 60000 }
+      },
+      // TimescaleDB, read-only (restricted mode). Enable only while a port-forward runs:
+      //   kubectl -n market-data port-forward timescaledb-0 5432:5432
+      //   export DATABASE_URI=postgresql://postgres:<pw>@localhost:5432/postgres
+      // pw: kubectl -n market-data get secret timescaledb-auth -o jsonpath='{.data.password}' | base64 -d
+      // postgres-mcp needs the mcp<2 pin until it supports MCP SDK 2.x.
+      "postgres": {
+        "type": "local",
+        "command": ["uvx", "--with", "mcp<2", "postgres-mcp", "--access-mode=restricted"],
+        "environment": {
+          "DATABASE_URI": "{env:DATABASE_URI}"
+        },
+        "disabled": true
+      }
+    }
+  },
+
+  "permissions": [
+    // kubectl: broad ask first, then read-only allows (last matching rule wins).
+    { "action": "shell", "resource": "kubectl *", "effect": "ask" },
+    { "action": "shell", "resource": "kubectl get *", "effect": "allow" },
+    { "action": "shell", "resource": "kubectl -n * get *", "effect": "allow" },
+    { "action": "shell", "resource": "kubectl describe *", "effect": "allow" },
+    { "action": "shell", "resource": "kubectl -n * describe *", "effect": "allow" },
+    { "action": "shell", "resource": "kubectl logs *", "effect": "allow" },
+    { "action": "shell", "resource": "kubectl -n * logs *", "effect": "allow" },
+    { "action": "shell", "resource": "kubectl top *", "effect": "allow" },
+    { "action": "shell", "resource": "kubectl -n * top *", "effect": "allow" },
+    { "action": "shell", "resource": "kubectl diff *", "effect": "allow" },
+    { "action": "shell", "resource": "kubectl -n * diff *", "effect": "allow" },
+    { "action": "shell", "resource": "kubectl port-forward *", "effect": "allow" },
+    { "action": "shell", "resource": "kubectl -n * port-forward *", "effect": "allow" },
+
+    // Hard guardrails: never delete the database workloads or its data volume.
+    { "action": "shell", "resource": "kubectl delete *timescaledb*", "effect": "deny" },
+    { "action": "shell", "resource": "kubectl * delete *timescaledb*", "effect": "deny" },
+    { "action": "shell", "resource": "kubectl delete *pgdata-timescaledb*", "effect": "deny" },
+    { "action": "shell", "resource": "kubectl * delete *pgdata-timescaledb*", "effect": "deny" },
+
+    // SSH helpers run arbitrary commands on cluster nodes — always confirm.
+    { "action": "shell", "resource": "python3 ops-tools/*", "effect": "ask" },
+    { "action": "shell", "resource": "python3 * ops-tools/*", "effect": "ask" },
+
+    // Secret manifests: confirm before reading or editing (rotation is deliberate).
+    { "action": "read", "resource": "*secret.yaml", "effect": "ask" },
+    { "action": "edit", "resource": "*secret.yaml", "effect": "ask" },
+
+    // Local secrets store (gitignored): agents may not read, edit or shell-expand it.
+    // ops-tools/*.py read it themselves, so agents never need to. The shell deny is
+    // best-effort pattern matching; the read/edit denies are the hard guard.
+    { "action": "read", "resource": "*.secrets.env", "effect": "deny" },
+    { "action": "edit", "resource": "*.secrets.env", "effect": "deny" },
+    { "action": "shell", "resource": "*secrets.env", "effect": "deny" },
+    { "action": "shell", "resource": "*secrets.env *", "effect": "deny" },
+    { "action": "shell", "resource": "*secrets.env\"*", "effect": "deny" },
+
+    // When the postgres MCP server is enabled, confirm each of its tool calls.
+    { "action": "postgres_*", "resource": "*", "effect": "ask" }
+  ]
+}
