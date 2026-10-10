@@ -33,6 +33,7 @@
 | **`stock-screener-implementation-plan.md`** | The v1 BUILD ORDER for the Nifty 500 + S&P 500 screener — as-built schema, sources (EDGAR + mixed), CronJobs, balanced scoring formulas, validation bars, rollout phases with live status | Extending/fixing the screener layer | Any screener code/schema change; phase completions |
 | **`nifty500_sp500_fundamental_analysis_implementation_plan.md`** | The TARGET ARCHITECTURE (v2+) above v1: security master, sector-relative 6-component scoring, classifications, style tags + investor lenses (§13), market-regime layer (§14), AI placement, binding ops constraints (§15) | Planning v2+ analysis features | When v1 scope shifts or a v2 item gets built |
 | **`market-data-telegram-bot.md`** | The Telegram channel as built — digest CronJob, Grafana alert contact point, **and the two-way listener (deployed 2026-10-09)** — plus operating procedures (test-firing, threshold tuning, token rotation) and the remaining update catalog incl. Strata-chat blockers | Anything touching the bot or notification channel; planning further two-way work | Any bot/alerting change; new alert rules; two-way decisions |
+| **`architecture-review-2026-10-10.md`** | Architect's review of the repo/system structure: strengths to keep, 12 findings (AR-1…AR-12) with evidence, target repo layout, phased plan, ADR candidates, how to re-measure | Planning structural/refactor work; before adding jobs or touching manifests | When an AR item is applied or rejected (update the tracker in the same session) |
 
 ## Roles in one line each
 

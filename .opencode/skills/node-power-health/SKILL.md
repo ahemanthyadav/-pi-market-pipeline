@@ -81,8 +81,11 @@ Ladder, in order (each step = one reboot pair, ~10 min):
 Specs sidebar: Pi 3 B+ wants **5.1 V / ≥2.5 A before the SSD's share**; buy
 5.1 V 3 A. Firmware browns out ≈4.65 V. "5 V" phone chargers sag to 4.8–4.9 V
 under load — three different chargers all failed on pi2 while identical
-SSD+adapter hardware ran clean on pi3 for days. A powered USB hub takes the
-SSD off the Pi's rail entirely if adapters keep eating supplies.
+SSD+adapter hardware ran clean on pi3 for days. To take the SSD off the Pi's rail
+without breaking boot, power it separately but keep its DATA path direct (powered SSD enclosure, or a
+separate-power Y-cable / data-only adapter). The SSD is the boot drive: a hub in the boot path is
+unverified on Pi 3 / 3B+ (the onboard LAN chip is already a hub) — test on pi3 or a spare first, never
+first on pi2.
 
 Fleet theme: supplies fail as a class — when one is convicted, check the
 others via the stats logger (`throttle_hex` column) before assuming one bad

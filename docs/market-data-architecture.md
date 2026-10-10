@@ -863,7 +863,8 @@ on the admin box).
 2. **TX2 is a single point of failure for DB + GPU.** Accepted for simplicity at this
    scale. Mitigation: daily `pg_dump -Fc` on pi3's independent SSD + PV reclaim Retain.
    **RTO measured 2026-10-03:** `pg_restore` of the newest dump = 2 s at current size
-   (388 KB); end-to-end recovery is bounded by human steps, well under 15 min.
+   (388 KB) — **stale since 2026-10-10: dumps are ~165 MB; re-run the drill**; end-to-end recovery is bounded by
+   human steps, well under 15 min.
    Re-run the drill (`manifests/timescaledb/restore-drill-job.yaml`) quarterly or
    after schema/backup changes.
 3. **No HA anywhere.** DB ×1, Grafana ×1, single control-plane node (sqlite/kine, so no
@@ -979,3 +980,6 @@ Also on the admin box: `~/.kube/pi-cluster.yaml` (kubeconfig, server `<pi2-ip>`)
 8. FDI/TIC flows still manual/deferred.
 9. `news_sentiment`/`raw_headlines` unique constraints deferred to the next scorer/
    fetcher image rebuild (need ON CONFLICT; INSERT-only writers today).
+10. Structural recommendations (CronJob restart-storm safeguards, shared job module, `job_runs`,
+    image consolidation, repo layout, DB roles, CI, control-plane/DB-host topology):
+    `architecture-review-2026-10-10.md` (AR-1…AR-12; tracker: pending-tasks §3).
