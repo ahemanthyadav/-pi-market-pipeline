@@ -1,0 +1,28 @@
+#!/bin/bash
+# Behavioural test for ops-tools/nodewatch.sh using its simulated-failure hook.
+# Never sends a message (no credentials are passed) and uses a scratch state dir.
+set -u
+cd "$(git rev-parse --show-toplevel)"
+export NODEWATCH_STATE_DIR="$(mktemp -d)"
+export NODEWATCH_SECRETS_FILE=/dev/null          # force "no Telegram credentials" -> print only
+trap 'rm -rf "$NODEWATCH_STATE_DIR"' EXIT
+pass=0; fail=0
+check() { if [ "$2" = "$3" ]; then echo "  ok    $1"; pass=$((pass+1)); else echo "  FAIL  $1 (got '$2', want '$3')"; fail=$((fail+1)); fi; }
+run() { bash ops-tools/nodewatch.sh "$@" 2>&1; }
+has() { grep -c "$2" <<<"$1"; }
+
+echo "== state-change logic (simulated outage)"
+out=$(run);                                    check "healthy baseline: no message"            "$(has "$out" '^message:')" 0
+out=$(NODEWATCH_TEST_DOWN="pi3 api" run);      check "outage -> one DOWN message"              "$(has "$out" 'DOWN → pi3 k3s-api')" 1
+out=$(NODEWATCH_TEST_DOWN="pi3 api" run);      check "same outage again -> suppressed"         "$(has "$out" '^message:')" 0
+out=$(NODEWATCH_TEST_DOWN="pi3" run);          check "api recovers, pi3 still down -> new msg" "$(has "$out" 'DOWN → pi3')" 1
+out=$(run);                                    check "full recovery -> recovered message"      "$(has "$out" 'reachable again')" 1
+out=$(run);                                    check "stable again -> silent"                  "$(has "$out" '^message:')" 0
+
+echo "== safety"
+out=$(NODEWATCH_TEST_DOWN="tx2" run --dry-run); check "dry-run never claims it sent"          "$(has "$out" '^sent')" 0
+out=$(NODEWATCH_TEST_DOWN="tx2" run);           check "no credentials -> prints, does not send" "$(has "$out" 'no Telegram credentials')" 1
+leak=$(grep -nE "([0-9]{1,3}\.){3}[0-9]{1,3}" ops-tools/nodewatch.sh | wc -l)
+check "script contains no IP literals"          "$leak" 0
+
+echo; echo "result: $pass passed, $fail failed"; [ $fail -eq 0 ]
