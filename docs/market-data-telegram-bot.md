@@ -3,7 +3,9 @@
 > **Purpose:** everything about the Marketfredbot Telegram channel — how the
 > deployed digest + alert pipeline is wired, how to operate and change it, and
 > the tiered menu of two-way/next-step upgrades with their real constraints.
-> **Last verified: 2026-10-09** (digest live-fire-delivered; alert chain
+> **Last verified: 2026-10-10** (v4 deployed — §1a; alerts canary delivered;
+> commands log-verified, not yet checked from the phone).
+> **v2 verification:** (digest live-fire-delivered; alert chain
 > validated end-to-end with a real FII firing; two-way listener deployed and
 > command-validated from the phone — /status /nifty /digest /scores answered).
 > Related: ADR 0009 (the decision record) · finds §1.5 F29–F32 (the rollout
@@ -45,6 +47,72 @@ Digest content (one message, ~900 chars): Nifty/Sensex/S&P/VIX/India-VIX/DXY/
 Gold closes **with day-change %**, USD/INR, 7-day sentiment average, latest
 FII/DII net, stale-feed warnings from `pipeline_heartbeat`, 3 newest scored
 headlines.
+
+## 1a. v3 — stock, watchlist and screener commands (deployed 2026-10-10)
+
+Image `local/telegram-digest:v3` adds `stocks.py` (shared view layer, no DB
+driver import — unit-tested with a fake in `tests/test_stocks.py`) and
+`alerts.py` (third entrypoint). Live tags verified and the alerts canary passed
+(`ALERTS-OK 3 line(s) sent`) on 2026-10-10; commands not yet exercised from the phone.
+
+| Command | Answers from | Notes |
+|---|---|---|
+| `/stock TCS` | `stock_prices`, `stock_metrics_daily`, `stock_scores`, `stock_fundamentals`, `headline_*` | symbol or name fragment (bare NSE symbols get `.NS` tried); close, day %, 1m/6m/12m/YTD, 50/200DMA, 52w position, RSI14 (computed in Python — `technical_indicators` covers indices only), factor scores, valuation, 3 headlines |
+| `/news TCS` | `headline_entities` → `raw_headlines`, `news_sentiment`, `headline_events` | last 14 d, sentiment per headline, event tags |
+| `/top growth sp500` | `stock_scores` | best 10 eligible by `value\|quality\|growth\|momentum\|risk\|composite`; default composite / NIFTY500 |
+| `/movers` | `stock_scores` | entered / left the top-20 between the last two FULL runs (≥40 eligible rows — canary runs ignored) |
+| `/track` | `stock_scores` × `stock_prices` | top-20 picks vs equal-weight universe, 1/5/21/63 trading days forward; says "not enough history" until a horizon completes |
+| `/watch`, `/watch add TCS [qty cost] [note]`, `/watch rm TCS` | `watchlist` | **the bot's one write path**; holdings P&L totalled per currency |
+| `/world [region]` | `index_prices`, `ticker_names` | every index + gold/silver/oil/DXY: close, day, 1m, YTD; best/worst YTD |
+| `/fx` (`/usdinr`) | `fx_rates` | all pairs, INR pairs first; YTD appears once history reaches 1 Jan |
+| `/macro` | `index_prices`, `fx_rates`, `bond_yields`, `capital_flows` | gold in INR/10 g (parity, ex-duty), 5 yield spreads, FII-vs-Nifty correlation |
+
+- **CronJob `telegram-alerts`** (02:45 node-local, after the screener chain):
+  top-20 entries/exits, watchlist day moves ≥5 %, 50/200-day crossings, tagged
+  news events in 24 h. Stateless — fires only on data dated today/yesterday
+  UTC, so weekends and stalled feeds cannot repeat an alert. Silent when
+  nothing changed (`ALERTS-OK nothing changed`).
+- **Digest** gains a compact watchlist section; skipped while the table is
+  empty or absent, so image v3 is safe to roll before the schema Job runs.
+- **Menu:** `bot.py` now calls `setMyCommands` on start (it was documented
+  but never coded).
+- **Gotcha — chunk pruning:** `stock_prices` has ~3,400 chunks. Time bounds
+  must be parameters or `now()` arithmetic; a `date_trunc()` or sub-select
+  bound planned for 11 s / ran 79 s. Both fixed in `stocks.py`; keep it so.
+
+### v4 (deployed 2026-10-10, same day) — layout, depth, candidates, confidence
+
+- **Layout:** every list is a fixed-width `<pre>` table ≤ 38 characters
+  (`stocks.table`), every single instrument a bold headline plus label/value
+  blocks (`stocks.kv`). Tests assert the width (`PHONE_WIDTH`).
+- **`/index <name>`** (and `/nifty` `/sensex` `/gold`): 1w/1m/3m/YTD/1y, 52-week
+  high/low and distance from the high, 50/200-day averages, RSI — one
+  380-day read of `index_prices`.
+- **YTD everywhere:** `/world`, `/vix`, digest index table, `/top`, `/scores`,
+  `/watch`, movers.
+- **Valuation at the latest close:** `stock_fundamentals` holds P/E, P/B and
+  market cap as Yahoo reported them on the weekly fetch (Saturdays). `/stock`
+  rescales those three by `close_now / close_at_snapshot` (`stocks.reprice`);
+  EV/EBITDA is shown with its snapshot date. **The screener's value factor
+  still uses the weekly snapshot** — up to a week stale by design of
+  `stock_fundamentals.py`; fixing that is a screener change, not a bot one.
+- **`/stock`** also shows revenue/EPS/net-income growth of the latest fiscal
+  year, debt/equity, FCF yield and daily traded value.
+- **`/multibagger [nifty|sp500]`** (`/mb`): gates then a 0-100 score. Gates —
+  revenue AND earnings CAGR ≥ 15 % over the 2-3 fiscal years on file, ROE ≥
+  15 %, debt/equity ≤ 1 (financials exempt), outside the largest 30 % by
+  market cap, PEG ≤ 2, price above the 200-day average. Score — growth 35,
+  quality 25, valuation 15, momentum 15, size 10. The message prints how many
+  names each gate dropped. First live run: 16 of 495 (NIFTY500), 1 of 503
+  (SP500). **Not backtested** — fundamentals are current snapshots, there is
+  no point-in-time history to test against.
+- **Confidence (0-100) on every recommendation** — `/top`, `/scores`,
+  `/stock`, `/multibagger`. It measures evidence quality, never the chance of
+  a gain, and every message says so. Screener picks: data coverage 40, factor
+  agreement 30, rank stability over the last 10 days 30. Multibagger: years
+  of history 30, EPS and net income both confirming 20, margin over the gates
+  15, positive FCF 15, reported ROE 10, upper half of the 52-week range 10.
+  ≥ 70 high · ≥ 45 medium · else low.
 
 ## 2. Decisions already paid for (ADR 0009 — don't re-litigate)
 
@@ -143,7 +211,8 @@ kubectl logs -n market-data deploy/telegram-bot -f
 1. **Sentiment-drop rule** — the one candidate from finds Tier 1 #1 still
    unwritten (e.g., 7-day mean < −0.15). Pure addition to `alerting.yaml`.
 2. **Threshold tuning pass** — §3.3 table; two weeks of real firings first.
-3. **Watchlist section in the digest** — a `watchlist` table (ticker, note)
+3. **Watchlist section in the digest** — ✅ written 2026-10-10 (§1a; deploy
+   pending). Original note: a `watchlist` table (ticker, note)
    joined to `stock_prices`/`stock_scores`; manual-INSERT pattern like FDI.
    First step toward the portfolio layer riding the same channel.
 4. **Weekly chart digest** — Grafana render-to-PNG → `sendPhoto`. Needs the

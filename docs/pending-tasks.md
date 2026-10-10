@@ -20,11 +20,38 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   pi2 (0xd0005, 62 °C) — physical PSU/cable check pending. All CronJobs
   SUSPENDED (etcd-persisted) to stop catchup storms on the single-node
   control plane; agents failed on pi1/pi3/TX2; DB pod down (data safe, PV
-  Retain). Remaining: PSU check → agents pi3→pi1→TX2 (§8 order) → verify
+  Retain). Remaining: power-supply fix (next item — gates everything below) → agents pi3→pi1→TX2 (§8 order) → verify
   timescaledb Running → unsuspend in dependency order (fetchers →
   sentiment/ner → ta → screener chain → health) → delete stale Jobs (nse,
   digest) → refire missed runs (nse, fiidii, ~15× intraday, yfinance,
   digest). Detail: ops manual §8 (newest subsection); ADR 0011.
+- [ ] 🔶 **Fix the Pi power supplies (PLANNED — owner is replacing them; gates the recovery above)**
+  - **Evidence (2026-10-10):** pi2 live undervolt+throttle (`0xd0005`, 62 °C). Phone-style chargers do
+    not hold: a 5 V 2 A adapter still gave 9 `Undervoltage detected` events in 5.5 min at near-idle
+    load (no thermal cap, load calm, k3s up). pi3 — identical SSD, own supply — stays `0x0`. pi0 shows a
+    chronic `0x50000`; pi1 accumulates events (skill `node-power-health`). pi1 was also unreachable at
+    ~11:54Z (cause unverified — power suspected, not proven). Supplies fail as a class.
+  - **Buy/do:** 5.1 V / 3 A supplies (known-good class) + short (≤ 0.5 m), thick (≥ 20 AWG) micro-USB
+    cables for **pi2 first, then pi1, then pi0**; pi3 keeps its clean supply; keep **one spare**
+    supply+cable set for swap tests. For pi2 power the SSD **separately from the Pi's 5 V rail** (the SSD is the BOOT
+    drive, so keep its data path direct): a powered SSD enclosure, or a separate-power Y-cable /
+    data-only adapter. A hub in the boot path is **unverified on Pi 3 / 3B+** — test on pi3 or a spare
+    first, never first on pi2; bring SSD and Pi up together (rootdelay already covers slow drives). Optional: an inline USB power meter (~$10).
+  - **Method:** the identity-free swap-test ladder (skill `node-power-health` §4): PSU+cable first,
+    then USB-SATA adapter, board last. **Never swap boot SSDs between nodes** (hostname, static IP, k3s
+    certs and cluster state travel with the disk).
+  - **Acceptance:** no live `0x1` and no new `Undervoltage detected` in `dmesg` while load is real (k3s
+    settled, jobs running), **24 h of clean `throttle_hex` in `stats.csv`** — an idle reading proves
+    nothing. Record the verdict per node here and in the ops manual §8.
+  - **Gate:** do not start more agents, unsuspend CronJobs, or refire missed runs while pi2 shows live
+    undervolt; the bursts are the wedge trigger.
+  - **Later (decision, not part of this fix):** one shared regulated 5 V rail with fused branches —
+    architecture review AR-10; needs an enclosed supply and careful mains-side wiring.
+  - Detail: `architecture-review-2026-10-10.md` AR-10; skill `node-power-health`; ADR 0011.
+- [ ] 🔶 **Protect the existing DB backups while the cluster is down** — the newest dump on pi3
+  (`marketdata-2026-10-10.dump`) is **0 bytes** (a failed run); copy the last 2–3 good dumps (~165 MB each) off pi3
+  to the workstation (read-only). pi1, the planned second copy, was unreachable ~11:54Z. Detail: review AR-11;
+  ops manual §9 (known flaws).
 - [x] ✅ **Node-local stats logging** — deployed + first-sample-verified
   2026-10-10 on pi0/pi1/pi2/pi3/TX2 (ADR 0011): root-cron CSV every 5 min
   at /var/log/node-stats/stats.csv (load/cpu/mem/swap/temp/throttle-hex/
@@ -69,6 +96,31 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 - [ ] 🔶 **Deploy `nodewatch` on pi0** — out-of-cluster dead-man's switch (would have caught the
   2026-10-09 outage in ≤5 min). Script + tests done 2026-10-10 (`tests/test-nodewatch.sh`, 9/9); install steps
   in ops manual §11. Needs the Telegram credentials placed on pi0 (a new secret location — your call).
+
+- [x] ✅ 2026-10-10 **Telegram v3 live** — `telegram-digest`, new
+  `telegram-alerts` (23 CronJobs) and the listener all on
+  `local/telegram-digest:v3` (live tags verified); canary
+  `telegram-alerts-validate` → `ALERTS-OK 3 line(s) sent`. Detail:
+  telegram-bot doc §1a.
+- [x] ✅ 2026-10-10 **Telegram v4 live** (same day as v3): table layout,
+  `/index`, YTD everywhere, valuation repriced to the latest close,
+  `/multibagger`, confidence score on every recommendation. 85 unit tests;
+  canary `ALERTS-OK`. Detail: telegram-bot doc §1a "v4".
+- [ ] 🔶 Phone check of the v4 commands (`/help`, `/stock TCS`, `/index nikkei`,
+  `/world`, `/top growth sp500`, `/multibagger`, `/watch add …`, `/digest`) —
+  only log-verified so far; table widths assume ~38 monospace characters.
+- [ ] 🤔 Screener value factor uses weekly Yahoo ratio snapshots (P/E, P/B,
+  EV/EBITDA, market cap from Saturday's `stock-fundamentals` run), not the
+  day's close. Reprice inside `stock_screener.py` the way `/stock` now does?
+- [ ] 🤔 Multibagger screen has no backtest — needs point-in-time fundamentals
+  (store each weekly snapshot instead of latest-only) before it can be scored.
+- [x] ✅ 2026-10-10 Schema Job rerun (`08-watchlist.sql` → table `watchlist`;
+  `^RUI` in ticker_names). `yfinance-fetcher:v4` live (pi1 + pi3 imports),
+  1y backfills run for both index fetchers: `^RUI` 251 rows, `^CRSLDX` (Nifty
+  500) 246 rows, no duplicate (ticker, ts). Grafana "Derived Metrics"
+  dashboard applied (file present in the pod; not yet checked in the UI).
+- [ ] 🔶 FX history backfill to 1 Jan — `fx_rates` starts 2026-09-30, so `/fx`
+  shows no YTD yet (fx-fetcher has no BACKFILL mode today).
 
 - [x] ✅ **Telegram digest bot** — deployed + validated 2026-10-09 (ADR 0009).
   08:00 IST (only job with explicit timeZone), pinned pi1; Secret `telegram-bot`
@@ -117,6 +169,34 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   natural rebuild). Detail: roadmap §3.1/§3.2.
 - [ ] 🔶 `news_sentiment`/`raw_headlines` unique constraints (need ON CONFLICT
   in scorer/fetcher first). Detail: ops manual §12.5; roadmap §3.4.
+
+### Architecture review follow-ups (2026-10-10 — recommendations, none applied)
+
+Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §5 phases.
+- [ ] 🔶 **AR-1 (Phase 0)** CronJob safeguards — `concurrencyPolicy: Forbid`, per-job
+  `startingDeadlineSeconds`, `activeDeadlineSeconds`, `ttlSecondsAfterFinished` (0 of the
+  committed jobs set any today). Edit manifests now; apply only when the cluster is calm.
+- [ ] 🔶 **AR-2/AR-3 (Phase 1)** shared job module (DB connect+retry, `write_window()`,
+  logging, `main()` wrapper) and a durable `job_runs` table (start/end/rows/status/error).
+- [ ] 🔶 **AR-5 (Phase 1→2)** lockfile for every image, then consolidate ~16 images to ~3 by
+  dependency profile (ADR candidate; touches ADR 0004).
+- [ ] 🔶 **AR-6/AR-7 (Phase 2)** repo layout (`src/ images/ deploy/ db/`) + kustomize base so
+  safeguards live in one place; parity-checked, no rebuild for pure moves.
+- [ ] 🔶 **AR-8 (Phase 1→2)** read-only DB roles for Grafana/bot, writer role for jobs;
+  fixture tests for pure job logic (`tests/test_stocks.py` is the model).
+- [ ] 🔶 **AR-9 (Phase 2)** GitHub Actions CI (drift check, tests, lint, gitleaks) and a
+  branch/worktree per session so WIP is never committed by the wrong session.
+- [ ] 🔶 **AR-4 (Phase 3)** DB `Guaranteed` QoS + readiness probe, bot liveness (StatefulSet
+  change restarts the single DB — quiet window only).
+- [ ] 🤔 **AR-10 (Phase 3, decisions/hardware)** control-plane `state.db` backup, stronger
+  control-plane host, DB-host/GPU-host separation, off-site backups, schedule timezone
+  (decide before 2026-11-01, ADR 0002 revisit).
+- [ ] 🔶 **AR-11 (Phase 0)** fix `pg-backup` — dump to temp name, verify (size floor + `pg_restore -l`), atomic
+  `mv`, prune only verified, keep ≥ 7 verified; second-node + off-site copy; > 36 h staleness alert; re-run the
+  restore drill on a ~165 MB dump (docs' 388 KB / 2 s figures are stale). Manifest-only; apply when calm.
+- [ ] 🔶 **AR-12 (Phase 1)** repair/verify the 5-min stats logger (one sample on pi0/pi1/pi3; no cron entry seen
+  on pi0) — the power fix's 24 h acceptance depends on it; install `nodewatch` on pi0; decide the watcher /
+  power-controller host (pi0 vs MCU vs smart plugs; relays normally-closed; external dead-man's switch).
 
 ## 4. v2+ (target architecture — build on v1's tables)
 

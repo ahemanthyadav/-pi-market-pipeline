@@ -91,6 +91,17 @@ re-runs and late corrections overwrite cleanly, never duplicate.
   `/etc/fstab.bak-20260929`). **Docker data-root moved to `/mnt/tx2-ssd/docker`
   (2026-10-03, `/etc/docker/daemon.json`)** — image builds no longer touch eMMC
   at all; golden sentiment image migrated intact, build smoke-tested.
+- **Docker must start AFTER the SSD mount** (found 2026-10-10): `docker.service`
+  had no ordering on `/mnt/tx2-ssd`, and at the 2026-10-09 boot it started 2.5 s
+  before the mount — it ran on the empty directory underneath, every build died
+  at the first `RUN` with `failed to update store for object type
+  *libnetwork.endpointCnt: Key not found in store`, and its tag index
+  overwrote the real one (older `local/*` images on the SSD are now untagged
+  `<none>`; layers intact, sentiment tarball still at
+  `/mnt/tx2-ssd/sentiment-fetcher-v1.tar.gz`). Fix: drop-in
+  `/etc/systemd/system/docker.service.d/10-ssd-data-root.conf`
+  (`RequiresMountsFor=/mnt/tx2-ssd`) + `systemctl restart docker`. Image
+  tarballs now go to `/mnt/tx2-ssd/image-tarballs/`, not the eMMC home dir.
 - **k3s containerd store bind-mounted from the SSD (2026-10-10; verified same day —
   agent Ready, timescaledb Running, sentiment-scorer Completed on GPU,
   `kubectl exec` + psql OK):** `/var/lib/rancher/k3s/agent/containerd` ←
@@ -107,6 +118,12 @@ re-runs and late corrections overwrite cleanly, never duplicate.
 
 - pi1/pi3 units also carry `--disable-apiserver-lb` (direct to pi2:6443, no
   flaky local-LB hop). Patched in place; stock k3s reinstalls would revert it.
+- **Power (2026-10-10):** Pi 3 / 3B+ need a 5.1 V / ≥ 2.5 A supply and a short, thick cable. The USB-SATA
+  SSD draws from the **same 5 V rail** as the board (micro-USB → polyfuse → rail → board + USB ports), so
+  its bursts sag the Pi's input (firmware flags undervolt ≈ 4.65 V). The SSD is also the **boot** drive:
+  to take it off the rail keep its data path direct (powered SSD enclosure, or separate-power Y-cable /
+  data-only adapter); a hub in the boot path is unverified on Pi 3 / 3B+ — test on pi3 or a spare, never
+  first on pi2. Triage ladder: skill `node-power-health`; plan: pending-tasks §1.
 
 ## 3. Workloads (namespace `market-data`)
 
@@ -121,7 +138,7 @@ schedules are left as-is; do not "fix" them without re-validating everything.
 |---|---|---|---|
 | nse-fetcher | 15 11 * * * | local/nse-fetcher:v3 | index_prices (9 Indian indices incl. ^CRSLDX Nifty 500, restored 2026-10-09) |
 | fiidii-fetcher | 0 14 * * * | local/fiidii-fetcher:v2 | capital_flows (FII/DII net) |
-| yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v3 | index_prices (28 tickers) |
+| yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v4 | index_prices (29 tickers — `^RUI` Russell 1000 added 2026-10-10, 1y backfilled) |
 | fx-fetcher | 0 23 * * * | local/fx-fetcher:v1 | fx_rates (10 pairs) |
 | yields-fetcher | 15 23 * * * | local/yields-fetcher:v1 | bond_yields (^TNX/^FVX/^TYX/^IRX) |
 | rates-fetcher | 20 23 * * * | local/rates-fetcher:v1 | interest_rates DFF + bond_yields DGS2/10/30 |
@@ -140,7 +157,8 @@ schedules are left as-is; do not "fix" them without re-validating everything.
 | rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (7 IN_* policy rates) + bond_yields (5 G-Sec tenors + 3 T-bills) + pipeline_heartbeat self-row 'rbi' |
 | headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (gazetteer extraction over raw_headlines, ADR 0010) |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only (manual INSERT follows) |
-| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v2 (pinned pi1) | Telegram digest (read-only; no DB write) |
+| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v4 (pinned pi1) | Telegram digest (read-only; no DB write) |
+| telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v4, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
 
 ### Always-on / one-shot resources
 
@@ -165,7 +183,8 @@ schedules are left as-is; do not "fix" them without re-validating everything.
   alerting-provisioning error and the section is all-or-nothing per file —
   a bad alerting.yaml crash-loops the pod (finds F29–F32).
 - Telegram two-way listener (2026-10-09, Tier 2): Deployment `telegram-bot`
-  (1×, pi1), `local/telegram-digest:v2` with `args: bot.py` — the ONLY
+  (1×, pi1), `local/telegram-digest:v4` (since 2026-10-10: stock/watchlist/
+  screener/world commands, telegram-bot doc §1a) with `args: bot.py` — the ONLY
   getUpdates consumer (Telegram 409s a second poller; the digest CronJob and
   Grafana only sendMessage). Single-user: answers only the allow-listed chat,
   logs+ignores everyone else. Commands: /status /vix /nifty /sensex /gold /fii
@@ -318,7 +337,7 @@ kubectl create job -n market-data yf-validate --from=cronjob/yfinance-fetcher
 # Wait ~60s, then verify:
 kubectl get job -n market-data yf-validate
 kubectl logs -n market-data job/yf-validate --tail=10
-# Expect: "fetched 28/28 tickers" + "wrote 28 rows into index_prices"
+# Expect: "fetched 29/29 tickers" + "wrote 29 rows into index_prices"
 
 # 6. Verify in DB:
 export KUBECONFIG=~/.kube/pi-cluster.yaml
@@ -345,11 +364,12 @@ kubectl get nodes
 
 # 2. CronJob schedules present?
 kubectl get cronjobs -n market-data
-# Should show 22 CronJobs: nse-fetcher, fiidii-fetcher, yfinance-fetcher,
+# Should show 23 CronJobs: nse-fetcher, fiidii-fetcher, yfinance-fetcher,
 # fx-fetcher, yields-fetcher, rates-fetcher, news-fetcher, sentiment-scorer,
 # ta-compute, pg-backup, pipeline-health, intraday-fetcher, fdi-watch,
 # universe-refresh, stock-prices, stock-fundamentals, stock-metrics,
-# stock-screener, stock-report, rbi-fetcher, headline-ner, telegram-digest
+# stock-screener, stock-report, rbi-fetcher, headline-ner, telegram-digest,
+# telegram-alerts
 # (SUSPEND=False on all — a True left over from §8 recovery means someone
 # forgot to unsuspend)
 
@@ -367,7 +387,7 @@ python3 ops-tools/runcmd.py pi2 pi2 'uptime; free -m | head -2'
 
 # 6. Backup freshness (should show today's dump):
 python3 ops-tools/runcmd.py pi3 pi3 'ls -lh /var/lib/market-data/backups/ | tail -3'
-# Expect: marketdata-2026-10-03.dump ~300-500K
+# Expect: today's dump, ~165 MB since 2026-10-10 (was ~300-500K on 2026-10-03); a 0-byte file = a failed run
 
 # 7. TX2 disk (alert if eMMC > 85%):
 python3 ops-tools/runcmd.py tx2 ahytx2 'df -h / /mnt/tx2-ssd | tail -2'
@@ -385,7 +405,8 @@ bash ops-tools/collect-node-stats.sh && tail -1 out/node-stats/*.csv
 kubectl -n market-data port-forward svc/grafana 3000:3000
 # Open http://localhost:3000
 # User: admin | Password: GRAFANA_ADMIN_PASSWORD in .secrets.env
-# 5 dashboards: Overview, Indices (named ticker variable — "Nifty 50 (^NSEI)"
+# 7 dashboards (Derived Metrics added 2026-10-10 — provisioned, not yet eyeballed in the UI;
+# Screener): Overview, Indices (named ticker variable — "Nifty 50 (^NSEI)"
 # style labels via ticker_names), Markets, Sentiment, Flows
 ```
 **⚠️ GRAFANA UI "NO DATA" FIX (required on first load):**
@@ -611,7 +632,7 @@ python3 ops-tools/runcmd.py pi2 pi2 'echo @@PW@@ | sudo -S systemctl restart k3s
 
 ### Verify backup ran (daily 01:30 UTC)
 ```bash
-# Check pi3's backup directory (should show today's dump ~300-500K):
+# Check pi3's backup directory (should show today's dump, ~165 MB; a 0-byte file = a failed run):
 python3 ops-tools/runcmd.py pi3 pi3 'ls -lh /var/lib/market-data/backups/ | tail -5'
 # Output should show marketdata-2026-10-03.dump with recent timestamp
 ```
@@ -634,6 +655,7 @@ restores the newest dump into a throwaway `drill_restore` DB, compares row count
 kubectl apply -f manifests/timescaledb/restore-drill-job.yaml
 kubectl logs -n market-data job/restore-drill --tail=5
 # Measured 2026-10-03: RESTORE-DRILL-OK, pg_restore 2s @ 388K dump, live=drill=9076 rows.
+# STALE since 2026-10-10: dumps are ~165 MB (≈ 400× larger, screener backfills) — re-run the drill for a real figure.
 # Re-run quarterly, or after any schema/backup change.
 ```
 
@@ -656,6 +678,20 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
 - Runs `pg_dump -h timescaledb -U postgres -d postgres -Fc -f /backups/marketdata-$(date -u +%F).dump`
 - Keeps 7 daily dumps (`ls -t ... | tail -n +8 | xargs -r rm -f`)
 - Writes to `/var/lib/market-data/backups/` on pi3's USB SSD (hostPath, survives pod restarts)
+
+**Known flaws (verified on pi3, 2026-10-10 — review AR-11):**
+- The newest file, `marketdata-2026-10-10.dump`, is **0 bytes** — a failed run during the outage. `pg_dump -f`
+  leaves the empty file; `set -e` then skips pruning, so one failure is harmless.
+- Pruning counts files by mtime and does not care if they are empty: after a run of failed days followed by a
+  success, empty files crowd good dumps out of the 7-file window (after 7 consecutive failures no good dump
+  survives).
+- Nothing verifies a dump (no size floor, no `pg_restore -l`), and the write is not atomic.
+- Dumps are now ~165 MB each (8 files = 792 MB; pi3's SSD has ~208 GB free), so the 388 KB / 2 s drill
+  figures are stale.
+- **Fix (manifest-only, no image change — apply when the cluster is calm):** dump to a temp name → require a size
+  floor and a readable `pg_restore -l` → atomic `mv` → prune only verified dumps, keep ≥ 7 verified; copy each
+  verified dump to a second node (pull-based, checksummed) and off-site; alert if the newest verified copy is
+  > 36 h old; re-run the restore drill on a real dump.
 
 ### Retain safety
 - The PV `timescaledb-tx2-ssd` has `persistentVolumeReclaimPolicy: Retain`.
