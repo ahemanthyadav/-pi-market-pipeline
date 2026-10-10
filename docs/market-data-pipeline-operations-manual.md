@@ -1,0 +1,793 @@
+# Market Data Pipeline — Operations Manual & System Reference
+
+> **Last verified:** 2026-10-03 (cluster healthy, all CronJobs on schedule).
+> **Repo layout (2026-10-03):** everything lives in `projects/marketdata/` —
+> `docs/` (project docs), `manifests/` (k8s), `ops-tools/` (SSH helpers),
+> `validation/` (Grafana scripts + screenshots), `AGENTS.md` + `opencode.jsonc` +
+> `.opencode/` (OpenCode: agents, commands, skills). Run all `manifests/…` /
+> `ops-tools/…` commands from `marketdata/` as the working directory.
+> Companion docs: `market-data-pipeline-plan.md` (design + build history),
+> `homelab setup/SETUP.md` (Pi runbook + Pi passwords), `homelab
+> setup/TX2_AI_Edge_Lab_Setup_and_Test_Plan.md` (TX2 bring-up gotchas).
+> `manifests/` = k8s manifests; SSH helpers in `ops-tools/` — both relative to
+> `projects/marketdata/` (this repo's root).
+
+---
+
+## 1. Architecture
+
+```
+                        ┌─────────────────────────────────────────────┐
+                        │  SOURCES (internet)                         │
+                        │  Yahoo Finance · NSE API · FRED · RSS feeds │
+                        │  (FRED needs API key in Secret; rest keyless)│
+                        └──────────────┬──────────────────────────────┘
+                                       │ daily pulls (Pi workers)
+                                       ▼
+                        ┌─────────────────────────────────────────────┐
+                        │  k3s CronJobs → TimescaleDB                 │
+                        │  market-data namespace                      │
+                        │  yfinance 22:30 · fx 23:00 · yields 23:15   │
+                        │  rates 23:20 · news 23:45 · NSE 11:15       │
+                        │  FII/DII 14:00 · TA 00:30 · backup 01:30    │
+                        │  FDI watch monthly                          │
+                        └──────────────┬──────────────────────────────┘
+                                       ▼
+  ┌─────────────────────┴───────────────────────────────────────────┐
+  │ TimescaleDB 2.30.1 (StatefulSet, TX2, sda4 SSD)                │
+  │ index_prices · fx_rates · bond_yields · interest_rates        │
+  │ news_sentiment · technical_indicators · capital_flows         │
+  │ raw_headlines (staging)                                       │
+  └─────┬────────────────────────────────────────────┬────────────┘
+        │ FinBERT scoring (TX2, 00:15)               │ dashboards (pi3)
+        ▼                                            ▼
+  news_sentiment (TX2 CPU, no GPU needed)    Grafana v12 (tailnet-only)
+```
+
+Data flow rule: fetchers only ever DELETE+INSERT their own (key, ts) rows —
+re-runs and late corrections overwrite cleanly, never duplicate.
+
+## 2. Inventory
+
+### Nodes (all k3s Ready unless noted)
+
+> **Addresses are not written in the docs.** `<pi2-ip>`, `<tx2-tailnet-ip>`, `<wan-ip>`
+> etc. are placeholders; the real values live in the gitignored **`.hosts.env`** (repo
+> root; template `.hosts.env.example`). `ops-tools/*.py` take node aliases
+> (`pi0 pi1 pi2 pi3 tx2`) and resolve them from it; in your own shell:
+> `set -a; source .hosts.env; set +a`, then e.g. `ssh pi2@$PI2_IP`.
+
+| Node | Hardware | LAN IP | Tailscale IP | Role |
+|---|---|---|---|---|
+| pi0 | Pi 1 B+, 512 MB | <pi0-ip> | — (not on tailnet) | Pi-hole v6.4.3 + unbound (DNS) |
+| pi1 | Pi 3 B, 1 GB, 233 GB SSD | <pi1-ip> | <pi1-tailnet-ip> | k3s worker (ingestion pool) |
+| pi2 | Pi 3 B+, 1 GB | <pi2-ip> | <pi2-tailnet-ip> | k3s control-plane — FRAGILE, see §8 |
+| pi3 | Pi 3 B, 1 GB | <pi3-ip> | <pi3-tailnet-ip> | k3s worker; Grafana + pg-backup pinned here |
+| ahytx2-desktop | Jetson TX2, 7.7 GB | <tx2-ip> (router DHCP reservation, confirmed 2026-10-03) | <tx2-tailnet-ip> | GPU/tainted worker; DB host |
+
+- k3s: server v1.36.4+k3s1 (pi2); agents v1.36.4 on Pis, **pinned v1.35.3+k3s1 on TX2**.
+- Admin machine in these examples: `ahy-MS-7D25` (<admin-tailnet-ip>), kubectl v1.36.5
+  at `~/.local/bin`, kubeconfig `~/.kube/pi-cluster.yaml`.
+
+### TX2 fixed configuration (do not lose)
+
+- Agent flags: `--disable-apiserver-lb --kubelet-arg=fail-cgroupv1=false
+  --kubelet-arg=cgroup-driver=cgroupfs --node-ip <tx2-ip>` (unit:
+  `/etc/systemd/system/k3s-agent.service`; always re-check parsed ExecStart
+  with `systemctl show` after editing — a dangling continuation line once
+  nearly broke a restart).
+- Labels `hardware=gpu`, `nvidia.com/gpu.present=true`; taint `gpu=true:NoSchedule`.
+- containerd fragment
+  `/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d/nvidia.toml`
+  (nvidia runtime + `SystemdCgroup=false` for nvidia AND runc — kubelet and
+  containerd drivers must match or `kubectl exec` breaks on systemd-237).
+- iptables wrappers `/sbin/iptables-restore` + `/sbin/ip6tables-restore`
+  backed by `/sbin/xtables-multi.orig` — re-verify after ANY apt work on the TX2.
+- L4T R32.7.5 / JetPack 4.6.1 / CUDA 10.2 (host); kernel 4.9.337-tegra (cgroup v1).
+- Storage: 28 GB eMMC (OS + k3s containerd — 79% used after the 2026-10-03 cleanup;
+  CUDA/cuDNN/TensorRT libs in /usr are ~10 GB of that) + 224 GB USB SSD `sda4` →
+  fixed fstab mount `/mnt/tx2-ssd` (by UUID, `nofail`; backup
+  `/etc/fstab.bak-20260929`). **Docker data-root moved to `/mnt/tx2-ssd/docker`
+  (2026-10-03, `/etc/docker/daemon.json`)** — image builds no longer touch eMMC
+  at all; golden sentiment image migrated intact, build smoke-tested.
+
+### Pi agents
+
+- pi1/pi3 units also carry `--disable-apiserver-lb` (direct to pi2:6443, no
+  flaky local-LB hop). Patched in place; stock k3s reinstalls would revert it.
+
+## 3. Workloads (namespace `market-data`)
+
+### Scheduled jobs — **schedules are NODE-LOCAL PDT, not UTC** (verified 2026-10-04:
+the "02:00-02:30" screener chain fired at 09:00-09:30 UTC = 02:00 PDT). k3s's cron
+controller uses server-local time when no CronJob timezone is set. Every "UTC"
+time written in these docs has actually been firing at PDT — functionally fine
+(each fetch still lands after its market close; the staggering order holds), so
+schedules are left as-is; do not "fix" them without re-validating everything.
+
+| CronJob | Schedule | Image (node-local, Never pull) | Writes to |
+|---|---|---|---|
+| nse-fetcher | 15 11 * * * | local/nse-fetcher:v3 | index_prices (9 Indian indices incl. ^CRSLDX Nifty 500, restored 2026-10-09) |
+| fiidii-fetcher | 0 14 * * * | local/fiidii-fetcher:v2 | capital_flows (FII/DII net) |
+| yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v3 | index_prices (28 tickers) |
+| fx-fetcher | 0 23 * * * | local/fx-fetcher:v1 | fx_rates (10 pairs) |
+| yields-fetcher | 15 23 * * * | local/yields-fetcher:v1 | bond_yields (^TNX/^FVX/^TYX/^IRX) |
+| rates-fetcher | 20 23 * * * | local/rates-fetcher:v1 | interest_rates DFF + bond_yields DGS2/10/30 |
+| news-fetcher | 45 23 * * * | local/news-fetcher:v1 | raw_headlines (RSS staging) |
+| sentiment-scorer | 15 0 * * * | local/sentiment-fetcher:v1 (TX2 only) | news_sentiment |
+| ta-compute | 30 0 * * * | local/ta-compute:v1 | technical_indicators |
+| pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | /var/lib/market-data/backups on pi3 |
+| pipeline-health | 45 1 * * * | local/pipeline-health:v4 | pipeline_heartbeat (feed freshness, 13 feeds) |
+| intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
+| universe-refresh | 0 9 * * 0 | local/screener:v8 | universe_constituents + ticker_names (998 symbols) |
+| stock-prices | 30 23 * * * | local/screener:v8 | stock_prices (998 symbols, 5d window) |
+| stock-fundamentals | 0 6 * * 6 | local/screener:v8 | stock_fundamentals (EDGAR US + yfinance NSE, resumable) |
+| stock-metrics | 0 2 * * * | local/screener:v8 | stock_metrics_daily |
+| stock-screener | 15 2 * * * | local/screener:v8 | stock_scores + screening_runs (v8: house conn pattern, both universes — see §8) |
+| stock-report | 30 2 * * * | local/screener:v8 | stock_reports (top-25/universe + __digest__; v8: today's shortlist only) |
+| rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (7 IN_* policy rates) + bond_yields (5 G-Sec tenors + 3 T-bills) + pipeline_heartbeat self-row 'rbi' |
+| headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (gazetteer extraction over raw_headlines, ADR 0010) |
+| fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only (manual INSERT follows) |
+| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v2 (pinned pi1) | Telegram digest (read-only; no DB write) |
+
+### Always-on / one-shot resources
+
+- StatefulSet `timescaledb` (1×, TX2): 1 Gi req / 2 Gi lim RAM; PGDATA on PV.
+- PV `timescaledb-tx2-ssd` 30 Gi, hostPath `/mnt/tx2-ssd/pgdata`, nodeAffinity
+  TX2, ReclaimPolicy **Retain** (deleting a PVC never deletes data).
+- Service `timescaledb` (headless): `timescaledb.market-data.svc.cluster.local:5432`.
+- RuntimeClass `nvidia` (TX2 GPU smoke-test path; sentiment uses CPU, no class needed).
+- Secrets: `timescaledb-auth` (postgres pw), `fred-api` (FRED key), `grafana-admin`,
+  `telegram-bot` (bot token + chat id — applied out-of-band per ADR 0009, no
+  manifest file).
+- ConfigMaps: `timescaledb-schema`, `grafana-provisioning`, `grafana-dashboards`.
+- Grafana Deployment (1×, pi3) + Service :3000; dashboards: Overview, Indices
+  (ticker variable), FX-Commodities-Yields (incl. India yields panel, added
+  2026-10-09), Sentiment-News, Capital-Flows, **Stock Screener** (added
+  2026-10-09: universe variable, top-25 table, median-composite trend, 5
+  top-10-by-factor panels).
+  Alerting (2026-10-09, ADR 0009): Telegram contact point (Secret
+  `telegram-bot`; chatid rendered in at apply time by
+  `ops-tools/apply-grafana-provisioning.sh` — F29 — token env-expanded), policy tree → `telegram` receiver, 3 rules every 10m
+  (stale feed, VIX>25, FII<−3000 Rs cr). NOTE: Grafana exits on any
+  alerting-provisioning error and the section is all-or-nothing per file —
+  a bad alerting.yaml crash-loops the pod (finds F29–F32).
+- Telegram two-way listener (2026-10-09, Tier 2): Deployment `telegram-bot`
+  (1×, pi1), `local/telegram-digest:v2` with `args: bot.py` — the ONLY
+  getUpdates consumer (Telegram 409s a second poller; the digest CronJob and
+  Grafana only sendMessage). Single-user: answers only the allow-listed chat,
+  logs+ignores everyone else. Commands: /status /vix /nifty /sensex /gold /fii
+  /scores /digest /help — all read-only SELECTs, connection per query (F26).
+  Backlog drained on start; offset in-memory (commands are idempotent).
+- One-shot Jobs (kept as manifests, run on demand): `backfill-*-1y` (history
+  seeding), `timescaledb-schema`, `timescaledb-write-test`, `restore-drill`.
+- Intraday (2026-10-03): `intraday-fetcher` hourly at :10 — yfinance 1h×2d
+  candles; FX → `fx_rates` (hourly rows, coexists with daily), gold/silver/
+  oil/DXY → `intraday_prices` (separate hypertable — `index_prices` stays
+  pure-daily because ta-compute iterates every ticker over all rows).
+  `ticker_names` reference table (46 rows) backs the named ticker dropdown.
+
+## 4. Data sources & feed catalog
+
+| Source | Method | Status 2026-10-03 | Quirks found |
+|---|---|---|---|
+| Yahoo indices/FX/yields/futures | yfinance batch | ✅ live | `FTSE.MI` died → `FTSEMIB.MI`; `^CNXAUTO`/`^CNXFMCG` dead (ghost quote only); `^CRSLDX` (Nifty 500) RESTORED 2026-10-09 after live probe |
+| NSE indices | yfinance validated symbols | ✅ 8/8 live | gaps above; jugaad-data not needed yet |
+| FRED (DFF, DGS2/10/30) | fredapi + key in Secret | ✅ live | key verified 2026-10-03 (DFF 3.88) |
+| News RSS | feedparser (ET, BS live) | ✅ partial | Moneycontrol ×2 + Reuters dead (WARN-tolerant) |
+| NSE FII/DII | fiidiiTradeReact JSON + session | ✅ live | API returns bare list, not `{data:…}` envelope |
+| Stock prices/fundamentals (screener layer) | yfinance per-universe + EDGAR + yfinance stmts | ✅ live (2026-10-09) | Yahoo pre-open "today" bars (partial OHLC, ~0 volume) land for a handful of tickers each run; self-healing — the next run DELETE+INSERTs the final bar, but same-day metrics/scores can key to the partial bar. `DUMMYHEG.NS` dead (WARN-tolerant). |
+| RBI/G-Secs | official RBI mobile "Current Rates" widget (lxml scrape) | ✅ live (2026-10-09, `rbi-fetcher`) | benchmark SECURITY names rotate — matched by maturity-year→tenor bucket; page hides a stale date in an HTML comment (lxml text_content drops it); values carry '#'/'*' markers |
+| Headline intelligence | gazetteer extraction over raw_headlines (`headline-ner`, ADR 0010) | ✅ live (2026-10-09) | deterministic ticker_names matching; common-word first-tokens stoplisted (measured FPs: "live/target/realty"); 16-event keyword taxonomy; events link the single company mentioned |
+| FDI monthly | watch + manual INSERT | 🔶 reporter only | DPIIT PDFs; 5-min quarterly task (template in job log) |
+| TIC mirror stat | — | deferred | — |
+
+## 5. Database reference
+
+### Connect (password from `timescaledb-auth` Secret)
+
+```bash
+export KUBECONFIG=~/.kube/pi-cluster.yaml
+PW=$(kubectl -n market-data get secret timescaledb-auth -o jsonpath='{.data.password}' | base64 -d)
+```
+
+**Option A — no local psql (runs inside the DB pod):**
+```bash
+# Row counts per table (health check)
+kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
+  psql -U postgres -d postgres -c "
+SELECT 'index_prices', count(*) FROM index_prices UNION ALL
+SELECT 'fx_rates', count(*) FROM fx_rates UNION ALL
+SELECT 'news_sentiment', count(*) FROM news_sentiment UNION ALL
+SELECT 'technical_indicators', count(*) FROM technical_indicators UNION ALL
+SELECT 'capital_flows', count(*) FROM capital_flows;"
+
+# Latest Nifty 50 close
+kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
+  psql -U postgres -d postgres -c "SELECT ts, close FROM index_prices WHERE ticker='^NSEI' ORDER BY ts DESC LIMIT 5;"
+
+# 7-day sentiment trend
+kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
+  psql -U postgres -d postgres -c "
+SELECT date_trunc('day', ts)::date AS day, round(avg(sentiment_score)::numeric,3)
+FROM news_sentiment WHERE ts > now() - interval '14 days' GROUP BY 1 ORDER BY 1;"
+
+# Latest FII/DII net flows (Rs cr)
+kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
+  psql -U postgres -d postgres -c "
+SELECT flow_type, amount FROM capital_flows WHERE direction='net'
+AND ts = (SELECT max(ts) FROM capital_flows);"
+```
+
+**Option B — local psql / Python (port-forward first, then connect to localhost):**
+```bash
+# Terminal 1: hold this open
+kubectl -n market-data port-forward timescaledb-0 5432:5432
+
+# Terminal 2: use any local tool
+psql -h localhost -U postgres -d postgres -c "SELECT count(*) FROM index_prices;"
+python3 -c "
+import psycopg
+conn = psycopg.connect(host='localhost', user='postgres', password='$PW', dbname='postgres')
+import pandas as pd
+print(pd.read_sql('SELECT ts, close FROM index_prices WHERE ticker=\'^NSEI\' ORDER BY ts DESC LIMIT 5', conn))
+"
+```
+
+Health queries (copy-paste into either option above):
+```sql
+-- Row counts per table
+SELECT 'index_prices', count(*) FROM index_prices UNION ALL
+SELECT 'fx_rates', count(*) FROM fx_rates UNION ALL
+SELECT 'news_sentiment', count(*) FROM news_sentiment UNION ALL
+SELECT 'technical_indicators', count(*) FROM technical_indicators UNION ALL
+SELECT 'capital_flows', count(*) FROM capital_flows;
+
+-- 7-day sentiment trend
+SELECT date_trunc('day', ts)::date AS day, round(avg(sentiment_score)::numeric,3)
+FROM news_sentiment WHERE ts > now() - interval '14 days' GROUP BY 1 ORDER BY 1;
+
+-- Latest FII/DII net flows (Rs cr)
+SELECT flow_type, amount FROM capital_flows WHERE direction='net'
+AND ts = (SELECT max(ts) FROM capital_flows);
+```
+
+## 6. Image pipeline (no registry — by design)
+
+**Why no registry:** This is a homelab on CGNAT — no inbound ports, no external
+DNS. The TX2 (aarch64) builds natively; Pi workers (also aarch64) just need the
+tarball. `Never` pull policy makes missing images immediately visible.
+
+**Credentials in these commands (2026-10-10):** `ops-tools/*.py` pick the right
+password themselves from the gitignored `.secrets.env` (PI_PASS for the Pis, TX2_PASS
+for the TX2). In a remote command, write sudo as `echo @@PW@@ | sudo -S …` — the
+tool swaps in the shell-quoted host password at run time. Never type a password on
+the command line; `SSH_PASS` in the environment still works as an override.
+
+**Full cycle — e.g., updating the yfinance fetcher to v4:**
+
+```bash
+# 1. Edit code + bump version in CronJob
+#    Edit: manifests/ingestion/yfinance/yfinance-fetcher.py
+#    Bump tag in manifests/ingestion/yfinance/cronjob.yaml:
+#      image: local/yfinance-fetcher:v4
+
+# 2. Build on TX2 (native ARM64, no QEMU):
+python3 ops-tools/putfile.py tx2 ahytx2 \
+  manifests/ingestion/yfinance/yfinance-fetcher.py /home/ahytx2/yf-build/yfinance-fetcher.py
+python3 ops-tools/putfile.py tx2 ahytx2 \
+  manifests/ingestion/yfinance/Dockerfile /home/ahytx2/yf-build/Dockerfile
+python3 ops-tools/runcmd.py tx2 ahytx2 \
+  'echo @@PW@@ | sudo -S docker build -t local/yfinance-fetcher:v4 /home/ahytx2/yf-build 2>&1 | tail -2'
+python3 ops-tools/runcmd.py tx2 ahytx2 \
+  'echo @@PW@@ | sudo -S sh -c "docker save local/yfinance-fetcher:v4 | gzip > /home/ahytx2/yfinance-fetcher-v4.tar.gz" && echo @@PW@@ | sudo -S chown ahytx2:ahytx2 /home/ahytx2/yfinance-fetcher-v4.tar.gz'
+
+# 3. Pull tarball to admin machine:
+python3 ops-tools/getfile.py tx2 ahytx2 \
+  /home/ahytx2/yfinance-fetcher-v4.tar.gz /tmp/opencode/yfinance-fetcher-v4.tar.gz
+
+# 4. Distribute to Pi workers (TX2-only images skip this):
+for h in pi1 pi2 pi3; do   # alias == login user on the Pis
+  python3 ops-tools/putfile.py $h $h /tmp/opencode/yfinance-fetcher-v4.tar.gz /home/$h/yfinance-fetcher-v4.tar.gz
+  python3 ops-tools/runcmd.py $h $h "echo @@PW@@ | sudo -S /usr/local/bin/k3s ctr -n k8s.io images import /home/$h/yfinance-fetcher-v4.tar.gz 2>&1 | tail -1"
+done
+# Note for pi2 (slow import): run detached, then poll:
+# python3 ops-tools/runcmd.py pi2 pi2 \
+#   "echo @@PW@@ | sudo -S bash -c 'nohup /usr/local/bin/k3s ctr -n k8s.io images import /home/pi2/yfinance-fetcher-v4.tar.gz >/tmp/yf-import.log 2>&1 &' && echo LAUNCHED"
+# Poll: python3 ops-tools/runcmd.py pi2 pi2 "tail -2 /tmp/yf-import.log"
+
+# 5. Apply updated manifests + validate:
+kubectl apply -f manifests/ingestion/yfinance/cronjob.yaml
+kubectl create job -n market-data yf-validate --from=cronjob/yfinance-fetcher
+# Wait ~60s, then verify:
+kubectl get job -n market-data yf-validate
+kubectl logs -n market-data job/yf-validate --tail=10
+# Expect: "fetched 28/28 tickers" + "wrote 28 rows into index_prices"
+
+# 6. Verify in DB:
+export KUBECONFIG=~/.kube/pi-cluster.yaml
+PW=$(kubectl -n market-data get secret timescaledb-auth -o jsonpath='{.data.password}' | base64 -d)
+kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
+  psql -U postgres -d postgres -c "SELECT count(*), count(DISTINCT ticker) FROM index_prices;"
+```
+
+**Dependency locking:** After any build, dump the versions:
+```bash
+python3 ops-tools/runcmd.py tx2 ahytx2 \
+  'echo @@PW@@ | sudo -S docker run --rm local/yfinance-fetcher:v4 pip freeze 2>/dev/null | grep -Ei "^(yfinance|pandas|psycopg|numpy|requests)"'
+```
+Paste output into `manifests/ingestion/yfinance/requirements.lock` for reproducible rebuilds.
+
+## 7. Daily operations checklist
+
+```bash
+export KUBECONFIG=~/.kube/pi-cluster.yaml
+
+# 1. Cluster health — all 4 nodes Ready?
+kubectl get nodes
+# Expected: pi0 (not k3s), pi1/pi2/pi3/ahytx2-desktop all Ready
+
+# 2. CronJob schedules present?
+kubectl get cronjobs -n market-data
+# Should show 22 CronJobs: nse-fetcher, fiidii-fetcher, yfinance-fetcher,
+# fx-fetcher, yields-fetcher, rates-fetcher, news-fetcher, sentiment-scorer,
+# ta-compute, pg-backup, pipeline-health, intraday-fetcher, fdi-watch,
+# universe-refresh, stock-prices, stock-fundamentals, stock-metrics,
+# stock-screener, stock-report, rbi-fetcher, headline-ner, telegram-digest
+# (SUSPEND=False on all — a True left over from §8 recovery means someone
+# forgot to unsuspend)
+
+# 3. Recent job runs — all Complete (not Failed)?
+kubectl get jobs -n market-data | tail -12
+# Look at STATUS column: should be 'Complete' for each recent run
+
+# 4. Check last run logs for WARNs (yfinance example — replace name):
+kubectl get jobs -n market-data | grep yfinance-fetcher | head -1 | awk '{print $1}' | xargs -I{} kubectl logs -n market-data job/{} --tail=10
+# Scans for 'WARN' lines (feed deaths, stale symbols, partial data)
+
+# 5. pi2 load (canary — investigate if sustained > 3):
+python3 ops-tools/runcmd.py pi2 pi2 'uptime; free -m | head -2'
+# If load > 3 sustained: stop all agents, cool pi2, restart one-by-one (see §8)
+
+# 6. Backup freshness (should show today's dump):
+python3 ops-tools/runcmd.py pi3 pi3 'ls -lh /var/lib/market-data/backups/ | tail -3'
+# Expect: marketdata-2026-10-03.dump ~300-500K
+
+# 7. TX2 disk (alert if eMMC > 85%):
+python3 ops-tools/runcmd.py tx2 ahytx2 'df -h / /mnt/tx2-ssd | tail -2'
+# / (eMMC) alert above 85%; /mnt/tx2-ssd (sda4) has 140G+ free
+
+# 8. Node stats (ADR 0011) — pull every node's CSV, eyeball the flags:
+bash ops-tools/collect-node-stats.sh && tail -1 out/node-stats/*.csv
+# Red flags: throttle_hex != 0x0 on a Pi (power/thermal — bit0/1/2 = uv/
+# cap/throttle NOW, bits 16-19 = since boot), k3s_state != active,
+# temp_c > 70, swap_used_mb climbing, db_procs=0 on tx2 (DB down)
+```
+
+**Grafana dashboards:**
+```bash
+kubectl -n market-data port-forward svc/grafana 3000:3000
+# Open http://localhost:3000
+# User: admin | Password: GRAFANA_ADMIN_PASSWORD in .secrets.env
+# 5 dashboards: Overview, Indices (named ticker variable — "Nifty 50 (^NSEI)"
+# style labels via ticker_names), Markets, Sentiment, Flows
+```
+**⚠️ GRAFANA UI "NO DATA" FIX (required on first load):**
+1. **Time picker (top-right) → "Last 90 days" / "All time" → Click Apply**
+2. **Each panel: click ⋮ menu → ⟳ Refresh** (or dashboard ⟳ refresh button)
+3. **Hard refresh: Ctrl+Shift+R** (clears cached "No data" state)
+
+> **Why:** Grafana panels cache "No data" state and **do not auto-requery** when time range changes. Manual refresh is required. API queries work perfectly (validated).
+
+## 8. Failure recovery runbook (copy-paste commands)
+
+### pi2 wedged ~16 h + live undervoltage found (2026-10-09→10) — full post-mortem
+**Root cause (first catch of the node-stats logger, ADR 0011):** pi2 ran
+with LIVE undervoltage + throttle flags (`vcgencmd get_throttled` = 0xd0005
+at 62 °C; uv/throttle/soft-temp "since boot" bits all set; pi0 showed past
+flags 0x50000 too). Throttled CPU → slow API → agent retry storms → 1 GB
+swap-thrash → kine stall. **Check the Pis' PSU/cables before blaming
+software.** pi2 also idles a desktop session (dbus/mpris) and
+`netfilter-persistent` failed on its boot — hygiene items, not blockers.
+
+**Timeline (UTC):** wedged from ~14:23 Oct 9 (agents saw 503 → timeouts);
+TX2 agent retried ~15 h then EXITED failed 05:35 Oct 10 (agents do NOT
+retry forever — gotcha below); DB — hence every pipeline write — down the
+whole window (data safe, PV Retain). Whole-cluster reboots ~05:35 UTC
+re-triggered the storm: agents auto-start against the cold server → k3s
+swap peak 867 M → systemd SIGKILL → failed. pi2 alone rebooted again
+06:22 UTC.
+
+**SUSPEND-FIRST when only pi2 is up.** With no agents, the controller
+catchups every missed job ONTO pi2 (fx/intraday/yields landed there within
+4 min of the API answering; the 998-symbol stock-prices was minutes away):
+```bash
+for j in $(kubectl -n market-data get cronjobs -o name); do
+  kubectl -n market-data patch "$j" -p '{"spec":{"suspend":true}}'; done
+```
+Suspend persists in etcd across k3s restarts — afterwards, stop/start k3s
+is SAFE from catchup storms. If the workstation path flaps under load, run
+the same loop ON pi2: `sudo /usr/local/bin/k3s kubectl ...` (localhost
+answers when the NIC path doesn't).
+
+**Agent gotcha:** k3s-agents that exhaust startup retries EXIT and stay
+`failed` (NRestarts=0) — after any long control-plane outage each agent
+needs a manual `systemctl start k3s-agent` (pi3 → pi1 → TX2, one at a
+time, verify Ready between). Do NOT reboot the whole cluster to "fix"
+them: boot auto-start = the storm again. Power-cycle pi2 ALONE.
+
+**Stale Jobs to delete after recovery** (created mid-outage, pods never
+ran, sit ACTIVE forever): the 2026-10-09/10 `nse-fetcher-*` (12 h) and
+`telegram-digest-*` (4 h) Jobs, plus that day's failed catchup Jobs.
+
+### pi2 wedged (SSH/API timeout, ping alive) — happened 2026-09-29
+**Cause:** Agent registration/retry bursts against 1 GB RAM → swap-thrash → etcd/kine stalls.
+
+```bash
+# 1. Stop ALL agents to quiet retry storm
+python3 ops-tools/runcmd.py tx2 ahytx2 'echo @@PW@@ | sudo -S systemctl stop k3s-agent'
+python3 ops-tools/runcmd.py pi1 pi1 "echo @@PW@@ | sudo -S systemctl stop k3s-agent"
+python3 ops-tools/runcmd.py pi3 pi3 "echo @@PW@@ | sudo -S systemctl stop k3s-agent"
+
+# 2. Wait ~10 min — if pi2 still not responding to SSH, PHYSICAL POWER-CYCLE pi2
+#    (pull power, wait 10s, plug back in)
+
+# 3. Wait for pi2 to boot (USB-SSD boot takes 3-5 min). Verify calm:
+python3 ops-tools/runcmd.py pi2 pi2 'uptime; free -m | head -2'
+# Target: load average < 2
+
+# 4. Restart agents ONE AT A TIME, verify each before next:
+python3 ops-tools/runcmd.py pi3 pi3 "echo @@PW@@ | sudo -S systemctl start --no-block k3s-agent"
+# wait 2 min, verify:
+export KUBECONFIG=~/.kube/pi-cluster.yaml; kubectl get nodes | grep pi3
+
+python3 ops-tools/runcmd.py pi1 pi1 "echo @@PW@@ | sudo -S systemctl start --no-block k3s-agent"
+# wait 2 min, verify pi1 Ready
+
+python3 ops-tools/runcmd.py tx2 ahytx2 'echo @@PW@@ | sudo -S systemctl start --no-block k3s-agent'
+# wait 2 min, verify TX2 Ready
+
+# 5. Final cluster check:
+kubectl get nodes
+# All 4 should be Ready. If any stuck activating >5 min: stop it, wait for pi2 calm, retry.
+```
+
+### CronJob still runs the OLD image after a code change (happened 2026-10-04)
+**Cause:** sed-bumping the tag in `cronjobs.yaml` is not enough — the LIVE CronJob
+object keeps the old spec until `kubectl apply` runs. The report job was
+re-"validated" three times against a stale v1 image while the fix sat in v6.
+```bash
+# Always verify the LIVE tag, not the file:
+kubectl -n market-data get cronjob <name> -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}'
+# Then apply + re-validate:
+kubectl apply -f manifests/stock-screener/cronjobs.yaml
+kubectl create job -n market-data <name>-validate --from=cronjob/<name>
+```
+
+### DB errors "out of shared memory" / jobs die with "connection is closed" (2026-10-04)
+**Cause 1 (fixed):** Postgres default `max_locks_per_transaction=64` exhausted under
+concurrent hypertable access (EDGAR ingest + counts + reads). Fixed via StatefulSet
+`args: ["postgres", "-c", "max_locks_per_transaction=256"]` — **args, NOT command**
+(command replaces docker-entrypoint.sh and crash-loops the DB; forced pod deletion
+recovers it). Verify: `SHOW max_locks_per_transaction` = 256.
+**Cause 2 (pattern):** long-lived implicit transactions get dropped by the pod→DB
+path during multi-minute fetches. House rule for all fetcher/scorer scripts:
+`conn.autocommit=True` for reads, one `with conn.transaction():` per write unit,
+reconnect-and-retry once on `OperationalError`. Health job also sets
+`max_parallel_workers_per_gather=0` (parallel count workers multiply lock use).
+**Recurrence (2026-10-05→09, fixed in screener v8):** `stock-screener` died
+every night at the NIFTY500→SP500 boundary — `stock_scores` got 494 rows, then
+`psycopg.OperationalError: the connection is closed` (line 105, first SP500
+query), exit 1. The screener was the one script still on the old single-implicit-
+transaction layout; the crash was invisible in the chain because metrics/report
+still produced NIFTY-only output (reports ran "Complete"). v8 moved it onto the
+house pattern (per-universe leg function + one retry). Diagnostic shortcut that
+found it: `kubectl create job --from=cronjob/stock-screener` + poll-capture
+logs — failed job pods vanish in ~1 min on k8s 1.36, so don't rely on
+`kubectl logs job/…` after the fact.
+
+### Agent stuck in `activating` + `Waiting to retrieve agent configuration`
+```bash
+# Check its pod/logs on the worker:
+python3 ops-tools/runcmd.py pi1 pi1 'journalctl -u k3s-agent --since "10 minutes ago" | tail -20'
+# If looping >5 min: stop it, cool pi2, retry once calm.
+python3 ops-tools/runcmd.py pi1 pi1 "echo @@PW@@ | sudo -S systemctl stop k3s-agent"
+# wait for pi2 calm (load <2), then start
+python3 ops-tools/runcmd.py pi1 pi1 "echo @@PW@@ | sudo -S systemctl start --no-block k3s-agent"
+```
+
+### SSH "Authentication failed" on pi2 that was NOT a wrong password (2026-10-09)
+
+Symptom: `ops-tools/runcmd.py` intermittently failed on pi2 with
+`CONNECT FAIL: Authentication failed` while pi1/pi3 worked — looked exactly
+like a password change. Evidence it was not: pi2's `journalctl -u ssh` showed
+**zero "Failed password" events**, only `Connection closed by authenticating
+user pi2 … [preauth]` (client-side aborts), interleaved with successful
+`Accepted password` logins. Cause: `runcmd.py` used `auth_timeout=10`; pi2's
+PAM auth under load sometimes exceeds that, and paramiko raises its generic
+"Authentication failed" on timeout. Fix: ops-tools now uses 30s
+connect/banner/auth timeouts. **Rule: diagnose SSH auth failures from the
+SERVER journal, never from the client's error text.** kubectl debug node/pi2
+(busybox + `chroot /host journalctl …`) is the rescue path when SSH itself is
+down. Also: retry with backoff before concluding anything — the flap looked
+clustered.
+
+### `ErrImageNeverPull`
+```bash
+# Identify which node is missing the image:
+kubectl get pods -n market-data -o wide | grep -E 'ErrImageNeverPull|ImagePullBackOff'
+# Note the NODE column, then import there:
+python3 ops-tools/runcmd.py <node: pi1|pi2|pi3|tx2> <user> "echo @@PW@@ | sudo -S /usr/local/bin/k3s ctr -n k8s.io images import /home/<user>/<image>.tar.gz"
+# Note: must use `-n k8s.io` namespace (k3s default). pi2: run detached (nohup) + poll.
+```
+
+### Editing a multi-key ConfigMap YAML (dashboards-style) — the no-trailing-newline glue (2026-10-09)
+
+Appending a new key to a ConfigMap file whose last line has **no trailing
+newline** glues the new key onto the previous key's block-scalar VALUE —
+`kubectl apply` succeeds, the new key doesn't exist, and the previous key
+(e.g. `flows.json`) ships CORRUPTED content (Grafana keeps the old dashboard
+only until its next re-provision). Fix pattern: open the file with Python,
+split on `\n`, insert a standalone `  key: |-` line, and validate BOTH JSONs
+before applying. Always verify the applied object, not just the file:
+
+```bash
+kubectl get configmap <name> -o json | python3 -c \
+  "import json,sys; d=json.load(sys.stdin); [json.loads(v) for v in d['data'].values()]; print('all valid')"
+```
+
+### NSE/Yahoo symbol deaths
+```bash
+# Check job logs for WARN lines:
+kubectl get jobs -n market-data | grep <job-name> | head -1 | awk '{print $1}' | xargs -I{} kubectl logs -n market-data job/{} --tail=20 | grep -i warn
+# Confirm symbol via Yahoo search API:
+curl -s "https://query2.finance.yahoo.com/v1/finance/search?q=<symbol>&quotesCount=5" | python3 -c "import json,sys; d=json.load(sys.stdin); [print(q['symbol'], '|', q.get('shortname','')) for q in d['quotes']]"
+# Fix the symbol in the fetcher script, bump version, rebuild, redistribute (see §6).
+```
+
+### `kubectl exec` fails on TX2 pods
+```bash
+# Verify cgroupfs alignment on TX2:
+python3 ops-tools/runcmd.py tx2 ahytx2 'echo @@PW@@ | sudo -S /usr/local/bin/k3s crictl info 2>/dev/null | grep -i "SystemdCgroup"'
+# Must show "SystemdCgroup": false for BOTH runc and nvidia runtimes.
+# Also check kubelet driver:
+journalctl -u k3s-agent --since "1 hour ago" | grep -i "cgroup driver"
+# Must show cgroupDriver="cgroupfs". If mismatch: fix both sides (see §2 TX2 config).
+```
+
+### iptables wrappers after TX2 apt work
+```bash
+# Quick check:
+python3 ops-tools/runcmd.py tx2 ahytx2 'head -1 /sbin/iptables-restore'
+# Must output "#!/bin/bash" and the wrapper must exec /sbin/xtables-multi.orig
+# If missing: re-create from backup or see §2 TX2 fixed configuration.
+```
+
+### Grafana panels show "No data" but the DB has rows (happened 2026-10-03)
+**Cause:** postgres datasource provisioning had `database: postgres` at the TOP LEVEL of
+the yaml, but Grafana 12's postgres plugin only reads `jsonData.database`. Backend
+queries still work (curl `/api/ds/query` returns data — misleading!), while the browser
+plugin refuses to fire panel queries at all (console: "Postgres requires a default
+database..."). Dashboards also lacked a `time` property, defaulting to Last 6h — daily
+data at midnight timestamps renders empty either way.
+```bash
+# Check from a browser console (F12) — the tell-tale error:
+#   "You do not currently have a default database configured for this data source"
+# Fix (in manifests/grafana/provisioning.yaml):
+#   jsonData:
+#     database: postgres   # <- must be INSIDE jsonData, not top-level
+# Then: bash ops-tools/apply-grafana-provisioning.sh && rollout restart grafana
+# All 5 dashboards also now ship "time": {"from": "now-90d", "to": "now"}.
+```
+
+### k3s-server died under peak storm
+```bash
+# Check if API is down but agents are quiet:
+kubectl get nodes  # if TLS timeout, pi2 is the bottleneck
+# Check pi2 directly:
+python3 ops-tools/runcmd.py pi2 pi2 'systemctl status k3s'
+# If dead (exit 1) but Restart=always: it should self-restart. If stuck:
+python3 ops-tools/runcmd.py pi2 pi2 'echo @@PW@@ | sudo -S systemctl restart k3s'
+# Then verify agents re-register one-by-one (pi3 → pi1 → TX2).
+```
+
+## 9. Backup & restore (copy-paste commands)
+
+### Verify backup ran (daily 01:30 UTC)
+```bash
+# Check pi3's backup directory (should show today's dump ~300-500K):
+python3 ops-tools/runcmd.py pi3 pi3 'ls -lh /var/lib/market-data/backups/ | tail -5'
+# Output should show marketdata-2026-10-03.dump with recent timestamp
+```
+
+### Manual backup (on demand)
+```bash
+# Trigger the CronJob immediately as a one-shot Job:
+kubectl create job -n market-data pgbackup-manual --from=cronjob/pg-backup
+# Wait ~30s:
+kubectl get job -n market-data pgbackup-manual
+kubectl logs -n market-data job/pgbackup-manual --tail=10
+# Expect: BACKUP-OK + dump filename
+```
+
+### Restore drill (practice before you need it)
+
+**Reusable timed drill (measured 2026-10-03):** `manifests/timescaledb/restore-drill-job.yaml`
+restores the newest dump into a throwaway `drill_restore` DB, compares row counts, drops it.
+```bash
+kubectl apply -f manifests/timescaledb/restore-drill-job.yaml
+kubectl logs -n market-data job/restore-drill --tail=5
+# Measured 2026-10-03: RESTORE-DRILL-OK, pg_restore 2s @ 388K dump, live=drill=9076 rows.
+# Re-run quarterly, or after any schema/backup change.
+```
+
+**Manual restore (older procedure, still valid):**
+```bash
+# 1. Pick a dump file (from step 1 above, e.g., marketdata-2026-10-01.dump)
+# 2. Create a temporary restore pod on pi3 (mounts backup dir + DB service):
+kubectl run -n market-data restore-drill --rm -i --tty --image=timescale/timescaledb:2.30.1-pg16 -- \
+  pg_restore -h timescaledb -U postgres -d postgres -c /backups/marketdata-2026-10-01.dump
+# If you get "role postgres already exists" or similar, that's fine — -c cleans first.
+# Verify restored data:
+kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
+  psql -U postgres -d postgres -c "SELECT count(*) FROM index_prices;"
+```
+
+### What the automated CronJob does (for reference)
+- Schedule: `30 1 * * *` (01:30 UTC)
+- Runs on pi3 (`nodeSelector: kubernetes.io/hostname=pi3`)
+- Image: `timescale/timescaledb:2.30.1-pg16` (cached, no pull)
+- Runs `pg_dump -h timescaledb -U postgres -d postgres -Fc -f /backups/marketdata-$(date -u +%F).dump`
+- Keeps 7 daily dumps (`ls -t ... | tail -n +8 | xargs -r rm -f`)
+- Writes to `/var/lib/market-data/backups/` on pi3's USB SSD (hostPath, survives pod restarts)
+
+### Retain safety
+- The PV `timescaledb-tx2-ssd` has `persistentVolumeReclaimPolicy: Retain`.
+- Data lives on TX2's sda4 USB SSD (independent from eMMC).
+- Even `kubectl delete statefulset timescaledb -n market-data` followed by
+  `kubectl delete pvc pgdata-timescaledb-0 -n market-data` **cannot delete the data files** on sda4 — they remain on disk until you manually wipe them.
+
+## 10. Security & secrets
+
+- **One local secrets file: `.secrets.env`** (repo root; gitignored, mode 600; the
+  committed `.secrets.env.example` lists the keys). It holds `PI_PASS`, `TX2_PASS`,
+  `PGPASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `FRED_API_KEY`, plus the out-of-band
+  `PIHOLE_ADMIN_PASSWORD` / `TELEGRAM_*`. `ops-tools/*.py` read it automatically
+  (host-aware); for your own shell: `set -a; source .secrets.env; set +a`.
+  **Docs never carry values** — commands use the `@@PW@@` token (see §6) or the
+  variable names above.
+- Secret manifests (`manifests/timescaledb|grafana|ingestion/rates/secret.yaml`) are
+  gitignored too; `secret.yaml.example` files show their shape. Live values also
+  live in the cluster. Credential rotation is not a current priority.
+- Agents are denied reading `.secrets.env` (`opencode.jsonc`); never paste its
+  contents into chat.
+- Everything (Grafana, DB) is tailnet-only; CGNAT means no inbound ports exist
+  by construction. Never expose Grafana publicly without auth + TLS work.
+- Images contain zero secrets (all via env/secretKeyRef) — safe to rebuild freely.
+
+## 11. Maintenance calendar
+
+- **Daily (automated):** all CronJobs (§3); glance at §7 checklist.
+- **Monthly (1st, automated + 5 min human):** `fdi-watch` logs DPIIT links →
+  manual INSERT into `capital_flows` (template in the job log).
+- **As needed:** rebuild/redistribute images on code changes (§6); prune TX2
+  docker cruft if eMMC >85% (keep sentiment image + slim bases); rerun 1y
+  backfills only if history is ever lost.
+- **Never without care:** TX2 k3s upgrade past v1.35 (cgroup v1 ceiling →
+  control plane capped ~v1.38); TX2 apt upgrades (wrappers, §8); JetPack 5
+  reflash (would fix cgroup/nftables properly — recovery-mode, full revalidation).
+
+## 12. Known gaps & TODOs
+
+1. ~~RBI G-Secs/repo rate — no stable feed~~ ✅ closed 2026-10-09: `rbi-fetcher`
+   scrapes the official RBI mobile "Current Rates" widget daily (07:00 PDT);
+   7 policy rates + 5 G-Sec tenor buckets + 3 T-bill cut-offs land in
+   `interest_rates`/`bond_yields` (IN_* keys). Writes its own
+   `pipeline_heartbeat` row ('rbi'); the health job's hard-coded FEEDS list
+   adopts it at the next natural health-image rebuild. Note: the G-Sec rows
+   carry the page's EOD as-on date (T-1), policy/T-bill rows the fetch date.
+2. Nifty 500 / Auto / FMCG — **split 2026-10-09**: Nifty 500 restored via
+   `^CRSLDX` (nse-fetcher v3, probed 21 valid bars fresh through the day).
+   ^CNXAUTO / ^CNXFMCG / NIFTYAUTO.NS / NIFTYFMCG.NS all confirmed dead on
+   Yahoo (current-quote ghost only, no history) — NSE direct (session-cookie
+   API, like fiidii-fetcher) or jugaad-data are the only remaining avenues.
+3. Grafana alert rules not configured (panels are alert-ready; `pipeline_heartbeat`
+   table now exists as the alert source — next: notification channel decision).
+4. ~~TX2 LAN IP still DHCP~~ ✅ resolved 2026-10-03: router DHCP reservation
+   (user-confirmed); host stays DHCP client by design.
+5. news_sentiment / raw_headlines have NO unique constraints yet (INSERT-only
+   writers; add with ON CONFLICT at the next scorer/fetcher image rebuild).
+6. pi0 not on tailnet; router UDP 51820 forward leftover from WireGuard era.
+7. Longhorn/OpenEBS + Loki: deliberately declined (pi2 RAM ceiling).
+8. ~~`rbi-fetcher:v1` image NOT yet imported on pi2~~ ✅ resolved 2026-10-09
+   (same session): the "SSH Authentication failed" on pi2 was NEVER a wrong
+   password — the server journal showed zero "Failed password" events. It was
+   `runcmd.py`'s 10s `auth_timeout` aborting pi2's slow-under-load PAM auth
+   (paramiko raises a generic "Authentication failed"). ops-tools now uses
+   30s timeouts; rbi-fetcher:v1 imported + crictl-verified on pi2. Lesson in
+   §8; do not diagnose SSH auth from the client error text alone.
+
+---
+
+## Appendix A — Quick Reference (most-used one-liners)
+
+```bash
+# Full daily health check (copy-paste as a block):
+export KUBECONFIG=~/.kube/pi-cluster.yaml
+echo "=== NODES ===" && kubectl get nodes
+echo "=== CRONJOBS ===" && kubectl get cronjobs -n market-data
+echo "=== RECENT JOBS ===" && kubectl get jobs -n market-data | tail -10
+echo "=== pi2 LOAD ===" && python3 ops-tools/runcmd.py pi2 pi2 'uptime; free -m | head -2'
+echo "=== BACKUP ===" && python3 ops-tools/runcmd.py pi3 pi3 'ls -lh /var/lib/market-data/backups/ | tail -3'
+echo "=== TX2 DISK ===" && python3 ops-tools/runcmd.py tx2 ahytx2 'df -h / /mnt/tx2-ssd | tail -2'
+
+# Quick DB row counts:
+export KUBECONFIG=~/.kube/pi-cluster.yaml
+PW=$(kubectl -n market-data get secret timescaledb-auth -o jsonpath='{.data.password}' | base64 -d)
+kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" psql -U postgres -d postgres -c "SELECT 'index_prices', count(*) FROM index_prices UNION ALL SELECT 'fx_rates', count(*) FROM fx_rates UNION ALL SELECT 'news_sentiment', count(*) FROM news_sentiment;"
+
+# Grafana access:
+kubectl -n market-data port-forward svc/grafana 3000:3000
+# → http://localhost:3000 (admin / <GRAFANA_ADMIN_PASSWORD from .secrets.env>)
+
+# Rebuild + redistribute a fetcher (yfinance example):
+# 1. Edit script + bump tag in cronjob.yaml
+# 2. Build on TX2 + save tarball
+# 3. Distribute to pi1/pi2/pi3 + ctr import
+# 4. kubectl apply cronjob.yaml + kubectl create job --from=cronjob + check logs + DB rows
+
+# TX2 disk cleanup if eMMC > 85%:
+python3 ops-tools/runcmd.py tx2 ahytx2 'echo @@PW@@ | sudo -S docker system prune -f && echo @@PW@@ | sudo -S docker builder prune -f && df -h /'
+
+# Restart single agent (e.g., pi1):
+python3 ops-tools/runcmd.py pi1 pi1 "echo @@PW@@ | sudo -S systemctl restart k3s-agent"
+
+# Grafana "No data" fix:
+# 1. Time picker (top-right) → "Last 90 days" / "All time" → Apply
+# 2. Panel menu (⋮) → Refresh (⟳) to force re-query
+# Panels cache "No data" state and don't auto-requery on URL time params
+```
+
+---
+
+## Quick Start: See Data in Grafana (30 seconds)
+
+```bash
+# 1. Start port-forward
+kubectl -n market-data port-forward svc/grafana 3000:3000
+
+# 2. Open http://localhost:3000
+#    User: admin
+#    Password: <GRAFANA_ADMIN_PASSWORD from .secrets.env>
+
+# 3. Fix "No data" (REQUIRED on first load):
+#    a) Top-right time picker → "Last 90 days" → Apply
+#    b) Each panel: ⋮ menu → ⟳ Refresh  (or top nav ⟳ dashboard refresh)
+#    c) Hard refresh: Ctrl+Shift+R
+```
+
+---
+
+## Appendix B — File locations (source of truth)
+
+| Artifact | Path |
+|---|---|
+| **This index** | `marketdata/docs/README.md` — purpose of every doc + reading order |
+| Design/plan | `marketdata/docs/market-data-pipeline-plan.md` |
+| This manual | `marketdata/docs/market-data-pipeline-operations-manual.md` |
+| Architecture reference | `marketdata/docs/market-data-architecture.md` |
+| Hardening roadmap | `marketdata/docs/market-data-pipeline-architecture-roadmap.md` |
+| Finds & project ideas | `marketdata/docs/market-data-finds-and-projects.md` |
+| Stock screener plan (Nifty 500 + S&P 500) — v1 build order | `marketdata/docs/stock-screener-implementation-plan.md` |
+| Fundamental analysis target architecture (v2+) | `marketdata/docs/nifty500_sp500_fundamental_analysis_implementation_plan.md` |
+| Pi runbook (passwords, boot) | `piCluster/homelab setup/SETUP.md` |
+| TX2 bring-up gotchas | `piCluster/homelab setup/TX2_AI_Edge_Lab_Setup_and_Test_Plan.md` |
+| All manifests | `marketdata/manifests/` (namespace, DB, ingestion, intraday, health, sentiment, TA, Grafana, backup) |
+| SSH helpers | `marketdata/ops-tools/` (`runcmd.py`, `putfile.py`, `getfile.py`) |
+| Grafana validation scripts | `marketdata/validation/grafana/` (gitignored — hold the admin pw; never commit) |
+| Dashboard screenshots | `marketdata/validation/screenshots/` |
+| Real IP addresses (LAN / tailnet / WAN) | `marketdata/.hosts.env` (gitignored) — template: `.hosts.env.example` |
+| All local secrets (Pi/TX2/DB/Grafana/FRED) | `marketdata/.secrets.env` (gitignored, mode 600) — template: `.secrets.env.example` |
+| FRED API key | in cluster Secret `fred-api` (not in repo) |
+| OpenCode setup guide | `piCluster/opencode-mcp-and-skills.md` (workspace root, above `projects/`) |
+| OpenCode project setup | `marketdata/opencode.jsonc` (MCP + permissions), `marketdata/AGENTS.md`, `marketdata/.opencode/` (agents, commands, skills) |
