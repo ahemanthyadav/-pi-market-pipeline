@@ -4,10 +4,17 @@
 #   kubectl apply -f backfill-yfinance.yaml
 # Idempotent (same DELETE+INSERT as daily runs) — safe to re-run. Delete the
 # Job object afterwards to keep history tidy.
+# 2026-10-10: period raised 1y → 5y so the Telegram /index card can show 1/3/5-year
+# averages and a low/normal/high reading. Run 2026-10-10 (36,314 + 11,094 rows).
+# DO NOT raise it further without changing the fetcher first: this job writes in
+# ONE transaction and index_prices has 7-day chunks — the 5y run held ~2,900 of the
+# database's ~6,400 lock slots (max_locks_per_transaction 256 x max_connections 25)
+# and took 26 min; 10y would need ~6,000 and risks "out of shared memory" for every
+# session. Longer history needs a fetcher that commits per time range.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: backfill-yfinance-1y
+  name: backfill-yfinance-5y
   namespace: market-data
 spec:
   backoffLimit: 2
@@ -31,7 +38,7 @@ spec:
             - name: PGDATABASE
               value: postgres
             - name: FETCH_PERIOD
-              value: 1y
+              value: 5y
             - name: BACKFILL
               value: "1"
           resources:

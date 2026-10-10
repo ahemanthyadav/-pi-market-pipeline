@@ -237,6 +237,89 @@ class IndexCardTest(unittest.TestCase):
         self.assertIn("<b>Nifty 50</b>", stocks.index_text(exact, "^nsei"))
 
 
+class LongTermTest(unittest.TestCase):
+    END = datetime(2026, 10, 9, tzinfo=timezone.utc)
+
+    def weekly(self, years, level=lambda i, n: 100.0):
+        """One row a week for `years`; level(i, n) gives the close of row i of n."""
+        n = int(years * 52) + 1
+        return [(self.END - timedelta(weeks=n - 1 - i), level(i, n)) for i in range(n)]
+
+    def test_trailing_average_needs_the_full_window(self):
+        rows = self.weekly(4, lambda i, n: 100.0 if i < n - 52 else 200.0)
+        # 52 weeks at 200 plus the row exactly 364 days back, still at 100
+        self.assertAlmostEqual(stocks.trailing_average(rows, 1), (52 * 200 + 100) / 53)
+        self.assertAlmostEqual(stocks.trailing_average(rows, 3), (104 * 100 + 52 * 200) / 156,
+                               delta=1.0)
+        self.assertIsNone(stocks.trailing_average(rows, 5))
+
+    def test_gap_history_starts_once_a_window_is_full(self):
+        rows = self.weekly(6)                                   # flat at 100
+        gaps = stocks.gap_history(rows, 5)
+        self.assertTrue(40 <= len(gaps) <= 60)                  # ~1 year of full windows
+        self.assertTrue(all(abs(g) < 1e-9 for g in gaps))
+
+    def test_gap_is_close_over_its_own_trailing_mean(self):
+        rows = self.weekly(4, lambda i, n: 100.0 if i < n - 1 else 150.0)   # last day jumps
+        gap = stocks.gap_history(rows, 3)[-1]
+        self.assertAlmostEqual(gap, 150.0 / ((155 * 100 + 150) / 156) - 1, places=3)
+
+    def test_percentile_and_reading_bands(self):
+        self.assertEqual(stocks.percentile_of(3, [1, 2, 3, 4]), 62.5)     # 2 below + half a tie
+        self.assertEqual(stocks.percentile_of(0.1 + 0.2, [0.3, 0.3]), 50.0)  # float noise = tie
+        self.assertEqual([stocks.reading(p) for p in (0, 9.9, 10, 24, 25, 74, 75, 89, 90, 100)],
+                         ["very low", "very low", "low", "low", "normal", "normal",
+                          "high", "high", "very high", "very high"])
+
+    def test_block_for_a_steadily_rising_index_reads_normal(self):
+        # +10% a year for 10 years: always far above its averages, yet never unusual
+        rows = self.weekly(10, lambda i, n: 100.0 * 1.1 ** (i / 52))
+        lines = stocks.long_term_block(rows, "^NSEI")
+        self.assertIn("10 years of history", lines[0])
+        table = pre_lines(lines[1])
+        self.assertEqual(table[0].split(), ["Level", "Now", "vs"])
+        self.assertEqual([t.split()[0] for t in table[1:5]], ["1-year", "3-year", "5-year",
+                                                               "10-year"])
+        self.assertTrue(table[5].startswith("High since 2016"))
+        self.assertTrue(table[4].split()[-1].startswith("+"))       # above its 10-year average
+        self.assertIn("Reading: normal", lines[2])
+        self.assertIn("5-year average", lines[2])
+        self.assertIn("not where it goes next", lines[3])
+        for line in table:
+            self.assertLessEqual(len(line), PHONE_WIDTH, line)
+
+    def test_block_flags_a_collapse_and_a_spike(self):
+        fall = self.weekly(10, lambda i, n: 100.0 * 1.1 ** (i / 52) * (0.6 if i == n - 1 else 1))
+        self.assertIn("Reading: very low", stocks.long_term_block(fall, "^NSEI")[2])
+        jump = self.weekly(10, lambda i, n: 100.0 * 1.1 ** (i / 52) * (1.5 if i == n - 1 else 1))
+        self.assertIn("Reading: very high", stocks.long_term_block(jump, "^NSEI")[2])
+
+    def test_shorter_history_uses_the_3_year_average(self):
+        rows = self.weekly(5, lambda i, n: 100.0 * 1.1 ** (i / 52))
+        lines = stocks.long_term_block(rows, "^NSEI")
+        self.assertIn("3-year average", lines[2])
+        self.assertNotIn("10-year", lines[1])
+
+    def test_volatility_gauge_ranks_its_level(self):
+        rows = self.weekly(10, lambda i, n: 12.0 if i == n - 1 else 15.0 + (i % 10))
+        text = "\n".join(stocks.long_term_block(rows, "^VIX"))
+        self.assertIn("Reading: very low", text)
+        self.assertIn("higher than on 0% of days since 2016", text)
+        self.assertNotIn("stretched", text)
+
+    def test_too_little_history_gives_no_block_or_no_reading(self):
+        self.assertEqual(stocks.long_term_block(self.weekly(0.8), "^NSEI"), [])
+        lines = stocks.long_term_block(self.weekly(3), "^NSEI")      # averages, no reading
+        self.assertEqual(len(lines), 2)
+
+    def test_card_includes_the_block(self):
+        rows = [(self.END - timedelta(days=3650 - i), 100.0 * 1.1 ** (i / 365)) for i in range(3651)]
+        text = stocks.index_card(FakeDB([("FROM index_prices", rows)]), "^NSEI", "Nifty 50")
+        self.assertIn("<b>Long-term reference</b>", text)
+        self.assertIn("interval '40 years'", "interval '40 years'")
+        self.assertIn("<b>Reading: normal</b>", text)
+
+
 class YtdTest(unittest.TestCase):
     NOW = datetime(2026, 10, 10, tzinfo=timezone.utc)
 

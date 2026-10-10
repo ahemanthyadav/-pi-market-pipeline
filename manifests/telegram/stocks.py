@@ -307,10 +307,100 @@ def find_index(q, arg):
         (arg, f"%{arg}%", arg))
 
 
+YEAR = timedelta(days=365.25)
+LEVEL_GAUGES = NOT_RANKED   # volatility indices: judge the level itself, not a trend gap
+READINGS = ((10, "very low"), (25, "low"), (75, "normal"), (90, "high"), (101, "very high"))
+
+
+def trailing_average(rows, years):
+    """Mean close over the last `years` (rows: [(ts, close)] oldest first), or
+    None when the history does not reach that far back."""
+    start = rows[-1][0] - years * YEAR
+    if rows[0][0] > start + timedelta(days=20):
+        return None
+    window = [c for t, c in rows if t > start]
+    return sum(window) / len(window)
+
+
+def gap_history(rows, years):
+    """close ÷ its own trailing `years`-average − 1, for every day that has a
+    full window behind it. One pass with a running sum."""
+    span, out, total, left = years * YEAR, [], 0.0, 0
+    first = rows[0][0]
+    for right, (ts, close) in enumerate(rows):
+        total += close
+        while rows[left][0] <= ts - span:
+            total -= rows[left][1]
+            left += 1
+        if ts - first >= span - timedelta(days=20):
+            out.append(close / (total / (right - left + 1)) - 1)
+    return out
+
+
+def percentile_of(value, history):
+    """Mid-rank percentile of `value` within `history`, 0-100: the share strictly
+    below it plus half of the ties. Values are compared at 4 decimals so float
+    noise cannot turn a tie into a rank."""
+    value = round(value, 4)
+    rounded = [round(h, 4) for h in history]
+    below = sum(h < value for h in rounded)
+    ties = sum(h == value for h in rounded)
+    return 100.0 * (below + 0.5 * ties) / len(rounded)
+
+
+def reading(pctile):
+    return next(name for limit, name in READINGS if pctile < limit)
+
+
+def long_term_block(rows, ticker):
+    """Lines placing today's level against the index's own long history:
+    1/3/5/10-year averages, the high in the data, and a low/normal/high reading.
+
+    The reading for a trending index compares today's gap to its 5-year
+    average (3-year when history is shorter) with every past day's gap — a
+    rising index is nearly always above its long average, so the level alone
+    says nothing. Volatility gauges mean-revert, so their level is ranked
+    directly. Needs ~5 years of rows; returns [] below that.
+    """
+    last_ts, last = rows[-1]
+    span_years = (last_ts - rows[0][0]) / YEAR
+    body = []
+    for years in (1, 3, 5, 10):
+        avg = trailing_average(rows, years)
+        if avg:
+            body.append((f"{years}-year average", px(avg), pct(change(last, avg))))
+    if span_years < 2 or not body:
+        return []
+    high = max(c for _, c in rows)
+    body.append((f"High since {rows[0][0]:%Y}", px(high), pct(change(last, high))))
+    out = [f"<b>Long-term reference</b>  <i>{span_years:.0f} years of history</i>",
+           table(("", "Level", "Now vs"), body, "lrr")]
+
+    if ticker in LEVEL_GAUGES and span_years >= 4.5:
+        p = percentile_of(last, [c for _, c in rows])
+        out.append(f"<b>Reading: {reading(p)}</b> — higher than on {p:.0f}% of days "
+                   f"since {rows[0][0]:%Y}.")
+    elif ticker not in LEVEL_GAUGES:
+        years = 5 if span_years >= 7.5 else 3 if span_years >= 4.5 else None
+        if years:
+            gaps = gap_history(rows, years)
+            p = percentile_of(gaps[-1], gaps)
+            since = (rows[0][0] + years * YEAR).year
+            out.append(
+                f"<b>Reading: {reading(p)}</b> — {pct(gaps[-1])} against its {years}-year "
+                f"average. Relative to that average it was lower on {p:.0f}% of days "
+                f"since {since}.")
+    if len(out) > 2:
+        out.append("<i>Measured against this index's own past. It describes where the "
+                   "level sits, not where it goes next.</i>")
+    return out
+
+
 def index_card(q, ticker, label, now=None):
-    """Full picture of one index from a single year-long read of index_prices."""
+    """Full picture of one index: recent performance and trend from the last
+    year, then the long-term reference from everything on file."""
     rows = q("SELECT ts, close FROM index_prices WHERE ticker = %s "
-             "AND ts >= now() - interval '380 days' AND close IS NOT NULL ORDER BY ts",
+             "AND ts >= now() - interval '40 years' AND close IS NOT NULL ORDER BY ts",
              (ticker,))
     if not rows:
         return f"{esc(label)}: no data"
@@ -340,7 +430,7 @@ def index_card(q, ticker, label, now=None):
             ("vs 50-day average", since(sma(closes, 50))),
             ("vs 200-day average", since(sma(closes, 200))),
             ("RSI (14)", None if strength is None else f"{strength:.0f}")]),
-    ]
+    ] + long_term_block(rows, ticker)
     return "\n".join(p for p in parts if p)
 
 
