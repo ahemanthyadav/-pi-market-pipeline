@@ -29,8 +29,8 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   2026-10-10 on pi0/pi1/pi2/pi3/TX2 (ADR 0011): root-cron CSV every 5 min
   at /var/log/node-stats/stats.csv (load/cpu/mem/swap/temp/throttle-hex/
   k3s-state/db-procs/disk), logrotate weekly×8, keeps recording while k3s
-  is dead. Puller: `ops-tools/collect-node-stats.sh` (Pis read SETUP.md at
-  runtime; TX2 needs `TX2_PASS` env). First catches: pi2 live uv+throttle,
+  is dead. Puller: `ops-tools/collect-node-stats.sh` (passwords + host aliases
+  resolve from the gitignored local files — no env needed). First catches: pi2 live uv+throttle,
   pi0 past flags 0x50000, TX2 root disk 84%.
 - [x] ✅ **Verify first full-quality scoring run** — done 2026-10-09, one day late:
   the run had been failing silently every night since 10-05 — the screener's SP500
@@ -53,12 +53,22 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   `validation/grafana/` gitignored; `.example` secret manifests added; agents denied
   read of `.secrets.env` in `opencode.jsonc`. Credential rotation is explicitly
   NOT a priority (owner decision 2026-10-10). Detail: ops manual §10.
+- [ ] 🔶 **Verify the CGNAT claim** — 2026-10-10 measurement: the public IP this
+  LAN egresses with EQUALS the router's WAN IP (docs concluded CGNAT from the
+  opposite). One check from one workstation; confirm on the router's WAN page or
+  from the phone off Wi-Fi. If not CGNAT: "no inbound ports by construction" is
+  false and the stale UDP 51820 forward may be reachable — remove it first. Detail:
+  ops manual §12.9.
 - [ ] 🔶 pi0 → tailnet (remote Pi-hole admin + ad-block DNS on the move).
   Detail: ops manual §12.6.
 - [ ] 🔶 Remove dead router UDP 51820 port-forward (WireGuard leftover).
   Detail: roadmap §11.
 
 ## 3. Next features (roadmap order)
+
+- [ ] 🔶 **Deploy `nodewatch` on pi0** — out-of-cluster dead-man's switch (would have caught the
+  2026-10-09 outage in ≤5 min). Script + tests done 2026-10-10 (`tests/test-nodewatch.sh`, 9/9); install steps
+  in ops manual §11. Needs the Telegram credentials placed on pi0 (a new secret location — your call).
 
 - [x] ✅ **Telegram digest bot** — deployed + validated 2026-10-09 (ADR 0009).
   08:00 IST (only job with explicit timeZone), pinned pi1; Secret `telegram-bot`
@@ -127,7 +137,7 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 
 ## 5. Recurring (never "done" — calendar items)
 
-- [ ] 🔄 Daily: `/health` checklist (ops manual §7). Automatic: 19 CronJobs.
+- [ ] 🔄 Daily: `/health` checklist (ops manual §7). Automatic: 22 CronJobs.
 - [ ] 🔄 Monthly (1st): fdi-watch logs DPIIT links → 5-min manual INSERT.
   Detail: ops manual §11.
 - [ ] 🔄 Quarterly: timed restore drill (`restore-drill-job.yaml`), after any

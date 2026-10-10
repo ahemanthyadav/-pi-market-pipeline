@@ -1,6 +1,7 @@
 # Market Data Pipeline — Operations Manual & System Reference
 
-> **Last verified:** 2026-10-03 (cluster healthy, all CronJobs on schedule).
+> **Reconciled with `manifests/` 2026-10-10** (schedules/images checked by `ops-tools/workloads.py --check`).
+> Last fully healthy cluster check: 2026-10-09; degraded since 2026-10-09 15:02 UTC — see §8 and pending-tasks §1.
 > **Repo layout (2026-10-03):** everything lives in `projects/marketdata/` —
 > `docs/` (project docs), `manifests/` (k8s), `ops-tools/` (SSH helpers),
 > `validation/` (Grafana scripts + screenshots), `AGENTS.md` + `opencode.jsonc` +
@@ -66,7 +67,7 @@ re-runs and late corrections overwrite cleanly, never duplicate.
 | ahytx2-desktop | Jetson TX2, 7.7 GB | <tx2-ip> (router DHCP reservation, confirmed 2026-10-03) | <tx2-tailnet-ip> | GPU/tainted worker; DB host |
 
 - k3s: server v1.36.4+k3s1 (pi2); agents v1.36.4 on Pis, **pinned v1.35.3+k3s1 on TX2**.
-- Admin machine in these examples: `ahy-MS-7D25` (<admin-tailnet-ip>), kubectl v1.36.5
+- Admin machine in these examples: `<admin-host>` (<admin-tailnet-ip>), kubectl v1.36.5
   at `~/.local/bin`, kubeconfig `~/.kube/pi-cluster.yaml`.
 
 ### TX2 fixed configuration (do not lose)
@@ -654,8 +655,9 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
   `PGPASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `FRED_API_KEY`, plus the out-of-band
   `PIHOLE_ADMIN_PASSWORD` / `TELEGRAM_*`. `ops-tools/*.py` read it automatically
   (host-aware); for your own shell: `set -a; source .secrets.env; set +a`.
-  **Docs never carry values** — commands use the `@@PW@@` token (see §6) or the
-  variable names above.
+  **Docs never carry values** — commands use the `@@PW@@` token (see §6), any
+  `@@KEY@@` from `.secrets.env` (e.g. `@@TELEGRAM_BOT_TOKEN@@` for a direct
+  getMe/sendMessage channel check), or the variable names above.
 - Secret manifests (`manifests/timescaledb|grafana|ingestion/rates/secret.yaml`) are
   gitignored too; `secret.yaml.example` files show their shape. Live values also
   live in the cluster. Credential rotation is not a current priority.
@@ -673,6 +675,14 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
 - **As needed:** rebuild/redistribute images on code changes (§6); prune TX2
   docker cruft if eMMC >85% (keep sentiment image + slim bases); rerun 1y
   backfills only if history is ever lost.
+- **Repo hygiene (git, since 2026-10-10):** one-time `git config core.hooksPath .githooks` enables the
+  pre-commit guard (gitleaks + exact local secret/address values + private-IP + forbidden-file checks).
+  Before a push: `python3 ops-tools/workloads.py --check` (docs vs manifests), `bash tests/test-precommit-hook.sh`,
+  `bash tests/test-nodewatch.sh`.
+- **Out-of-cluster watcher:** `ops-tools/nodewatch.sh` (ping every node + TCP-probe the API; Telegram message
+  only on state change, 6 h reminders). Built + tested 2026-10-10, **not yet deployed** — install on pi0 (outside
+  k3s): copy the script, create `/etc/nodewatch.hosts` (PI0_IP…TX2_IP) and `/etc/nodewatch.secrets` (mode 600:
+  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID), cron `*/5 * * * *`. Dry-run anywhere: `bash ops-tools/nodewatch.sh --dry-run`.
 - **Never without care:** TX2 k3s upgrade past v1.35 (cgroup v1 ceiling →
   control plane capped ~v1.38); TX2 apt upgrades (wrappers, §8); JetPack 5
   reflash (would fix cgroup/nftables properly — recovery-mode, full revalidation).
@@ -706,6 +716,13 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
    (paramiko raises a generic "Authentication failed"). ops-tools now uses
    30s timeouts; rbi-fetcher:v1 imported + crictl-verified on pi2. Lesson in
    §8; do not diagnose SSH auth from the client error text alone.
+9. **CGNAT claim unverified (2026-10-10).** The finds/architecture/decision-log conclusion
+   ("CGNAT, no inbound ports by construction") rested on router-WAN ≠ externally-seen IP.
+   Re-measured 2026-10-10: the address this LAN currently egresses with EQUALS the
+   router WAN IP — the signature of a normal public address. Single check, one workstation
+   (no VPN/exit node visible). Confirm on the router WAN page or from the phone off Wi-Fi
+   before relying on the claim; if it fails, treat UDP 51820 (stale forward) as reachable
+   and remove it. Real addresses: local `.hosts.env` only.
 
 ---
 

@@ -95,6 +95,12 @@ down and crash-loops Grafana (F29–F31). Current thresholds (first guesses):
 | Large FII outflow | latest FII net < −3000 Rs cr | **fired legitimately at −12,944** on day one; raise to −5000+ if too chatty |
 
 ### 3.4 Validate the alert chain end-to-end (no test endpoint exists, F31)
+Channel sanity check first — token + chat id + pi0 egress DNS in one shot
+(`@@TELEGRAM_*@@` resolve from `.secrets.env` at run time; no values on the line):
+```bash
+python3 ops-tools/runcmd.py pi0 pi0 'curl -s https://api.telegram.org/bot@@TELEGRAM_BOT_TOKEN@@/getMe'
+python3 ops-tools/runcmd.py pi0 pi0 'curl -s -d chat_id=@@TELEGRAM_CHAT_ID@@ -d text="alert-chain test" https://api.telegram.org/bot@@TELEGRAM_BOT_TOKEN@@/sendMessage'
+```
 Temporarily: group `interval: 10m → 1m` AND stale-feed threshold `gt 0 → gt -1`
 → apply → fresh pod → rule goes `firing` within ~2 min → message arrives →
 **revert both** → rule resolves (resolve message = the return path validated).

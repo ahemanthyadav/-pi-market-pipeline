@@ -252,12 +252,12 @@ zero new compute.
 
 | CronJob | Schedule (UTC) | Runs on | Image | Writes | Est. runtime |
 |---|---|---|---|---|---|
-| `universe-refresh` | `0 9 * * 0` (Sun) | Pi worker | `local/screener:v7` | `universe_constituents`, `ticker_names` | ~2 min |
-| `stock-prices` | `30 23 * * *` | Pi worker | `local/screener:v7` | `stock_prices` | ~15-30 min (1000 syms, chunks of 100, 3 s sleep) |
-| `stock-fundamentals` | `0 6 * * 6` (Sat) | Pi worker | `local/screener:v7` | `stock_fundamentals`, `job_state` | ~45-90 min, resumable via `job_state` cursor |
-| `stock-metrics` | `0 2 * * *` | Pi worker | `local/screener:v7` | `stock_metrics_daily` | ~5-10 min |
-| `stock-screener` | `15 2 * * *` | Pi worker | `local/screener:v7` | `stock_scores`, `screening_runs` | ~2-5 min |
-| `stock-report` | `30 2 * * *` | Pi worker | `local/screener:v7` | `stock_reports` | ~2-5 min |
+| `universe-refresh` | `0 9 * * 0` (Sun) | Pi worker | `local/screener:v8` | `universe_constituents`, `ticker_names` | ~2 min |
+| `stock-prices` | `30 23 * * *` | Pi worker | `local/screener:v8` | `stock_prices` | ~15-30 min (1000 syms, chunks of 100, 3 s sleep) |
+| `stock-fundamentals` | `0 6 * * 6` (Sat) | Pi worker | `local/screener:v8` | `stock_fundamentals`, `job_state` | ~45-90 min, resumable via `job_state` cursor |
+| `stock-metrics` | `0 2 * * *` | Pi worker | `local/screener:v8` | `stock_metrics_daily` | ~5-10 min |
+| `stock-screener` | `15 2 * * *` | Pi worker | `local/screener:v8` | `stock_scores`, `screening_runs` | ~2-5 min |
+| `stock-report` | `30 2 * * *` | Pi worker | `local/screener:v8` | `stock_reports` | ~2-5 min |
 | `backfill-stock-prices-max` | one-shot Job (manual) | Pi worker | same as `stock-prices` (env `BACKFILL=max`) | `stock_prices` | ~30-60 min, resumable |
 | `backfill-stock-fundamentals` | one-shot Job (manual) | Pi worker | same as fundamentals (env `BACKFILL=1`) | `stock_fundamentals` | hours; resumable across runs |
 

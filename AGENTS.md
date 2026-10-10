@@ -42,6 +42,14 @@ skill); never commit credentials or IPs (rules 7–8; run the audit before any p
    `ops-tools/*.py` take the aliases and resolve them. Agents may read `.hosts.env`
    (not a credential file) but must not copy its values into tracked files.
 
+## Before any push (repo hygiene)
+
+- One-time per clone: `git config core.hooksPath .githooks` — pre-commit guard (gitleaks + exact local
+  secret/address values + private-IP + forbidden-file checks; never prints a value).
+- Must pass: `python3 ops-tools/workloads.py --check` (docs agree with manifests),
+  `bash tests/test-precommit-hook.sh`, `bash tests/test-nodewatch.sh`.
+- Conventional commits (`commit-and-changelog` skill); push over SSH.
+
 ## DB access (read-only by default)
 
 ```bash

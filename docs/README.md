@@ -5,11 +5,12 @@
 > commodities, yields, rates, news, FinBERT sentiment, FII/DII flows, technicals,
 > and a 998-stock fundamental screener (Nifty 500 + S&P 500) — into TimescaleDB,
 > with Grafana dashboards, Tailscale-only access, and no container registry.
-> **Last verified 2026-10-09:** all 4 nodes Ready · **20 CronJobs live
-> (telegram-digest added 2026-10-09, 08:00 IST)** · Telegram alert channel
+> **Status 2026-10-10 — ⚠ cluster degraded** since 2026-10-09 15:02 UTC (control-plane wedge; pi1 rejoined,
+> pi3 + TX2/DB not yet, API intermittent — ops manual §8, pending-tasks §1). Last fully healthy check
+> 2026-10-09: all 4 nodes Ready · **22 CronJobs** (per `manifests/`; telegram-digest 08:00 IST) · Telegram alert channel
 > live (contact point + 3 rules) · **Telegram two-way listener live**
 > (Deployment telegram-bot: /status /vix /nifty /sensex /gold /fii /scores
-> /digest) · screener toolkit `local/screener:v7` ·
+> /digest) · screener toolkit `local/screener:v8` ·
 > health monitor `local/pipeline-health:v4`.
 
 ## Reading order (new session? start here)
@@ -46,7 +47,7 @@
   "Last verified" dates true.
 - Feed quirks/symbol deaths → ops manual §4 **and** the fetcher script header.
 - New failure modes → ops manual §8 (copy-paste fix commands).
-- Long-shelf-life decisions → `docs/adr/` via the `adr` skill — 9 written
+- Long-shelf-life decisions → `docs/adr/` via the `adr` skill — 11 written
   (0001–0011, latest 2026-10-10: node-local stats logging; 0009 Telegram bot);
   see `docs/adr/` for the format.
 - Secrets never enter docs — see AGENTS.md §7 for where they live. Neither do IP

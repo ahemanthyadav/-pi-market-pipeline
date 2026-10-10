@@ -1,7 +1,8 @@
 # Market Data Pipeline — System Architecture
 
-> **Status:** live in production on the home k3s cluster. Last verified 2026-10-03
-> (all nodes Ready, all 19 CronJobs on schedule, DB healthy).
+> **Status:** live in production on the home k3s cluster. Reconciled with `manifests/` 2026-10-10
+> (22 CronJobs; `ops-tools/workloads.py --check` keeps the tables honest). Live state NOT re-verified that
+> day — the cluster was degraded/unreachable (see ops manual §8 and pending-tasks).
 > Doc map: this file = **architecture** (what the system is);
 > `market-data-pipeline-plan.md` = design history + build log;
 > `market-data-pipeline-operations-manual.md` = runbooks + copy-paste commands;
@@ -221,7 +222,7 @@ whole DB via `pg_dump`.*
 | pi3 | Pi 3 B, 1 GB | <pi3-ip> | <pi3-tailnet-ip> | agent v1.36.4 | Worker — Grafana + pg-backup pinned here |
 | ahytx2-desktop | Jetson TX2, 7.7 GB RAM | <tx2-ip> (DHCP, router-reserved) | <tx2-tailnet-ip> | agent pinned v1.35.3+k3s1 | GPU/tainted worker + DB host |
 
-- Network `<lan-cidr>`, gateway `<gateway-ip>`; LAN DNS = pi0. Admin from `ahy-MS-7D25`
+- Network `<lan-cidr>`, gateway `<gateway-ip>`; LAN DNS = pi0. Admin from `<admin-host>`
   (<admin-tailnet-ip>) via `~/.kube/pi-cluster.yaml`.
 - Remote access is Tailscale-only (CGNAT: no inbound ports exist). WireGuard was removed.
 - 4th Pi 3B + 870 EVO remains unbuilt and optional.
@@ -252,7 +253,7 @@ whole DB via `pg_dump`.*
 |---|---|---|
 | Orchestration | k3s (server v1.36.4+k3s1; TX2 agent pinned v1.35.3+k3s1) | Whole cluster |
 | DNS | Pi-hole v6.4.3 + unbound | pi0 |
-| Scheduling | k3s CronJobs (11 live); no workflow engine by design (pi2 RAM) | Pi workers / TX2 |
+| Scheduling | k3s CronJobs (22 live); no workflow engine by design (pi2 RAM) | Pi workers / TX2 |
 | Storage | TimescaleDB 2.30.1-pg16 (Postgres 16.15) | TX2, sda4 SSD |
 | Ingestion | Python 3.12-slim images: `yfinance`, `pandas`, `psycopg[binary]`, `feedparser`, `fredapi` | Pi workers |
 | Sentiment/NLP | FinBERT on CPU (TX2 inference needs no GPU at this volume) | TX2 only |
@@ -536,11 +537,11 @@ layer (JOINs on ticker/symbol), not in DDL.*
 - Idempotency rule (§1.1): DELETE+INSERT own `(key, ts)` rows — safe re-runs.
 - Validate changes with `kubectl create job --from=cronjob/<name>` + log check + DB row check.
 
-### 5.2 Daily schedule (UTC)
+### 5.2 Schedule (node-local PDT — ADR 0002; telegram-digest is explicit IST)
 
 | CronJob | Schedule | Image | Writes to |
 |---|---|---|---|
-| nse-fetcher | 15 11 * * * | local/nse-fetcher:v2 | index_prices (8 Indian indices) |
+| nse-fetcher | 15 11 * * * | local/nse-fetcher:v3 | index_prices (9 Indian indices incl. ^CRSLDX) |
 | fiidii-fetcher | 0 14 * * * | local/fiidii-fetcher:v2 | capital_flows (FII/DII net) |
 | yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v3 | index_prices (28 tickers) |
 | fx-fetcher | 0 23 * * * | local/fx-fetcher:v1 | fx_rates (10 pairs) |
@@ -549,15 +550,18 @@ layer (JOINs on ticker/symbol), not in DDL.*
 | news-fetcher | 45 23 * * * | local/news-fetcher:v1 | raw_headlines (RSS staging) |
 | sentiment-scorer | 15 0 * * * | local/sentiment-fetcher:v1 (TX2 only) | news_sentiment |
 | ta-compute | 30 0 * * * | local/ta-compute:v1 | technical_indicators |
+| headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (ADR 0010) |
+| rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (IN_* policy rates) + bond_yields (IN_GS_*) |
+| telegram-digest | 0 8 * * * (Asia/Kolkata) | local/telegram-digest:v2 (pinned pi1) | Telegram digest (read-only) |
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | pi3 SSD dumps |
-| pipeline-health | 45 1 * * * | local/pipeline-health:v2 | pipeline_heartbeat (10 feeds) |
+| pipeline-health | 45 1 * * * | local/pipeline-health:v4 | pipeline_heartbeat (13 feeds) |
 | intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
-| universe-refresh | 0 9 * * 0 | local/screener:v7 | universe_constituents + ticker_names (998) |
-| stock-prices | 30 23 * * * | local/screener:v7 | stock_prices (5d window) |
-| stock-fundamentals | 0 6 * * 6 | local/screener:v7 | stock_fundamentals (EDGAR US + yfinance NSE) |
-| stock-metrics | 0 2 * * * | local/screener:v7 | stock_metrics_daily |
-| stock-screener | 15 2 * * * | local/screener:v7 | stock_scores + screening_runs |
-| stock-report | 30 2 * * * | local/screener:v7 | stock_reports (top-25/universe + digest) |
+| universe-refresh | 0 9 * * 0 | local/screener:v8 | universe_constituents + ticker_names (998) |
+| stock-prices | 30 23 * * * | local/screener:v8 | stock_prices (5d window) |
+| stock-fundamentals | 0 6 * * 6 | local/screener:v8 | stock_fundamentals (EDGAR US + yfinance NSE) |
+| stock-metrics | 0 2 * * * | local/screener:v8 | stock_metrics_daily |
+| stock-screener | 15 2 * * * | local/screener:v8 | stock_scores + screening_runs |
+| stock-report | 30 2 * * * | local/screener:v8 | stock_reports (top-25/universe + digest) |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only → manual INSERT |
 
 **Schedules are node-local PDT, not UTC** (verified 2026-10-04 — the "02:00-02:30"
