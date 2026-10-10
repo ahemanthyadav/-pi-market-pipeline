@@ -241,8 +241,8 @@ whole DB via `pg_dump`.*
 - iptables wrappers `/sbin/iptables-restore` + `/sbin/ip6tables-restore` backed by
   `/sbin/xtables-multi.orig` — re-verify after ANY apt work (else kube-proxy loses VIPs).
 - L4T R32.7.5 / JetPack 4.6.1 / CUDA 10.2 (host); kernel 4.9.337-tegra (cgroup v1 only).
-- Storage: 28 GB eMMC (OS + images — hit 85% during the sentiment build; prune docker
-  cruft above that) + 224 GB USB SSD `sda4` → fixed fstab mount `/mnt/tx2-ssd`
+- Storage: 28 GB eMMC (OS only since 2026-10-10 — images/containerd live on the SSD; it hit
+  85% during the sentiment build) + 224 GB USB SSD `sda4` → fixed fstab mount `/mnt/tx2-ssd`
   (by UUID, `nofail`; backup `/etc/fstab.bak-20260929`).
 - Pi agents pi1/pi3 also carry `--disable-apiserver-lb` (direct to pi2:6443, no flaky
   local-LB hop). Patched in place; stock k3s reinstalls would revert it.
@@ -834,10 +834,11 @@ on the admin box).
    without a JetPack 5 reflash (recovery-mode, full revalidation — kept in the icebox).
 3. **Load-bearing TX2 files:** iptables wrappers, containerd `nvidia.toml`, agent unit flags
    (§2.2). Re-verify after any TX2 apt/k3s work; stock reinstalls revert unit edits.
-4. **Disk watch:** eMMC at 79% after the 2026-10-03 cleanup (Pi-only build images
-   pruned; docker data-root moved to sda4 — builds no longer touch eMMC; OS/CUDA
-   libs + k3s containerd are the remaining fixed ~20 GB). Alert above 85% still
-   stands; sda4 has 145 G free. Backup freshness = today's dump on pi3.
+4. **Disk watch:** eMMC at 54% since 2026-10-10 (was 79–84%): docker data-root is on
+   sda4 (2026-10-03) and the k3s containerd store is now bind-mounted from sda4 too
+   (2026-10-10, ops manual §2) — the eMMC holds only the OS + CUDA libs. Consequence:
+   the TX2 cannot run any pod without the USB SSD. Alert above 85% still stands; sda4
+   has 145 G free. Backup freshness = today's dump on pi3.
 5. **Deliberately declined:** Longhorn/OpenEBS + Loki (pi2 RAM ceiling), Argo/Tekton
    (API-watch load; staggered CronJobs instead).
 
@@ -882,7 +883,7 @@ on the admin box).
    the sole boundary, secrets in manifests. Defensible behind CGNAT + tailnet; NOT
    internet-facing-ready (no TLS, no SSO, no audit).
 9. **Hardware buses & media.** Pi 3B USB2-shared bus caps all USB storage throughput;
-   TX2 eMMC at 79% (fixed-cost OS/CUDA/containerd; docker builds relocated to sda4);
+   TX2 eMMC at 54% (OS/CUDA only; docker data-root and k3s containerd relocated to sda4);
    TX2 LAN IP secured via router DHCP reservation (confirmed 2026-10-03).
 10. **Not sized for:** 7B+ LLM inference, intraday/high-frequency data, multi-user load,
     horizontal Postgres (Citus = overkill). Revisit triggers: RTX 3090 WoL box, 4th Pi
@@ -937,7 +938,7 @@ Also on the admin box: `~/.kube/pi-cluster.yaml` (kubeconfig, server `<pi2-ip>`)
 
 | Path | Disk | Contents |
 |---|---|---|
-| `/` | eMMC 28 GB (79% used) | Ubuntu 18.04 + L4T; `/usr` CUDA/cuDNN/TensorRT stack (~10 GB); `/var/lib/rancher/k3s` containerd (6.2 GB: sentiment 2.05 GB + timescaledb images) |
+| `/` | eMMC 28 GB (54% used) | Ubuntu 18.04 + L4T; `/usr` CUDA/cuDNN/TensorRT stack (~10 GB); `/var/lib/rancher/k3s/agent/containerd` is a bind mount of `/mnt/tx2-ssd/k3s-containerd` (since 2026-10-10) |
 | `/mnt/tx2-ssd` | sda4 157 GB ext3 (fixed fstab mount, by UUID, `nofail`) | `pgdata/` — **TimescaleDB data** (PV hostPath); `docker/` — **docker data-root** (since 2026-10-03; all image builds land here); `application/`, `images/` — pre-existing NAS data (untouched) |
 | `/etc/systemd/system/k3s-agent.service` (+ `.env`) | eMMC | agent unit: `--disable-apiserver-lb --kubelet-arg=fail-cgroupv1=false --kubelet-arg=cgroup-driver=cgroupfs --node-ip <tx2-ip>`; node token in `.env` |
 | `/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d/nvidia.toml` | eMMC | nvidia runtime + `SystemdCgroup=false` for runc AND nvidia (kubelet must match — else `kubectl exec` breaks) |

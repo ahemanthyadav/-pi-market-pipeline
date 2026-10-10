@@ -144,6 +144,10 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   schema/backup change too. Detail: ops manual §9.
 - [ ] 🔄 After ANY TX2 apt work: re-verify iptables wrappers (ops manual §8).
 - [ ] 🔄 eMMC >85% alert → prune TX2 docker cruft (ops manual §7 step 7).
+- [x] ✅ 2026-10-10 TX2 k3s containerd store moved to the SSD (bind mount), eMMC
+  copy + 19 stale tarballs deleted: eMMC 84% → 54%. Detail: ops manual §2.
+- [x] ✅ 2026-10-10 `local/headline-ner:v3` was missing from the TX2 k3s store
+  (`ErrImageNeverPull`); imported from the tarball, the pending job Completed.
 
 ## 6. Icebox 🧊 (deliberately declined — revisit triggers noted)
 

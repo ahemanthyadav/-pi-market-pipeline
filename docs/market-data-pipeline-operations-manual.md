@@ -85,12 +85,23 @@ re-runs and late corrections overwrite cleanly, never duplicate.
 - iptables wrappers `/sbin/iptables-restore` + `/sbin/ip6tables-restore`
   backed by `/sbin/xtables-multi.orig` — re-verify after ANY apt work on the TX2.
 - L4T R32.7.5 / JetPack 4.6.1 / CUDA 10.2 (host); kernel 4.9.337-tegra (cgroup v1).
-- Storage: 28 GB eMMC (OS + k3s containerd — 79% used after the 2026-10-03 cleanup;
+- Storage: 28 GB eMMC (OS only since 2026-10-10 — 54% used; was 79% after the 2026-10-03 cleanup;
   CUDA/cuDNN/TensorRT libs in /usr are ~10 GB of that) + 224 GB USB SSD `sda4` →
   fixed fstab mount `/mnt/tx2-ssd` (by UUID, `nofail`; backup
   `/etc/fstab.bak-20260929`). **Docker data-root moved to `/mnt/tx2-ssd/docker`
   (2026-10-03, `/etc/docker/daemon.json`)** — image builds no longer touch eMMC
   at all; golden sentiment image migrated intact, build smoke-tested.
+- **k3s containerd store bind-mounted from the SSD (2026-10-10; verified same day —
+  agent Ready, timescaledb Running, sentiment-scorer Completed on GPU,
+  `kubectl exec` + psql OK):** `/var/lib/rancher/k3s/agent/containerd` ←
+  `/mnt/tx2-ssd/k3s-containerd` (fstab bind line, backup `/etc/fstab.bak-20261010`);
+  drop-in `/etc/systemd/system/k3s-agent.service.d/10-ssd-containerd.conf`
+  (`RequiresMountsFor=` — the agent refuses to start without the store mounted;
+  the unit file and its flags are untouched). The rsync'd copy matched the source
+  (49,022 files, zero diffs). The eMMC copy and 19 stale image tarballs in
+  `/home/ahytx2` were then deleted: **eMMC 84% → 54%** (14 G of 28 G). The TX2 now
+  cannot run any pod without the USB SSD. To revert: stop agent, `umount`, remove
+  the fstab line + drop-in, rsync the store back.
 
 ### Pi agents
 

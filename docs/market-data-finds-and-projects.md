@@ -76,7 +76,7 @@ fixed and the pod re-created.
 | CPU | 1–3% used, load 0.17 (6 cores) | Wide open for batch inference |
 | GPU | 0% — idle; sentiment runs CPU by design | Available, **but see the catch** |
 | RAM | 5.9 GB available of 7.86 (DB capped 2 Gi) | ~4–5 GB for new ML outside the 00:15–00:30 UTC sentiment window (which takes up to 4 Gi) |
-| eMMC | 79% after cleanup; builds relocated to sda4 | No longer a constraint for images |
+| eMMC | 54% (2026-10-10: docker + k3s containerd both on sda4) | No longer a constraint for images |
 | sda4 | 145 GB free (DB + docker data-root) | Room for models, embeddings stores, build churn |
 
 **The GPU catch (hard ceiling):** TX2 is Pascal (sm_62) + CUDA 10.2 on JetPack 4.6.1 —
