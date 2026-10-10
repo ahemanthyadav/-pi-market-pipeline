@@ -146,7 +146,7 @@ data:
     );
     INSERT INTO ticker_names (ticker, name) VALUES
       ('^GSPC','S&P 500'), ('^IXIC','Nasdaq Composite'), ('^DJI','Dow Jones'),
-      ('^RUT','Russell 2000'), ('^VIX','VIX (US)'),
+      ('^RUT','Russell 2000'), ('^RUI','Russell 1000'), ('^VIX','VIX (US)'),
       ('^FTSE','FTSE 100'), ('^GDAXI','DAX 40'), ('^FCHI','CAC 40'),
       ('^STOXX50E','Euro Stoxx 50'), ('^IBEX','IBEX 35'), ('FTSEMIB.MI','FTSE MIB'),
       ('^SSMI','Swiss Market Index'), ('^AEX','AEX'),
@@ -306,3 +306,15 @@ data:
     );
     CREATE INDEX IF NOT EXISTS idx_headline_events_type_ts
       ON headline_events (event_type, ts DESC);
+  08-watchlist.sql: |
+    -- Watchlist / holdings (2026-10-10). Plain table, single user. The ONLY
+    -- writer is the Telegram listener's /watch command (manifests/telegram/
+    -- bot.py); digest.py and alerts.py read it. qty + avg_cost NULL = watch
+    -- only; avg_cost is per share in the stock's own currency.
+    CREATE TABLE IF NOT EXISTS watchlist (
+      symbol TEXT PRIMARY KEY,          -- universe_constituents.symbol form (TCS.NS, AAPL)
+      qty DOUBLE PRECISION,
+      avg_cost DOUBLE PRECISION,
+      note TEXT,
+      added_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
