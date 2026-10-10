@@ -15,6 +15,17 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 
 ## 1. Immediate (next checkpoint: tomorrow's `/health`)
 
+- [ ] 🔶 **2026-10-10 second wedge during the screener v9 rollout (IN PROGRESS, opened ~13:30 UTC).** Sequence: v9 built on
+  TX2 and imported on pi3 (63 s), then pi1's tarball push/import → API `ServiceUnavailable`, pi1 `ctr` EOF; pi1/pi2 SSH
+  banner resets with ping alive, pi3 off the network; pi2 + pi3 later came back (~17:41 UTC, "up 0 min"); **pi1 still
+  NotReady with no ping at 17:50 UTC — needs a physical power check.** Cause unproven (a 116 MB push + import on
+  Pis with a known PSU fault is the prime suspect — avoid bulk transfers until the power fix is accepted).
+  At 17:44 UTC **all 23 CronJobs were suspended** (all 23 were active before; list in
+  `/tmp/opencode/cronjob-suspend-before.txt`) — un-suspend **staggered**, not all at once, once pi2 load < 2 and
+  pi1 is back. Live CronJobs still reference `screener:v8`; `screener:v9` exists only in TX2 docker, pi3's containerd and
+  tarballs (TX2 `/home/ahytx2/screener-v9.tar.gz`, workstation `/tmp/opencode/`, and a leftover copy in `/home/pi1/`).
+  Resume the v9 rollout (DQ-2/DQ-3 fixes) only after: 4 nodes Ready, pi2 calm, power fix accepted.
+
 - [ ] 🔶 **2026-10-09→10 outage recovery (IN PROGRESS)** — pi2 wedged ~16 h;
   root cause found by the new stats logger: LIVE undervoltage+throttle on
   pi2 (0xd0005, 62 °C) — physical PSU/cable check pending. All CronJobs
@@ -102,21 +113,30 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   `local/telegram-digest:v3` (live tags verified); canary
   `telegram-alerts-validate` → `ALERTS-OK 3 line(s) sent`. Detail:
   telegram-bot doc §1a.
-- [ ] ⛔ **Apply Telegram v6 — blocked on pi2** (API refused from ~13:50 UTC
-  2026-10-10, mid-rollout; no SSH for 6+ min). Image `local/telegram-digest:v6`
-  is already imported on pi1 and the manifests carry the tag; live objects are
-  still on v5 (working). When the API answers:
-  `kubectl apply -f manifests/telegram/cronjob.yaml -f manifests/telegram/deployment.yaml`,
-  verify the three live tags, then in-pod check
-  `kubectl -n market-data exec deploy/telegram-bot -- python -c "import bot; print(bot.COMMANDS['nifty']('/nifty'))"`
-  and bump the manual's tag references v5 → v6.
+- [ ] 🔶 **Telegram v6 applied, not yet running — pi1 is down** (2026-10-10).
+  Deployment and both CronJobs carry `local/telegram-digest:v6` (live tags
+  verified); the bot pod is Pending because it is pinned to pi1, which has not
+  come back since the ~10:40 power cycle. When pi1 is Ready: confirm the pod
+  starts, then
+  `kubectl -n market-data exec deploy/telegram-bot -- python -c "import bot; print(bot.COMMANDS['nifty']('/nifty'))"`.
+- [ ] 🔶 **Import the new fetcher images on pi1** when it is back:
+  `yfinance-fetcher-v5.tar.gz` and `nse-fetcher-v4.tar.gz` are in
+  `/mnt/tx2-ssd/image-tarballs/` on tx2 and imported on pi3 only. Neither
+  CronJob is pinned, so a run scheduled onto pi1 before the import fails with
+  ErrImageNeverPull.
 - [x] ✅ 2026-10-10 **Index long-term reference** (v5): 1/3/5-year averages +
   low/normal/high reading on `/index` `/nifty` `/sensex` `/gold`; index history
   backfilled to 5 years (47,408 rows, no duplicates). Detail: telegram-bot doc
   §1a "v5 / v6". 95 unit tests.
-- [ ] 🔶 Index history beyond 5 years needs a fetcher that commits per time range
-  (one-transaction backfill hits the lock table) — then 10y+/monthly history for
-  a 5-year reading that includes a bear market.
+- [x] ✅ 2026-10-10 **Index history back to 1985** (292,387 rows, 38 tickers,
+  no duplicates, 299 chunks). Fetchers commit one calendar year per
+  transaction (`yfinance-fetcher:v5`, `nse-fetcher:v4`, canaried on the live
+  CronJob spec); `index_prices` creates one-year chunks from now on (approved,
+  recorded in `01-schema.sql`). Jobs `backfill-yfinance-deep` (250,309 rows,
+  3.5 min) and `backfill-nse-deep` (42,078 rows, 53 s). Cards verified against
+  the live DB. `tests/test_index_fetchers.py` (4 tests).
+- [ ] 🔶 `NIFTYMIDCAP150.NS` has only 2019 → today on Yahoo, so its reading
+  rests on two years of comparisons; a longer series needs NSE's own archive.
 - [ ] 🔶 pi2 keeps rebooting under shared-charger power (six+ times on
   2026-10-10, each taking API + cluster DNS + the bot down). Dedicated 5.1 V
   supply for pi2 is the fix; nothing in software will hold until then.
@@ -339,7 +359,7 @@ practice · ⚪ unproven here · ⚠️ citation not verified.
 
 ## 5. Recurring (never "done" — calendar items)
 
-- [ ] 🔄 Daily: `/health` checklist (ops manual §7). Automatic: 22 CronJobs.
+- [ ] 🔄 Daily: `/health` checklist (ops manual §7). Automatic: 23 CronJobs.
 - [ ] 🔄 Monthly (1st): fdi-watch logs DPIIT links → 5-min manual INSERT.
   Detail: ops manual §11.
 - [ ] 🔄 Quarterly: timed restore drill (`restore-drill-job.yaml`), after any

@@ -19,7 +19,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: fetcher
-              image: local/nse-fetcher:v3
+              image: local/nse-fetcher:v4
               imagePullPolicy: Never
               env:
                 - name: PGHOST

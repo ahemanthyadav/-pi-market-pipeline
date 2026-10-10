@@ -3,8 +3,9 @@
 > **Purpose:** everything about the Marketfredbot Telegram channel — how the
 > deployed digest + alert pipeline is wired, how to operate and change it, and
 > the tiered menu of two-way/next-step upgrades with their real constraints.
-> **Last verified: 2026-10-10** (v5 live and validated in-pod; v6 imported on
-> pi1 but not applied — §1a; commands not yet checked from the phone).
+> **Last verified: 2026-10-10** (v6 applied; bot pod Pending while pi1 is down — §1a and the tracker; index
+> cards validated against the live DB with 40 years of history; commands not
+> yet checked from the phone).
 > **v2 verification:** (digest live-fire-delivered; alert chain
 > validated end-to-end with a real FII firing; two-way listener deployed and
 > command-validated from the phone — /status /nifty /digest /scores answered).
@@ -119,22 +120,30 @@ driver import — unit-tested with a fake in `tests/test_stocks.py`) and
 ### v5 / v6 (2026-10-10) — long-term reference on the index card
 
 `/index`, `/nifty`, `/sensex`, `/gold` now end with a **Long-term reference**
-block: the 1-, 3- and 5-year average level with today's distance from each, the
+block: the 1-, 3-, 5- and 10-year average level with today's distance from each, the
 high on file, and a reading — very low / low / normal / high / very high.
 
 - **How the reading is made** (`stocks.long_term_block`): a rising index is
   almost always above its long average, so the level alone says nothing. The
-  reading ranks today's *gap to the 3-year average* against that same gap on
+  reading ranks today's *gap to the 5-year average* (3-year below 7.5 years of history) against that same gap on
   every earlier day (mid-rank percentile; bands at 10/25/75/90). Volatility
   indices (`^VIX`, `^INDIAVIX`) mean-revert, so their level is ranked directly.
-  With 7.5+ years of history it switches to the 5-year average by itself.
-- **History:** `index_prices` was backfilled from 1 to **5 years** for all 38
-  tickers. That leaves about two years of gap history behind each reading
-  (the message says "since 2024") — thin, and it contains no bear market.
-- **Why not 10 years:** the backfill writes in one transaction and
-  `index_prices` has 7-day chunks. The 5-year run held ~2,900 of ~6,400 lock
-  slots and took 26 minutes; 10 years would need ~6,000. Longer history needs
-  a fetcher that commits per time range (tracked).
+- **History:** `index_prices` holds everything Yahoo has from **1985** for all
+  38 tickers (292,387 rows, no duplicates; deep backfill 2026-10-10). Depth per
+  index is what the feed carries — S&P 500, Nikkei, FTSE 40 years (the card
+  reads at most 40); Sensex from 1997; Nifty 500 2005; Nifty 50 / Bank / IT
+  2007; India VIX 2008; gold/silver/crude futures 2000; Midcap 150 only 2019.
+  So every card except Midcap 150 now shows the 10-year average and bases its
+  reading on the 5-year average across at least two bear markets (Nifty 50:
+  "since 2012"; S&P 500: "since 1991"). Verified against the live DB: Nifty 50
+  very low, Sensex very low, Nifty 500 low, S&P 500 high, gold high, Nikkei
+  very high.
+- **How the depth became possible:** the first 5-year backfill wrote one
+  transaction across 7-day chunks and held ~2,900 of ~6,400 lock slots for 26
+  minutes. Two changes fixed that: the fetchers (`yfinance-fetcher:v5`,
+  `nse-fetcher:v4`) commit one calendar year per transaction, and
+  `index_prices` creates one-year chunks from now on (approved schema change,
+  `01-schema.sql`). The 40-year run took 3.5 minutes and added 37 chunks.
 - **Evidence:** distance from a long-run average is context, not a timing
   signal. Valuation measures (earnings-based, e.g. CAPE) have better backing
   for "expensive or cheap" but need index earnings, which no feed here carries.

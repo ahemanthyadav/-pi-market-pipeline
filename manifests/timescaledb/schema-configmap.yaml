@@ -20,6 +20,12 @@ data:
       volume BIGINT
     );
     SELECT create_hypertable('index_prices', 'ts', if_not_exists => TRUE);
+    -- 2026-10-10: one-year chunks for everything created from now on (the table is
+    -- ~10k rows a year). Needed for the 40-year index backfill: at the default
+    -- 7 days it would have added ~1,900 chunks, and the unbounded scans in
+    -- ta-compute / pipeline-health lock every chunk. Chunks that already exist
+    -- (2021-10 → 2026-10, weekly) are not rewritten. Idempotent.
+    SELECT set_chunk_time_interval('index_prices', INTERVAL '365 days');
 
     CREATE TABLE IF NOT EXISTS fx_rates (
       pair TEXT NOT NULL,

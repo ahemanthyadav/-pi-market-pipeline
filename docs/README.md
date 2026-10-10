@@ -7,7 +7,7 @@
 > with Grafana dashboards, Tailscale-only access, and no container registry.
 > **Status 2026-10-10 — ⚠ cluster degraded** since 2026-10-09 15:02 UTC (control-plane wedge; pi1 rejoined,
 > pi3 + TX2/DB not yet, API intermittent — ops manual §8, pending-tasks §1). Last fully healthy check
-> 2026-10-09: all 4 nodes Ready · **22 CronJobs** (per `manifests/`; telegram-digest 08:00 IST) · Telegram alert channel
+> 2026-10-09: all 4 nodes Ready · **23 CronJobs** (per `manifests/`; telegram-digest 08:00 IST) · Telegram alert channel
 > live (contact point + 3 rules) · **Telegram two-way listener live**
 > (Deployment telegram-bot: /status /vix /nifty /sensex /gold /fii /scores
 > /digest) · screener toolkit `local/screener:v8` ·
