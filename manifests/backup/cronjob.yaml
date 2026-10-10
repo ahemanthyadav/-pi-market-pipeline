@@ -1,0 +1,61 @@
+# Daily pg_dump backup (Phase 8). 01:30 UTC, after all compute lands.
+# Pinned to pi3 (nodeSelector): reuses the cached timescale image (no new pull)
+# and writes dumps to pi3's USB SSD at /var/lib/market-data/backups (hostPath,
+# created on first run). Keeps 7 daily dumps, prunes older. Custom format
+# (-Fc) + restore with pg_restore. DB itself lives on the TX2's sda4, so this
+# is a true second copy on independent hardware.
+# Restore drill (from any pod with the image + Secret):
+#   pg_restore -h timescaledb -U postgres -d postgres -c /backups/<file>.dump
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pg-backup
+  namespace: market-data
+spec:
+  schedule: "30 1 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          nodeSelector:
+            kubernetes.io/hostname: pi3
+          containers:
+            - name: backup
+              image: timescale/timescaledb:2.30.1-pg16
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+              command:
+                - sh
+                - -c
+                - |
+                  set -e
+                  mkdir -p /backups
+                  FILE=/backups/marketdata-$(date -u +%F).dump
+                  pg_dump -h timescaledb -U postgres -d postgres -Fc -f "$FILE"
+                  ls -t /backups/marketdata-*.dump | tail -n +8 | xargs -r rm -f
+                  ls -lh /backups/ | tail -8
+                  echo BACKUP-OK
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+              resources:
+                requests:
+                  memory: 128Mi
+                  cpu: 100m
+                limits:
+                  memory: 512Mi
+                  cpu: 500m
+          volumes:
+            - name: backups
+              hostPath:
+                path: /var/lib/market-data/backups
+                type: DirectoryOrCreate

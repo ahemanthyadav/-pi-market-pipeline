@@ -1,0 +1,11 @@
+# RuntimeClass exposing the TX2's NVIDIA container runtime to k3s pods.
+# Requires the containerd drop-in on ahytx2-desktop:
+#   /var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d/nvidia.toml
+# (Phase 1 of market-data-pipeline-plan.md). Pods opt in via
+# `runtimeClassName: nvidia` (no device-plugin needed — the whole GPU node
+# is dedicated to one job at a time via nodeSelector + taint toleration).
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia
+handler: nvidia

@@ -1,0 +1,298 @@
+# Datasource (TimescaleDB via postgres plugin) + dashboard file provider.
+# Password injected via $POSTGRES_PASSWORD env expansion (from Secret).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-provisioning
+  namespace: market-data
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: TimescaleDB
+        uid: timescaledb
+        type: postgres
+        access: proxy
+        url: timescaledb:5432
+        database: postgres
+        user: postgres
+        secureJsonData:
+          password: $POSTGRES_PASSWORD
+        jsonData:
+          database: postgres
+          sslmode: disable
+          maxOpenConns: 5
+          maxIdleConns: 2
+          timescaledb: true
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: market-data
+        orgId: 1
+        folder: Market Data
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        allowUiUpdates: true
+        options:
+          path: /etc/grafana/provisioning/dashboards-files
+  # Alerting (2026-10-09, ADR 0009): Telegram contact point + pipeline rules.
+  # Token/chat ID enter via $TELEGRAM_* env expansion from the telegram-bot
+  # Secret — same mechanism as $POSTGRES_PASSWORD above; deployment config,
+  # never hard-coded logic (roadmap §5). Contact-point env expansion and rule
+  # firing BOTH need a live check before trusting them (F1: API-pass != UI-works).
+  alerting.yaml: |
+    apiVersion: 1
+    contactPoints:
+      - orgId: 1
+        name: telegram
+        receivers:
+          - uid: telegram-cp
+            type: telegram
+            settings:
+              # chatid must be a LITERAL in the rendered file, not $TELEGRAM_CHAT_ID:
+              # Grafana's env expansion re-types digit-only values as numbers even
+              # quoted ("cannot unmarshal number ... of type string", 2026-10-09).
+              # The repo copy carries a placeholder (no personal id in git); apply
+              # with ops-tools/apply-grafana-provisioning.sh, which renders the real
+              # id from the live Secret `telegram-bot` (key chat-id). Never
+              # `kubectl apply -f` this file directly. The token stays env-expanded.
+              chatid: "__TELEGRAM_CHAT_ID__"
+              bottoken: "$TELEGRAM_BOT_TOKEN"
+            disableResolveMessage: false
+    # Route tree now that the telegram contact point exists — the first
+    # attempt (2026-10-09) failed invalidFormat while the contact point was
+    # broken by the chatid typing bug; receiver must exist first.
+    policies:
+      - orgId: 1
+        receiver: telegram
+        group_by:
+          - grafana_folder
+          - alertname
+    groups:
+      - orgId: 1
+        name: pipeline
+        folder: Market Data
+        interval: 10m
+        rules:
+          - uid: stale-feed
+            title: Stale pipeline feed
+            condition: B
+            for: 0m
+            noDataState: OK
+            execErrState: OK
+            data:
+              - refId: A
+                relativeTimeRange:
+                  from: 600
+                  to: 0
+                datasourceUid: timescaledb
+                model:
+                  datasource:
+                    type: postgres
+                    uid: timescaledb
+                  editorMode: code
+                  format: table
+                  rawQuery: true
+                  rawSql: "SELECT count(*) AS value FROM pipeline_heartbeat WHERE fresh = false"
+                  refId: A
+              - refId: B
+                relativeTimeRange:
+                  from: 600
+                  to: 0
+                datasourceUid: __expr__
+                model:
+                  conditions:
+                    - evaluator:
+                        params:
+                          - 0
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                          - B
+                      reducer:
+                        params: []
+                        type: last
+                      type: query
+                  datasource:
+                    type: __expr__
+                    uid: __expr__
+                  expression: A
+                  intervalMs: 1000
+                  maxDataPoints: 43200
+                  refId: B
+                  type: threshold
+            annotations:
+              summary: "Stale feeds: {{ $values.B }}"
+              description: "One or more feeds report fresh=false in pipeline_heartbeat. Run /health; runbook is ops manual §8."
+            labels:
+              severity: warning
+          - uid: vix-spike
+            title: VIX above 25
+            condition: B
+            for: 0m
+            noDataState: OK
+            execErrState: OK
+            data:
+              - refId: A
+                relativeTimeRange:
+                  from: 600
+                  to: 0
+                datasourceUid: timescaledb
+                model:
+                  datasource:
+                    type: postgres
+                    uid: timescaledb
+                  editorMode: code
+                  format: table
+                  rawQuery: true
+                  rawSql: "SELECT close AS value FROM index_prices WHERE ticker = '^VIX' ORDER BY ts DESC LIMIT 1"
+                  refId: A
+              - refId: B
+                relativeTimeRange:
+                  from: 600
+                  to: 0
+                datasourceUid: __expr__
+                model:
+                  conditions:
+                    - evaluator:
+                        params:
+                          - 25
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                          - B
+                      reducer:
+                        params: []
+                        type: last
+                      type: query
+                  datasource:
+                    type: __expr__
+                    uid: __expr__
+                  expression: A
+                  intervalMs: 1000
+                  maxDataPoints: 43200
+                  refId: B
+                  type: threshold
+            annotations:
+              summary: "VIX: {{ $values.B }}"
+              description: "VIX close above 25 (threshold tunable in this file — watch a few weeks, then adjust)."
+            labels:
+              severity: warning
+          - uid: fii-outflow
+            title: Large FII outflow
+            condition: B
+            for: 0m
+            noDataState: OK
+            execErrState: OK
+            data:
+              - refId: A
+                relativeTimeRange:
+                  from: 600
+                  to: 0
+                datasourceUid: timescaledb
+                model:
+                  datasource:
+                    type: postgres
+                    uid: timescaledb
+                  editorMode: code
+                  format: table
+                  rawQuery: true
+                  rawSql: "SELECT amount AS value FROM capital_flows WHERE flow_type = 'FII' AND direction = 'net' ORDER BY ts DESC LIMIT 1"
+                  refId: A
+              - refId: B
+                relativeTimeRange:
+                  from: 600
+                  to: 0
+                datasourceUid: __expr__
+                model:
+                  conditions:
+                    - evaluator:
+                        params:
+                          - -3000
+                        type: lt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                          - B
+                      reducer:
+                        params: []
+                        type: last
+                      type: query
+                  datasource:
+                    type: __expr__
+                    uid: __expr__
+                  expression: A
+                  intervalMs: 1000
+                  maxDataPoints: 43200
+                  refId: B
+                  type: threshold
+            annotations:
+              summary: "FII net: {{ $values.B }} Rs cr"
+              description: "Latest FII net below -3000 Rs cr (threshold tunable in this file)."
+            labels:
+              severity: warning
+          # Sentiment-drop rule — finds Tier 1 #1's last candidate, added
+          # 2026-10-09. Same 7-day AVG(sentiment_score) the digest reports
+          # (digest.py), so alert and digest can never disagree on the number.
+          # Threshold -0.15 is a first guess like VIX 25 / FII -3000 — tune
+          # from real firings per telegram-bot doc §3.3.
+          - uid: sentiment-drop
+            title: Sentiment drop
+            condition: B
+            for: 0m
+            noDataState: OK
+            execErrState: OK
+            data:
+              - refId: A
+                relativeTimeRange:
+                  from: 600
+                  to: 0
+                datasourceUid: timescaledb
+                model:
+                  datasource:
+                    type: postgres
+                    uid: timescaledb
+                  editorMode: code
+                  format: table
+                  rawQuery: true
+                  rawSql: "SELECT AVG(sentiment_score) AS value FROM news_sentiment WHERE ts > now() - interval '7 days'"
+                  refId: A
+              - refId: B
+                relativeTimeRange:
+                  from: 600
+                  to: 0
+                datasourceUid: __expr__
+                model:
+                  conditions:
+                    - evaluator:
+                        params:
+                          - -0.15
+                        type: lt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                          - B
+                      reducer:
+                        params: []
+                        type: last
+                      type: query
+                  datasource:
+                    type: __expr__
+                    uid: __expr__
+                  expression: A
+                  intervalMs: 1000
+                  maxDataPoints: 43200
+                  refId: B
+                  type: threshold
+            annotations:
+              summary: "7-day sentiment: {{ $values.B }}"
+              description: "7-day news_sentiment mean below -0.15 (threshold tunable in this file). Compare with the digest's 7-day sentiment line — same query."
+            labels:
+              severity: warning

@@ -1,0 +1,264 @@
+"""Balanced multi-factor screener (Phase F, job 2 of 2) — plan §7 formulas.
+
+Per universe, per day: winsorize (1/99) → cross-sectional percentile ranks →
+factor scores → weighted composite → rank. Eligibility: coverage ≥ 0.60 and
+20d dollar volume ≥ universe p10. Point-in-time: fundamentals only as of
+latest metric ts (filing_published_at respected). Writes stock_scores +
+screening_runs. Factor components (v1): VALUE(pe,pb,ev_ebitda,fcf_yield)
+QUALITY(roe,operating_margin,−de) GROWTH(rev_cagr_3y,eps_growth_yoy)
+MOMENTUM(ret_6m,ret_12m,pos_52w,sma200_ratio) RISK(−vol_180d,−max_dd_252d).
+
+Connection discipline (house pattern, lesson 2026-10-04; applied here in v8
+after the SP500 leg died at the NIFTY→SP500 boundary 5 nights running
+[2026-10-05..09]: "psycopg.OperationalError: the connection is closed"):
+reads in autocommit (no idle-in-transaction window across the long EDGAR/
+metrics pulls), one atomic conn.transaction() per universe's writes, and a
+reconnect-and-retry of the universe leg on a dropped connection.
+"""
+import os
+import sys
+from datetime import datetime, timezone
+
+import pandas as pd
+import psycopg
+
+W = {"value": 0.25, "quality": 0.25, "growth": 0.20, "momentum": 0.20, "risk": 0.10}
+NEUTRAL = 0.5
+
+
+def connect():
+    conn = psycopg.connect(
+        host=os.environ.get("PGHOST", "timescaledb.market-data.svc.cluster.local"),
+        user=os.environ.get("PGUSER", "postgres"),
+        password=os.environ["PGPASSWORD"],
+        dbname=os.environ.get("PGDATABASE", "postgres"),
+    )
+    conn.autocommit = True  # reads never hold a transaction open
+    return conn
+
+
+def pct_rank(s: pd.Series, negate=False) -> pd.Series:
+    """Winsorize at 1/99 then percentile rank in [0,1]; higher = better."""
+    v = -s if negate else s
+    v = v.astype(float)
+    if v.notna().sum() < 3:
+        return pd.Series(NEUTRAL, index=s.index)
+    lo, hi = v.quantile(0.01), v.quantile(0.99)
+    v = v.clip(lo, hi)
+    return v.rank(pct=True).fillna(NEUTRAL)
+
+
+def latest_fundamentals(cur, symbols, as_of):
+    """{symbol: {metric: value}} — latest statement facts + live ratios ≤ as_of."""
+    cur.execute(
+        """SELECT DISTINCT ON (symbol, metric) symbol, metric, value
+           FROM stock_fundamentals
+           WHERE symbol = ANY(%s) AND ts <= %s AND filing_published_at <= %s
+           ORDER BY symbol, metric, ts DESC""",
+        (symbols, as_of, as_of))
+    out = {}
+    for sym, metric, val in cur.fetchall():
+        out.setdefault(sym, {})[metric] = val
+    return out
+
+
+def annual_series(cur, symbols, metric, as_of, years_back):
+    """{symbol: [(period_end, value)]} annualized: EDGAR mixes quarterly and
+    annual period ends; per calendar year of the period end, keep the max-end
+    entry (the 10-K for standard fiscal years). Returns DESC list."""
+    cur.execute(
+        """SELECT symbol, ts, value FROM stock_fundamentals
+           WHERE symbol = ANY(%s) AND metric = %s AND ts <= %s
+             AND filing_published_at <= %s
+           ORDER BY symbol, ts DESC""",
+        (symbols, metric, as_of, as_of))
+    raw = {}
+    for sym, ts, val in cur.fetchall():
+        raw.setdefault(sym, []).append((ts, val))
+    series = {}
+    for sym, entries in raw.items():
+        per_year = {}
+        for ts, val in entries:
+            y = ts.year
+            if y not in per_year or ts > per_year[y][0]:
+                per_year[y] = (ts, val)
+        series[sym] = [per_year[y] for y in sorted(per_year, reverse=True)]
+    return series
+
+
+def latest_metrics(cur, symbols):
+    """{symbol: {metric: value}} at each symbol's max ts."""
+    cur.execute(
+        """SELECT DISTINCT ON (symbol) symbol, ts FROM stock_metrics_daily
+           WHERE symbol = ANY(%s) ORDER BY symbol, ts DESC""", (symbols,))
+    stamps = {r[0]: r[1] for r in cur.fetchall()}
+    if not stamps:
+        return {}, {}
+    cur.execute(
+        """SELECT symbol, metric, value FROM stock_metrics_daily
+           WHERE symbol = ANY(%s) AND ts = ANY(%s)
+           ORDER BY symbol, metric, ts DESC""",
+        (list(stamps), list(set(stamps.values()))))
+    out = {}
+    for sym, metric, val in cur.fetchall():
+        if stamps.get(sym):
+            out.setdefault(sym, {})[metric] = val  # last row wins = newest ts
+    return out, stamps
+
+
+def run_universe(conn, universe, today, limit):
+    """One universe leg: read → score → atomic write. Raises OperationalError
+    on a dropped connection so the caller can reconnect and retry the leg."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT symbol FROM universe_constituents WHERE active AND universe=%s "
+                    "ORDER BY 1", (universe,))
+        symbols = [r[0] for r in cur.fetchall()]
+        if limit:
+            symbols = symbols[:limit]
+        if not symbols:
+            return (0, 0, 0)
+        fund = latest_fundamentals(cur, symbols, today)
+        mets, stamps = latest_metrics(cur, symbols)
+        rev = annual_series(cur, symbols, "total_revenue", today, 3)
+        eps = annual_series(cur, symbols, "eps", today, 1)
+
+        rows = []
+        for sym in symbols:
+            f, m = fund.get(sym, {}), mets.get(sym, {})
+            ts = stamps.get(sym)
+            if not ts:
+                continue
+            # derived fundamentals
+            rev_cagr = eps_g = None
+            hist = rev.get(sym, [])
+            if len(hist) >= 2:  # annualized: latest vs ~3 annual steps back
+                back = min(3, len(hist) - 1)
+                latest_v, old_v = hist[0][1], hist[back][1]
+                if old_v and old_v > 0 and latest_v and latest_v > 0:
+                    yrs = max((hist[0][0] - hist[back][0]).days / 365.25, 1)
+                    rev_cagr = (latest_v / old_v) ** (1 / yrs) - 1
+            e = eps.get(sym, [])
+            if len(e) >= 2 and e[1][1] and e[1][1] != 0:
+                eps_g = e[0][1] / e[1][1] - 1
+            de = None
+            if f.get("total_debt") is not None and f.get("shareholder_equity"):
+                if f["shareholder_equity"] != 0:
+                    de = f["total_debt"] / f["shareholder_equity"]
+            fcf_y = None
+            if f.get("fcf") is not None and f.get("market_cap"):
+                if f["market_cap"] != 0:
+                    fcf_y = f["fcf"] / f["market_cap"]
+            rows.append({
+                "symbol": sym, "ts": ts,
+                "pe": f.get("pe"), "pb": f.get("pb"), "ev_ebitda": f.get("ev_ebitda"),
+                "fcf_yield": fcf_y, "roe": f.get("roe"),
+                "operating_margin": f.get("operating_margin"), "de": de,
+                "rev_cagr_3y": rev_cagr, "eps_growth_yoy": eps_g,
+                "ret_6m": m.get("ret_6m"), "ret_12m": m.get("ret_12m"),
+                "pos_52w": m.get("pos_52w"), "sma200_ratio": m.get("sma200_ratio"),
+                "vol_180d": m.get("vol_180d"), "max_dd_252d": m.get("max_dd_252d"),
+                "dol_vol_20d": m.get("dol_vol_20d"),
+            })
+        df = pd.DataFrame(rows)
+        if df.empty:
+            print(f"WARN {universe}: no rows", flush=True)
+            return (0, 0, 0)
+
+        def rank(col, negate=False):  # noqa: F811 (kept: debugging helper)
+            return pct_rank(df[col], negate) if col in df else \
+                pd.Series(pd.NA, index=df.index)
+
+        P = {}
+        for col, neg in (("pe", True), ("pb", True), ("ev_ebitda", True),
+                         ("fcf_yield", False), ("roe", False),
+                         ("operating_margin", False), ("de", True),
+                         ("rev_cagr_3y", False), ("eps_growth_yoy", False),
+                         ("ret_6m", False), ("ret_12m", False), ("pos_52w", False),
+                         ("sma200_ratio", False), ("vol_180d", True),
+                         ("max_dd_252d", True)):
+            P[col] = pct_rank(df[col], neg) if col in df.columns else \
+                pd.Series([NEUTRAL] * len(df), index=df.index)
+            P[col] = P[col].where(df[col].notna(), NEUTRAL) if col in df.columns \
+                else P[col]
+        factors = {
+            "value": (P["pe"] + P["pb"] + P["ev_ebitda"] + P["fcf_yield"]) / 4,
+            "quality": (P["roe"] + P["operating_margin"] + P["de"]) / 3,
+            "growth": (P["rev_cagr_3y"] + P["eps_growth_yoy"]) / 2,
+            "momentum": (P["ret_6m"] + P["ret_12m"] + P["pos_52w"]
+                         + P["sma200_ratio"]) / 4,
+            "risk": (P["vol_180d"] + P["max_dd_252d"]) / 2,
+        }
+        # coverage: share of non-imputed components
+        comps = ["pe", "pb", "ev_ebitda", "fcf_yield", "roe", "operating_margin",
+                 "de", "rev_cagr_3y", "eps_growth_yoy", "ret_6m", "ret_12m",
+                 "pos_52w", "sma200_ratio", "vol_180d", "max_dd_252d"]
+        coverage = df[comps].notna().mean(axis=1)
+        composite = sum(W[k] * factors[k] for k in W) * 100
+        liq_floor = df["dol_vol_20d"].quantile(0.10) \
+            if "dol_vol_20d" in df else 0
+        eligible = (coverage >= 0.60) & (df["dol_vol_20d"].fillna(0) >= liq_floor)
+        # rank among eligible only
+        rank_series = pd.Series(pd.NA, index=df.index, dtype="Int64")
+        el_pos = composite[eligible].rank(ascending=False, method="min")
+        rank_series[eligible] = el_pos.astype(int).values
+        n_short = int((rank_series <= 25).sum())
+        with conn.transaction():  # single atomic write per universe
+            with conn.cursor() as c2:
+                for i in df.index:
+                    c2.execute("DELETE FROM stock_scores WHERE symbol=%s AND ts=%s",
+                               (df.at[i, "symbol"], df.at[i, "ts"]))
+                    c2.execute(
+                        "INSERT INTO stock_scores (symbol, ts, universe, value_score, "
+                        "quality_score, growth_score, momentum_score, risk_score, "
+                        "composite, rank, coverage, eligible) VALUES "
+                        "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (df.at[i, "symbol"], df.at[i, "ts"], universe,
+                         float(factors["value"].at[i]), float(factors["quality"].at[i]),
+                         float(factors["growth"].at[i]),
+                         float(factors["momentum"].at[i]), float(factors["risk"].at[i]),
+                         float(composite.at[i]),
+                         int(rank_series.at[i]) if pd.notna(rank_series.at[i]) else None,
+                         float(coverage.at[i]), bool(eligible.at[i])))
+                c2.execute("DELETE FROM screening_runs WHERE ts=%s AND universe=%s",
+                           (today, universe))
+                c2.execute("INSERT INTO screening_runs (ts, universe, n_scored, "
+                            "n_eligible, n_shortlisted, params_hash) VALUES "
+                            "(%s,%s,%s,%s,%s,%s)",
+                            (today, universe, len(df), int(eligible.sum()), n_short,
+                             "v1-balanced-25/25-20-20-10"))
+        print(f"{universe}: scored={len(df)} eligible={int(eligible.sum())} "
+              f"shortlist={n_short} composite[min/max]="
+              f"{composite.min():.1f}/{composite.max():.1f}", flush=True)
+        return (len(df), int(eligible.sum()), n_short)
+
+
+def main() -> int:
+    limit = int(os.environ.get("UNIVERSE_LIMIT", "0") or 0) or None
+    today = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+    conn = connect()
+    with conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT universe FROM universe_constituents WHERE active")
+        universes = [r[0] for r in cur.fetchall()]
+    total = (0, 0, 0)
+    for universe in universes:
+        try:
+            res = run_universe(conn, universe, today, limit)
+        except psycopg.OperationalError as exc:
+            print(f"WARN {universe} conn dropped ({exc}); reconnecting, retrying "
+                  f"leg once", flush=True)
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+            conn = connect()
+            res = run_universe(conn, universe, today, limit)  # retry once, idempotent
+        total = tuple(a + b for a, b in zip(total, res))
+    conn.close()
+    print(f"SCREENER-OK scored={total[0]} eligible={total[1]} "
+          f"shortlisted={total[2]}", flush=True)
+    return 0 if total[0] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

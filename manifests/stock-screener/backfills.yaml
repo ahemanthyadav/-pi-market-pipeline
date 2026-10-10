@@ -1,0 +1,71 @@
+# One-shot Jobs (Phases D & E bootstrap). Run manually on quiet windows:
+#   kubectl apply -f backfills.yaml
+# Both are resumable via the job_state cursor — rerun after any interruption.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backfill-stock-prices-max
+  namespace: market-data
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: prices
+          image: local/screener:v8
+          imagePullPolicy: Never
+          command: ["python", "stock_prices.py"]
+          env:
+            - name: BACKFILL
+              value: "max"
+            - name: CHUNK
+              value: "50"
+            - name: PGHOST
+              value: timescaledb.market-data.svc.cluster.local
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: timescaledb-auth
+                  key: password
+            - name: PGDATABASE
+              value: postgres
+          resources:
+            requests: {memory: 256Mi, cpu: 100m}
+            limits: {memory: 1Gi, cpu: 500m}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backfill-stock-fundamentals
+  namespace: market-data
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: fundamentals
+          image: local/screener:v8
+          imagePullPolicy: Never
+          command: ["python", "stock_fundamentals.py"]
+          env:
+            - name: BACKFILL
+              value: "1"
+            - name: PGHOST
+              value: timescaledb.market-data.svc.cluster.local
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: timescaledb-auth
+                  key: password
+            - name: PGDATABASE
+              value: postgres
+          resources:
+            requests: {memory: 256Mi, cpu: 100m}
+            limits: {memory: 1Gi, cpu: 500m}

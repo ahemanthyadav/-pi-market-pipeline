@@ -1,0 +1,104 @@
+# Grafana (Phase 7). Single replica pinned to pi3 (kept off the fragile pi2
+# control-plane; TX2 is tainted for GPU work). Stateless by design: dashboards
+# and datasource are file-provisioned from ConfigMaps, so pod restarts lose
+# nothing but unsaved UI edits. Reach it tailnet-only via:
+#   kubectl port-forward -n market-data svc/grafana 3000:3000
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: market-data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: pi3
+      containers:
+        - name: grafana
+          image: grafana/grafana:12.2.0
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: admin-user
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: admin-password
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            - name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH
+              value: /etc/grafana/provisioning/dashboards-files/overview.json
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: timescaledb-auth
+                  key: password
+            # Telegram contact point (ADR 0009) — same Secret the digest uses.
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: telegram-bot
+                  key: bot-token
+            - name: TELEGRAM_CHAT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: telegram-bot
+                  key: chat-id
+          volumeMounts:
+            - name: provisioning
+              mountPath: /etc/grafana/provisioning
+            - name: dashboards
+              mountPath: /etc/grafana/provisioning/dashboards-files
+            - name: data
+              mountPath: /var/lib/grafana
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 512Mi
+              cpu: 500m
+      volumes:
+        - name: provisioning
+          configMap:
+            name: grafana-provisioning
+            items:
+              - key: datasource.yaml
+                path: datasources/datasource.yaml
+              - key: dashboards.yaml
+                path: dashboards/dashboards.yaml
+              - key: alerting.yaml
+                path: alerting/alerting.yaml
+        - name: dashboards
+          configMap:
+            name: grafana-dashboards
+        - name: data
+          hostPath:
+            path: /var/lib/market-data/grafana
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: market-data
+spec:
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: http
+      name: http

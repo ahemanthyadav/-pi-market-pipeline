@@ -1,0 +1,67 @@
+# Daily Telegram market digest (findings Tier 1 #6, deployed 2026-10-09).
+# 08:00 IST — runs after every feed has landed for the day (last is
+# pipeline-health at 01:45 node-local; the digest reads it for stale warnings).
+#
+# Deliberate deviations from house defaults, both documented in ADR 0009:
+#   - timeZone: Asia/Kolkata — the ONLY job with an explicit timezone. Existing
+#     schedules are node-local PDT (find F20) and left as-is; this is a NEW job,
+#     so it states its intent instead of inheriting the accident.
+#   - nodeSelector pi1 — roadmap §5: pinning reduces the image-import burden to
+#     one node, and pi2 (1 GB control-plane) stays light by policy.
+#
+# Secret is applied out-of-band (AGENTS.md: secrets never enter files or chat):
+#   kubectl -n market-data create secret generic telegram-bot \
+#     --from-literal=bot-token=<token> --from-literal=chat-id=<chat_id>
+# Validate with:
+#   kubectl create job -n market-data telegram-digest-test --from=cronjob/telegram-digest
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: telegram-digest
+  namespace: market-data
+spec:
+  schedule: "0 8 * * *"
+  timeZone: Asia/Kolkata
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          nodeSelector:
+            kubernetes.io/hostname: pi1
+          containers:
+            - name: digest
+              image: local/telegram-digest:v2
+              imagePullPolicy: Never
+              env:
+                - name: PGHOST
+                  value: timescaledb.market-data.svc.cluster.local
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+                - name: PGDATABASE
+                  value: postgres
+                - name: TELEGRAM_BOT_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: telegram-bot
+                      key: bot-token
+                - name: TELEGRAM_CHAT_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: telegram-bot
+                      key: chat-id
+              resources:
+                requests:
+                  memory: 64Mi
+                  cpu: 50m
+                limits:
+                  memory: 128Mi
+                  cpu: 500m

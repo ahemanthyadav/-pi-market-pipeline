@@ -1,0 +1,43 @@
+# Daily technical indicators (Phase 5). 00:30 UTC, after all price fetches.
+# Needs >= 50 bars per ticker — run the one-shot backfills first (they seed a
+# year of history), otherwise this job legitimately computes nothing.
+# Image is node-local (Never pull, on pi1/pi2/pi3). Validate with:
+#   kubectl create job -n market-data ta-test --from=cronjob/ta-compute
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ta-compute
+  namespace: market-data
+spec:
+  schedule: "30 0 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: compute
+              image: local/ta-compute:v1
+              imagePullPolicy: Never
+              env:
+                - name: PGHOST
+                  value: timescaledb.market-data.svc.cluster.local
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+                - name: PGDATABASE
+                  value: postgres
+              resources:
+                requests:
+                  memory: 256Mi
+                  cpu: 100m
+                limits:
+                  memory: 1Gi
+                  cpu: 500m

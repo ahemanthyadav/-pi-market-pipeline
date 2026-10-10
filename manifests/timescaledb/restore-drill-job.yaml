@@ -1,0 +1,66 @@
+# Timed restore drill (roadmap §9 item 2). Reusable one-shot: restores the
+# newest pi3 backup dump into a THROWAWAY drill database, times it, compares
+# row counts with live, then drops the drill DB. Never touches live data.
+# Run on demand:
+#   kubectl apply -f restore-drill-job.yaml
+#   kubectl delete job restore-drill && kubectl create job restore-drill --from=... (or just apply)
+# Expect log to end with RESTORE-DRILL-OK + measured seconds.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: restore-drill
+  namespace: market-data
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: OnFailure
+      nodeSelector:
+        kubernetes.io/hostname: pi3   # backups live on pi3's SSD (hostPath below)
+      containers:
+        - name: drill
+          image: timescale/timescaledb:2.30.1-pg16
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: timescaledb-auth
+                  key: password
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              DUMP=$(ls -t /backups/marketdata-*.dump | head -1)
+              echo "drill source: $DUMP ($(du -h "$DUMP" | cut -f1))"
+              psql -h timescaledb -U postgres -d postgres \
+                -c "DROP DATABASE IF EXISTS drill_restore;" \
+                -c "CREATE DATABASE drill_restore;"
+              T0=$(date +%s)
+              pg_restore -h timescaledb -U postgres -d drill_restore "$DUMP"
+              T1=$(date +%s)
+              LIVE=$(psql -h timescaledb -U postgres -d postgres -tAc "SELECT count(*) FROM index_prices")
+              DRILL=$(psql -h timescaledb -U postgres -d drill_restore -tAc "SELECT count(*) FROM index_prices")
+              echo "restore took $((T1-T0))s | index_prices live=$LIVE drill=$DRILL"
+              if [ "$LIVE" != "$DRILL" ]; then
+                echo "ROW COUNT MISMATCH — investigate before dropping"; exit 1
+              fi
+              psql -h timescaledb -U postgres -d postgres -c "DROP DATABASE drill_restore;"
+              echo "drill DB dropped"
+              echo RESTORE-DRILL-OK
+          volumeMounts:
+            - name: backups
+              mountPath: /backups
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 512Mi
+              cpu: 500m
+      volumes:
+        - name: backups
+          hostPath:
+            path: /var/lib/market-data/backups
+            type: Directory

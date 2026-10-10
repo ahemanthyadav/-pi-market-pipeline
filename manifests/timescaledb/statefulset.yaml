@@ -1,0 +1,69 @@
+# TimescaleDB on the TX2. Single replica (this data volume does not need HA).
+# - Pinned to ahytx2-desktop (only node with the SSD) + tolerates the gpu taint.
+# - PGDATA subdir convention required by the upstream postgres entrypoint.
+# - Telemetry off. Memory capped at 2Gi (TX2 has 7.7G shared; sentiment gets ~4G).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: timescaledb
+  namespace: market-data
+spec:
+  serviceName: timescaledb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: timescaledb
+  template:
+    metadata:
+      labels:
+        app: timescaledb
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ahytx2-desktop
+      tolerations:
+        - key: gpu
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      containers:
+        - name: postgres
+          image: timescale/timescaledb:2.30.1-pg16
+          # max_locks_per_transaction=256 (2026-10-04): default 64 exhausted the
+          # shared lock table under concurrent hypertable access (fundamentals
+          # grind + counts + reads) → "out of shared memory" errors and killed
+          # backends. 256 is the standard TimescaleDB recommendation.
+          # NOTE: args (not command!) — command would replace docker-entrypoint.sh.
+          args: ["postgres", "-c", "max_locks_per_transaction=256"]
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: timescaledb-auth
+                  key: password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: TIMESCALEDB_TELEMETRY
+              value: "off"
+          ports:
+            - containerPort: 5432
+              name: postgres
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: 250m
+            limits:
+              memory: 2Gi
+              cpu: "1"
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: tx2-ssd
+        resources:
+          requests:
+            storage: 30Gi

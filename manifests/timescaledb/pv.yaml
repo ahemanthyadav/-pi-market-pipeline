@@ -1,0 +1,28 @@
+# Static hostPath volume for Postgres data on the TX2's USB SSD.
+# Host path /mnt/tx2-ssd/pgdata is a fixed fstab mount (UUID, nofail) on sda4 —
+# NOT a desktop auto-mount (see Phase 0 #4). Pinned to ahytx2-desktop via
+# nodeAffinity; the StatefulSet tolerates the node's gpu taint to land there.
+# ReclaimPolicy Retain: deleting the PVC never deletes your data.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: timescaledb-tx2-ssd
+spec:
+  capacity:
+    storage: 30Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: tx2-ssd
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - ahytx2-desktop
+  hostPath:
+    path: /mnt/tx2-ssd/pgdata
+    type: Directory

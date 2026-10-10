@@ -1,0 +1,56 @@
+# Headline entity/event extraction (findings Tier 1 #2; ADR 0010).
+# 00:45 node-local PDT — after the 00:15 FinBERT scorer (avoids its 4 Gi RAM
+# window on the shared TX2), well before the 02:00 screener chain.
+# TX2-only via nodeSelector + taint toleration, mirroring sentiment-scorer:
+# the job is CPU-trivial but the image is TX2-local (Never pull).
+# Full rescan each run (~seconds at current volume) — DELETE+INSERT per
+# headline keeps re-runs idempotent. Validate with:
+#   kubectl create job -n market-data headline-ner-test --from=cronjob/headline-ner
+# DB verify:
+#   SELECT entity_type, count(*) FROM headline_entities GROUP BY 1;
+#   SELECT event_type, count(*) FROM headline_events GROUP BY 1 ORDER BY 2 DESC;
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: headline-ner
+  namespace: market-data
+spec:
+  schedule: "45 0 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          nodeSelector:
+            hardware: gpu
+          tolerations:
+            - key: gpu
+              operator: Equal
+              value: "true"
+              effect: NoSchedule
+          containers:
+            - name: ner
+              image: local/headline-ner:v3
+              imagePullPolicy: Never
+              env:
+                - name: PGHOST
+                  value: timescaledb.market-data.svc.cluster.local
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+                - name: PGDATABASE
+                  value: postgres
+              resources:
+                requests:
+                  memory: 256Mi
+                  cpu: 250m
+                limits:
+                  memory: 512Mi
+                  cpu: "1"

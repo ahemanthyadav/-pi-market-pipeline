@@ -1,0 +1,31 @@
+# Monthly FDI watchdog (Phase 3, job #8). 09:00 UTC on the 1st.
+# Informational only: logs current DPIIT factsheet links for human review +
+# manual INSERT (procedure in the plan). Image is node-local (Never pull).
+# Validate with:
+#   kubectl create job -n market-data fdi-test --from=cronjob/fdi-watch
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fdi-watch
+  namespace: market-data
+spec:
+  schedule: "0 9 1 * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: watch
+              image: local/fdi-watch:v1
+              imagePullPolicy: Never
+              resources:
+                requests:
+                  memory: 64Mi
+                  cpu: 50m
+                limits:
+                  memory: 128Mi
+                  cpu: 250m

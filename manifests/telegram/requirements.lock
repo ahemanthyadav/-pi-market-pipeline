@@ -1,0 +1,7 @@
+# Resolved 2026-10-09 during the native aarch64 builds on the TX2 (v1 digest,
+# v1→v2 two-way listener; python:3.12-slim base, unpinned
+# `pip install "psycopg[binary]" requests`). Re-dumped at v2: identical.
+# Re-pin here if a future rebuild misbehaves.
+psycopg==3.3.6
+psycopg-binary==3.3.6
+requests==2.34.2

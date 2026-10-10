@@ -1,0 +1,43 @@
+# Daily FII/DII flows (Phase 3, job #7). 14:00 UTC = 19:30 IST, after NSE's
+# evening FII/DII publication. Image is node-local (Never pull, on pi1/pi2/pi3).
+# NSE changes its API periodically — on failure the job WARNs loudly; check logs
+# before assuming the pipeline is fed. Validate with:
+#   kubectl create job -n market-data fiidii-test --from=cronjob/fiidii-fetcher
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fiidii-fetcher
+  namespace: market-data
+spec:
+  schedule: "0 14 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: fetcher
+              image: local/fiidii-fetcher:v2
+              imagePullPolicy: Never
+              env:
+                - name: PGHOST
+                  value: timescaledb.market-data.svc.cluster.local
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+                - name: PGDATABASE
+                  value: postgres
+              resources:
+                requests:
+                  memory: 128Mi
+                  cpu: 100m
+                limits:
+                  memory: 256Mi
+                  cpu: 500m

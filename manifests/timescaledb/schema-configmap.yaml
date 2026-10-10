@@ -1,0 +1,308 @@
+# Pipeline schema, Phase 2 step 3. Applied by schema-job.yaml (idempotent —
+# every statement is IF NOT EXISTS, so re-running is always safe).
+# One hypertable per time-series category; raw_headlines is a plain staging table.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: timescaledb-schema
+  namespace: market-data
+data:
+  01-schema.sql: |
+    CREATE EXTENSION IF NOT EXISTS timescaledb;
+
+    CREATE TABLE IF NOT EXISTS index_prices (
+      ticker TEXT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL,
+      open DOUBLE PRECISION,
+      high DOUBLE PRECISION,
+      low DOUBLE PRECISION,
+      close DOUBLE PRECISION,
+      volume BIGINT
+    );
+    SELECT create_hypertable('index_prices', 'ts', if_not_exists => TRUE);
+
+    CREATE TABLE IF NOT EXISTS fx_rates (
+      pair TEXT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL,
+      rate DOUBLE PRECISION
+    );
+    SELECT create_hypertable('fx_rates', 'ts', if_not_exists => TRUE);
+
+    CREATE TABLE IF NOT EXISTS commodity_prices (
+      commodity TEXT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL,
+      price DOUBLE PRECISION
+    );
+    SELECT create_hypertable('commodity_prices', 'ts', if_not_exists => TRUE);
+
+    CREATE TABLE IF NOT EXISTS bond_yields (
+      instrument TEXT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL,
+      yield DOUBLE PRECISION
+    );
+    SELECT create_hypertable('bond_yields', 'ts', if_not_exists => TRUE);
+
+    CREATE TABLE IF NOT EXISTS interest_rates (
+      rate_name TEXT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL,
+      value DOUBLE PRECISION
+    );
+    SELECT create_hypertable('interest_rates', 'ts', if_not_exists => TRUE);
+
+    CREATE TABLE IF NOT EXISTS news_sentiment (
+      headline TEXT NOT NULL,
+      source TEXT,
+      ts TIMESTAMPTZ NOT NULL,
+      sentiment_score DOUBLE PRECISION,
+      ticker_relevance TEXT
+    );
+    SELECT create_hypertable('news_sentiment', 'ts', if_not_exists => TRUE);
+
+    CREATE TABLE IF NOT EXISTS technical_indicators (
+      ticker TEXT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL,
+      indicator_name TEXT NOT NULL,
+      value DOUBLE PRECISION
+    );
+    SELECT create_hypertable('technical_indicators', 'ts', if_not_exists => TRUE);
+
+    CREATE TABLE IF NOT EXISTS capital_flows (
+      flow_type TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL,
+      amount DOUBLE PRECISION,
+      segment TEXT
+    );
+    SELECT create_hypertable('capital_flows', 'ts', if_not_exists => TRUE);
+
+    CREATE TABLE IF NOT EXISTS raw_headlines (
+      id BIGSERIAL PRIMARY KEY,
+      headline TEXT NOT NULL,
+      source TEXT,
+      ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+      scored BOOLEAN NOT NULL DEFAULT FALSE
+    );
+  02-constraints.sql: |
+    -- Unique indexes on natural keys (roadmap §3.3, applied 2026-10-03).
+    -- Every index includes the hypertable partition column (ts), as required.
+    -- Writers verified as row-level DELETE+INSERT (architecture doc §1), so
+    -- these only fire on genuine duplicates. Verified 0 pre-existing dups.
+    -- news_sentiment + raw_headlines intentionally EXCLUDED: INSERT-only
+    -- writers — a constraint there would turn benign crash-recovery reruns
+    -- into job failures until the scorers get ON CONFLICT clauses.
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_index_prices_ticker_ts
+      ON index_prices (ticker, ts);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_fx_rates_pair_ts
+      ON fx_rates (pair, ts);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_commodity_prices_key
+      ON commodity_prices (commodity, ts);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_bond_yields_instrument_ts
+      ON bond_yields (instrument, ts);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_interest_rates_name_ts
+      ON interest_rates (rate_name, ts);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_ta_ticker_ts_indicator
+      ON technical_indicators (ticker, ts, indicator_name);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_capital_flows_key
+      ON capital_flows (flow_type, segment, ts);
+  03-heartbeat.sql: |
+    -- Pipeline health heartbeat (roadmap §3.1). v1 semantics: one row per
+    -- FEED, written by the pipeline-health CronJob (01:45 UTC) from data-
+    -- freshness checks — detects missed jobs, stale feeds, dead sources.
+    -- v2 (per-JOB last_ok from inside each fetcher) lands with the next
+    -- fetcher image rebuilds. Plain table (tiny, no hypertable overhead).
+    CREATE TABLE IF NOT EXISTS pipeline_heartbeat (
+      feed TEXT PRIMARY KEY,
+      last_check TIMESTAMPTZ NOT NULL DEFAULT now(),
+      last_data_ts TIMESTAMPTZ,
+      fresh BOOLEAN NOT NULL DEFAULT FALSE,
+      rows_total BIGINT NOT NULL DEFAULT 0,
+      max_age_hours INT NOT NULL DEFAULT 96
+    );
+  04-intraday.sql: |
+    -- Intraday store for fast-moving instruments (2026-10-03): hourly
+    -- candles for gold/silver/oil futures + DXY. Deliberately SEPARATE from
+    -- index_prices — ta-compute iterates every index_prices ticker over
+    -- all rows, so hourly rows there would corrupt daily RSI/MACD math.
+    -- FX intraday goes to fx_rates instead (nothing computes over it).
+    CREATE TABLE IF NOT EXISTS intraday_prices (
+      ticker TEXT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL,
+      open DOUBLE PRECISION,
+      high DOUBLE PRECISION,
+      low DOUBLE PRECISION,
+      close DOUBLE PRECISION,
+      volume BIGINT
+    );
+    SELECT create_hypertable('intraday_prices', 'ts', if_not_exists => TRUE);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_intraday_prices_ticker_ts
+      ON intraday_prices (ticker, ts);
+  05-ticker-names.sql: |
+    -- Human-readable names next to tickers (2026-10-03). Reference table for
+    -- dashboards (Indices variable shows "Nifty 50 (^NSEI)" style labels)
+    -- and ad-hoc queries. ON CONFLICT DO UPDATE => re-runs refresh names.
+    CREATE TABLE IF NOT EXISTS ticker_names (
+      ticker TEXT PRIMARY KEY,
+      name TEXT NOT NULL
+    );
+    INSERT INTO ticker_names (ticker, name) VALUES
+      ('^GSPC','S&P 500'), ('^IXIC','Nasdaq Composite'), ('^DJI','Dow Jones'),
+      ('^RUT','Russell 2000'), ('^VIX','VIX (US)'),
+      ('^FTSE','FTSE 100'), ('^GDAXI','DAX 40'), ('^FCHI','CAC 40'),
+      ('^STOXX50E','Euro Stoxx 50'), ('^IBEX','IBEX 35'), ('FTSEMIB.MI','FTSE MIB'),
+      ('^SSMI','Swiss Market Index'), ('^AEX','AEX'),
+      ('^N225','Nikkei 225'), ('^HSI','Hang Seng'), ('000001.SS','Shanghai Composite'),
+      ('399001.SZ','Shenzhen Component'), ('^KS11','KOSPI'), ('^TWII','TAIEX'),
+      ('^AXJO','ASX 200'), ('^STI','Straits Times Index'),
+      ('^GSPTSE','S&P/TSX Composite'), ('^BVSP','Bovespa'), ('^MXX','IPC Mexico'),
+      ('DX-Y.NYB','US Dollar Index (DXY)'),
+      ('GC=F','Gold Futures'), ('SI=F','Silver Futures'), ('CL=F','WTI Crude Oil Futures'),
+      ('^NSEI','Nifty 50'), ('^NSEBANK','Nifty Bank'), ('^CNXIT','Nifty IT'),
+      ('^CNXPHARMA','Nifty Pharma'), ('NIFTYMIDCAP150.NS','Nifty Midcap 150'),
+      ('NIFTYSMLCAP250.NS','Nifty Smallcap 250'), ('^CRSLDX','Nifty 500'),
+      ('^BSESN','Sensex'),
+      ('^INDIAVIX','India VIX'),
+      ('USDINR=X','US Dollar / Indian Rupee'), ('EURUSD=X','Euro / US Dollar'),
+      ('GBPUSD=X','British Pound / US Dollar'), ('USDJPY=X','US Dollar / Japanese Yen'),
+      ('AUDUSD=X','Australian Dollar / US Dollar'), ('USDCHF=X','US Dollar / Swiss Franc'),
+      ('USDCNY=X','US Dollar / Chinese Yuan'), ('EURINR=X','Euro / Indian Rupee'),
+      ('GBPINR=X','British Pound / Indian Rupee'), ('JPYINR=X','Japanese Yen / Indian Rupee')
+    ON CONFLICT (ticker) DO UPDATE SET name = EXCLUDED.name;
+  06-stock-screener.sql: |
+    -- Stock screener layer v1 (2026-10-03, stock-screener-implementation-plan.md
+    -- Phase A). All tables NEW — nothing existing is touched. Security-master
+    -- fields + point-in-time filing_published_at adopted from the target
+    -- architecture doc; max-history design (no year cap).
+    CREATE TABLE IF NOT EXISTS universe_constituents (
+      universe   TEXT NOT NULL,            -- 'SP500' | 'NIFTY500'
+      symbol     TEXT NOT NULL,            -- Yahoo symbol (NSE = SYMBOL.NS)
+      name       TEXT NOT NULL,
+      sector     TEXT,
+      isin       TEXT,
+      cik        TEXT,                     -- zero-padded SEC CIK (S&P 500 only)
+      exchange   TEXT,
+      currency   TEXT,
+      active     BOOLEAN NOT NULL DEFAULT TRUE,
+      first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+      last_seen  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (universe, symbol)
+    );
+
+    -- Max-history daily OHLCV (US veterans 25-35y; ~4-6M rows ≈ ~1 GB in 30 GiB PV)
+    CREATE TABLE IF NOT EXISTS stock_prices (
+      symbol TEXT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL,
+      open DOUBLE PRECISION,
+      high DOUBLE PRECISION,
+      low DOUBLE PRECISION,
+      close DOUBLE PRECISION,
+      volume BIGINT
+    );
+    SELECT create_hypertable('stock_prices', 'ts', if_not_exists => TRUE);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_stock_prices_symbol_ts
+      ON stock_prices (symbol, ts);
+
+    -- Fundamentals: long/narrow, source-tagged, point-in-time.
+    -- ts = period END (statements) or fetch date (live ratios);
+    -- filing_published_at = when the fact first became knowable
+    -- (EDGAR 'filed'; yfinance legs = fetch date — our DB couldn't know earlier).
+    -- Deliberately plain table: revisions for this table keep last-write-wins
+    -- per (symbol, period, metric, source); append-only provenance is v2.
+    CREATE TABLE IF NOT EXISTS stock_fundamentals (
+      symbol TEXT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL,
+      metric TEXT NOT NULL,
+      value DOUBLE PRECISION,
+      source TEXT NOT NULL DEFAULT 'yfinance',
+      filing_published_at TIMESTAMPTZ,
+      PRIMARY KEY (symbol, ts, metric, source)
+    );
+
+    -- Price-derived daily metrics (ret_xm, vol, drawdown, 52w position, SMAs)
+    CREATE TABLE IF NOT EXISTS stock_metrics_daily (
+      symbol TEXT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL,
+      metric TEXT NOT NULL,
+      value DOUBLE PRECISION
+    );
+    SELECT create_hypertable('stock_metrics_daily', 'ts', if_not_exists => TRUE);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_stock_metrics_symbol_ts_metric
+      ON stock_metrics_daily (symbol, ts, metric);
+
+    -- Daily factor + composite scores (balanced screen, plan §7)
+    CREATE TABLE IF NOT EXISTS stock_scores (
+      symbol TEXT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL,
+      universe TEXT NOT NULL,
+      value_score DOUBLE PRECISION,
+      quality_score DOUBLE PRECISION,
+      growth_score DOUBLE PRECISION,
+      momentum_score DOUBLE PRECISION,
+      risk_score DOUBLE PRECISION,
+      composite DOUBLE PRECISION,
+      rank INT,
+      coverage DOUBLE PRECISION,
+      eligible BOOLEAN NOT NULL DEFAULT TRUE,
+      PRIMARY KEY (symbol, ts)
+    );
+    SELECT create_hypertable('stock_scores', 'ts', if_not_exists => TRUE);
+
+    -- Shortlist reports (markdown; '__digest__' = combined daily digest)
+    CREATE TABLE IF NOT EXISTS stock_reports (
+      symbol TEXT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL,
+      report_md TEXT NOT NULL,
+      PRIMARY KEY (symbol, ts)
+    );
+
+    -- Screener run log + resumable cursor for long fetches
+    CREATE TABLE IF NOT EXISTS screening_runs (
+      ts TIMESTAMPTZ NOT NULL,
+      universe TEXT NOT NULL,
+      n_scored INT,
+      n_eligible INT,
+      n_shortlisted INT,
+      params_hash TEXT,
+      PRIMARY KEY (ts, universe)
+    );
+    CREATE TABLE IF NOT EXISTS job_state (
+      job_name TEXT PRIMARY KEY,
+      last_key TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  07-headline-intelligence.sql: |
+    -- Headline entity/event extraction v1 (2026-10-09, findings Tier 1 #2;
+    -- ADR 0010). Gazetteer-first: entities are INSTRUMENT-linked matches from
+    -- ticker_names (deterministic, no model) — model-based NER is deferred to
+    -- the 3090 AI layer. Derived tables, rebuilt by the headline-ner CronJob
+    -- via DELETE+INSERT per headline_id (idempotent re-runs). Plain tables:
+    -- a few rows/headline/day — pipeline_heartbeat-style "tiny, no hypertable
+    -- overhead" reasoning. Additive only; rollback = DROP both tables.
+    CREATE TABLE IF NOT EXISTS headline_entities (
+      id BIGSERIAL PRIMARY KEY,
+      headline_id BIGINT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL,
+      symbol TEXT NOT NULL,
+      name TEXT NOT NULL,
+      entity_type TEXT NOT NULL,        -- 'stock' | 'index' | 'fx'
+      universe TEXT,                    -- NIFTY500 | SP500 | NULL
+      source TEXT,
+      UNIQUE (headline_id, symbol)
+    );
+    CREATE INDEX IF NOT EXISTS idx_headline_entities_symbol_ts
+      ON headline_entities (symbol, ts DESC);
+
+    -- Event rows from a v1 keyword taxonomy (results, rating_action, ma,
+    -- buyback, order_win, capex, ipo, dividend, debt_raise, regulatory, legal,
+    -- leadership, product, partnership, guidance, rate_decision). Extensible
+    -- in headline_ner.py — the taxonomy is code, not schema.
+    CREATE TABLE IF NOT EXISTS headline_events (
+      id BIGSERIAL PRIMARY KEY,
+      headline_id BIGINT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL,
+      event_type TEXT NOT NULL,
+      symbol TEXT,                      -- the company when exactly one is mentioned
+      source TEXT,
+      UNIQUE (headline_id, event_type, symbol)
+    );
+    CREATE INDEX IF NOT EXISTS idx_headline_events_type_ts
+      ON headline_events (event_type, ts DESC);

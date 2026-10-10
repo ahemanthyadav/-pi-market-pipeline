@@ -1,0 +1,43 @@
+# Daily indices batch fetcher (Phase 3, job #1). 22:30 UTC is after the US close
+# (21:00 UTC) and well after NSE close — all tracked markets have settled.
+# Image is node-local (see Dockerfile): Never pull, must exist on pi1/pi2/pi3.
+# History limits kept tiny to spare pi2's etcd. Validate any change with:
+#   kubectl create job -n market-data yf-test --from=cronjob/yfinance-fetcher
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: yfinance-fetcher
+  namespace: market-data
+spec:
+  schedule: "30 22 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: fetcher
+              image: local/yfinance-fetcher:v3
+              imagePullPolicy: Never
+              env:
+                - name: PGHOST
+                  value: timescaledb.market-data.svc.cluster.local
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+                - name: PGDATABASE
+                  value: postgres
+              resources:
+                requests:
+                  memory: 256Mi
+                  cpu: 100m
+                limits:
+                  memory: 512Mi
+                  cpu: 500m

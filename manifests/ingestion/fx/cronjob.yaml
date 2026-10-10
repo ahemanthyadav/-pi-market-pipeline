@@ -1,0 +1,41 @@
+# Daily FX rates (Phase 3, job #3). 23:00 UTC, after the global batch.
+# Image is node-local (Never pull, on pi1/pi2/pi3). Validate with:
+#   kubectl create job -n market-data fx-test --from=cronjob/fx-fetcher
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fx-fetcher
+  namespace: market-data
+spec:
+  schedule: "0 23 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: fetcher
+              image: local/fx-fetcher:v1
+              imagePullPolicy: Never
+              env:
+                - name: PGHOST
+                  value: timescaledb.market-data.svc.cluster.local
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+                - name: PGDATABASE
+                  value: postgres
+              resources:
+                requests:
+                  memory: 256Mi
+                  cpu: 100m
+                limits:
+                  memory: 512Mi
+                  cpu: 500m

@@ -1,0 +1,41 @@
+# One-shot 1y backfill for NSE indices. Image must be >= v2
+# (FETCH_PERIOD/BACKFILL support). Run once:
+#   kubectl apply -f backfill-nse.yaml
+# Idempotent — safe to re-run. Delete afterwards.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backfill-nse-1y
+  namespace: market-data
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: backfill
+          image: local/nse-fetcher:v2
+          imagePullPolicy: Never
+          env:
+            - name: PGHOST
+              value: timescaledb.market-data.svc.cluster.local
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: timescaledb-auth
+                  key: password
+            - name: PGDATABASE
+              value: postgres
+            - name: FETCH_PERIOD
+              value: 1y
+            - name: BACKFILL
+              value: "1"
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 200m
+            limits:
+              memory: 1Gi
+              cpu: "1"

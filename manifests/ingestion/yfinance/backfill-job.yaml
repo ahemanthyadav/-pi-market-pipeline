@@ -1,0 +1,42 @@
+# One-shot 1y backfill for the global batch (seeds history for TA/dashboards).
+# Image must be >= v3 (FETCH_PERIOD/BACKFILL support). Run once:
+#   kubectl apply -f backfill-yfinance.yaml
+# Idempotent (same DELETE+INSERT as daily runs) — safe to re-run. Delete the
+# Job object afterwards to keep history tidy.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backfill-yfinance-1y
+  namespace: market-data
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: backfill
+          image: local/yfinance-fetcher:v3
+          imagePullPolicy: Never
+          env:
+            - name: PGHOST
+              value: timescaledb.market-data.svc.cluster.local
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: timescaledb-auth
+                  key: password
+            - name: PGDATABASE
+              value: postgres
+            - name: FETCH_PERIOD
+              value: 1y
+            - name: BACKFILL
+              value: "1"
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 200m
+            limits:
+              memory: 1Gi
+              cpu: "1"

@@ -1,0 +1,53 @@
+# Daily FinBERT sentiment scoring (Phase 4). 00:15 UTC, after the 23:45 news
+# staging job. TX2-only via nodeSelector + taint toleration (CPU inference, so
+# no runtimeClass needed). Image is TX2-local (Never pull).
+# 4Gi limit leaves the DB (~2Gi) comfortable headroom in 7.7G shared RAM.
+# Validate with:
+#   kubectl create job -n market-data sentiment-test --from=cronjob/sentiment-scorer
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sentiment-scorer
+  namespace: market-data
+spec:
+  schedule: "15 0 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          nodeSelector:
+            hardware: gpu
+          tolerations:
+            - key: gpu
+              operator: Equal
+              value: "true"
+              effect: NoSchedule
+          containers:
+            - name: scorer
+              image: local/sentiment-fetcher:v1
+              imagePullPolicy: Never
+              env:
+                - name: PGHOST
+                  value: timescaledb.market-data.svc.cluster.local
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+                - name: PGDATABASE
+                  value: postgres
+                - name: BATCH_SIZE
+                  value: "16"
+              resources:
+                requests:
+                  memory: 1Gi
+                  cpu: 500m
+                limits:
+                  memory: 4Gi
+                  cpu: "2"

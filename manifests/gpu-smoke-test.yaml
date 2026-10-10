@@ -1,0 +1,37 @@
+# GPU smoke test: proves end-to-end GPU runtime passthrough on the TX2.
+# Runs a plain ubuntu:18.04 container through the nvidia runtime; the runtime
+# is expected to inject GPU device nodes (/dev/nvhost-*) and tegra libs
+# (libcuda.so et al. — on L4T the CUDA *toolkit* path /usr/local/cuda is a
+# host-side install and is NOT mounted; device nodes + libcuda are the
+# correct assertions). Success = pod log ends with SMOKE-OK. Delete after
+# verification:
+#   kubectl delete pod gpu-smoke-test
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-smoke-test
+  namespace: default
+spec:
+  runtimeClassName: nvidia
+  nodeSelector:
+    hardware: gpu
+  tolerations:
+    - key: gpu
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+  restartPolicy: Never
+  containers:
+    - name: smoke
+      image: ubuntu:18.04
+      env:
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: all
+      command:
+        - sh
+        - -c
+        - |
+          ls /dev/nvhost-gpu
+          ls /usr/lib/aarch64-linux-gnu/tegra/libcuda.so.1.1
+          ls /usr/lib/aarch64-linux-gnu/libcuda.so
+          echo SMOKE-OK

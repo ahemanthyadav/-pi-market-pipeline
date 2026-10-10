@@ -1,0 +1,54 @@
+# RBI daily rates fetcher (findings Tier 2 #8; ops manual §12.1 — closes the
+# last real India data gap). Scrapes the official RBI mobile-site Current
+# Rates widget: policy repo/SDF/MSF/bank/reverse-repo + CRR/SLR into
+# interest_rates, G-Sec benchmark yields (tenor-bucketed: the security name
+# changes, 3/5/10/15/30Y buckets don't) + T-bill cut-offs into bond_yields.
+#
+# 07:00 node-local PDT = 14:00 IST — after the RBI morning page update and
+# the FBIL 13:15 IST FX fix; nowhere near the Yahoo-heavy 23:xx PDT cluster
+# (different upstream anyway). Writes its own pipeline_heartbeat row
+# ('rbi', per-job heartbeat v2 pattern — the health job's FEEDS list adopts
+# it at its next natural image rebuild).
+# Validate with:
+#   kubectl create job -n market-data rbi-test --from=cronjob/rbi-fetcher
+# DB verify:
+#   SELECT * FROM interest_rates WHERE rate_name LIKE 'IN_%' ORDER BY ts DESC;
+#   SELECT * FROM bond_yields WHERE instrument LIKE 'IN_%' ORDER BY ts DESC;
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rbi-fetcher
+  namespace: market-data
+spec:
+  schedule: "0 7 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: fetcher
+              image: local/rbi-fetcher:v1
+              imagePullPolicy: Never
+              env:
+                - name: PGHOST
+                  value: timescaledb.market-data.svc.cluster.local
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+                - name: PGDATABASE
+                  value: postgres
+              resources:
+                requests:
+                  memory: 64Mi
+                  cpu: 50m
+                limits:
+                  memory: 256Mi
+                  cpu: "1"

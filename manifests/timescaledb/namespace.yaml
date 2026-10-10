@@ -1,0 +1,6 @@
+# All market-data pipeline workloads live here (keeps the DB, jobs and
+# dashboards out of default/kube-system).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: market-data

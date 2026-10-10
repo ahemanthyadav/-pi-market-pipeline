@@ -1,0 +1,43 @@
+# Hourly intraday fetcher (fast movers: FX + gold/silver/oil + DXY).
+# Schedule "10 * * * *" — every hour at :10 UTC. Idempotent against the
+# candles' real timestamps, so closed-market hours write nothing new.
+# Image is node-local (Never pull): build on TX2, import to pi1/pi2/pi3.
+# Validate: kubectl create job -n market-data intraday-validate --from=cronjob/intraday-fetcher
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: intraday-fetcher
+  namespace: market-data
+spec:
+  schedule: "10 * * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: fetcher
+              image: local/intraday-fetcher:v1
+              imagePullPolicy: Never
+              env:
+                - name: PGHOST
+                  value: timescaledb.market-data.svc.cluster.local
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+                - name: PGDATABASE
+                  value: postgres
+              resources:
+                requests:
+                  memory: 256Mi
+                  cpu: 100m
+                limits:
+                  memory: 512Mi
+                  cpu: 500m

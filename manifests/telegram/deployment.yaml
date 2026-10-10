@@ -1,0 +1,64 @@
+# Two-way Telegram listener — Tier 2 interface (2026-10-09, see
+# docs/market-data-telegram-bot.md §4). Always-on getUpdates long-poll;
+# CGNAT (F10) makes webhooks impossible, so the bot pulls — outbound only.
+#
+# The ONLY getUpdates consumer (Telegram 409s a second poller): the digest
+# CronJob and Grafana's contact point only sendMessage.
+#
+# Security: bot.py answers ONLY the allow-listed chat id from the Secret —
+# other senders are logged and ignored (bots are publicly discoverable).
+# All queries are read-only SELECTs.
+#
+# Pinned pi1: the image is imported there only (roadmap §5 import-burden
+# rule). Resources sized for a poll loop that sleeps server-side ~25 s.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-bot
+  namespace: market-data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: telegram-bot
+  template:
+    metadata:
+      labels:
+        app: telegram-bot
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: pi1
+      containers:
+        - name: listener
+          image: local/telegram-digest:v2
+          imagePullPolicy: Never
+          args: ["python", "bot.py"]
+          env:
+            - name: PGHOST
+              value: timescaledb.market-data.svc.cluster.local
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: timescaledb-auth
+                  key: password
+            - name: PGDATABASE
+              value: postgres
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: telegram-bot
+                  key: bot-token
+            - name: TELEGRAM_CHAT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: telegram-bot
+                  key: chat-id
+          resources:
+            requests:
+              memory: 32Mi
+              cpu: 50m
+            limits:
+              memory: 128Mi
+              cpu: 500m

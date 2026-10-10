@@ -1,0 +1,43 @@
+# Daily US Treasury yields (Phase 3, job #5 partial: yields half).
+# Fed funds rate needs a FRED API key; RBI rates have no stable feed —
+# both tracked as gaps in the plan, not here. 23:15 UTC, evening batch.
+# Image is node-local (Never pull, on pi1/pi2/pi3). Validate with:
+#   kubectl create job -n market-data yields-test --from=cronjob/yields-fetcher
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: yields-fetcher
+  namespace: market-data
+spec:
+  schedule: "15 23 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: fetcher
+              image: local/yields-fetcher:v1
+              imagePullPolicy: Never
+              env:
+                - name: PGHOST
+                  value: timescaledb.market-data.svc.cluster.local
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+                - name: PGDATABASE
+                  value: postgres
+              resources:
+                requests:
+                  memory: 256Mi
+                  cpu: 100m
+                limits:
+                  memory: 512Mi
+                  cpu: 500m

@@ -1,0 +1,16 @@
+# Headless Service: gives the StatefulSet its stable DNS identity AND is the
+# connection endpoint for jobs (timescaledb.market-data.svc.cluster.local:5432).
+# Single replica, so no kube-proxy load-balancing behavior to worry about.
+apiVersion: v1
+kind: Service
+metadata:
+  name: timescaledb
+  namespace: market-data
+spec:
+  clusterIP: None
+  selector:
+    app: timescaledb
+  ports:
+    - port: 5432
+      targetPort: postgres
+      name: postgres

@@ -1,0 +1,47 @@
+# Daily US rates via FRED (Phase 3, job #5 completion). 23:20 UTC, evening batch.
+# Needs the fred-api Secret (free key). Image is node-local (Never pull).
+# Validate with:
+#   kubectl create job -n market-data rates-test --from=cronjob/rates-fetcher
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rates-fetcher
+  namespace: market-data
+spec:
+  schedule: "20 23 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: fetcher
+              image: local/rates-fetcher:v1
+              imagePullPolicy: Never
+              env:
+                - name: FRED_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: fred-api
+                      key: api-key
+                - name: PGHOST
+                  value: timescaledb.market-data.svc.cluster.local
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+                - name: PGDATABASE
+                  value: postgres
+              resources:
+                requests:
+                  memory: 128Mi
+                  cpu: 100m
+                limits:
+                  memory: 256Mi
+                  cpu: 500m

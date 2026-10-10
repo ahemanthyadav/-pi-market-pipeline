@@ -1,0 +1,44 @@
+# Pipeline health monitor (roadmap §3.1 heartbeat, v1). Runs 01:45 UTC —
+# after every fetch/compute job and after the 01:30 backup. Checks each
+# feed's max(ts) freshness + row count and upserts one row per feed into
+# pipeline_heartbeat. Grafana/alerts key off `fresh`. Image is node-local
+# (Never pull) — import to pi1/pi2/pi3. Validate with:
+#   kubectl create job -n market-data health-validate --from=cronjob/pipeline-health
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pipeline-health
+  namespace: market-data
+spec:
+  schedule: "45 1 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: health
+              image: local/pipeline-health:v4
+              imagePullPolicy: Never
+              env:
+                - name: PGHOST
+                  value: timescaledb.market-data.svc.cluster.local
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+                - name: PGDATABASE
+                  value: postgres
+              resources:
+                requests:
+                  memory: 64Mi
+                  cpu: 50m
+                limits:
+                  memory: 128Mi
+                  cpu: 250m

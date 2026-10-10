@@ -1,0 +1,35 @@
+# Write-path self-test: INSERT → SELECT → hypertable list → DELETE on the live DB.
+# Used to verify Phase 2 end-to-end, and reusable any time the write path is
+# suspect. Success = job log ends with WRITE-OK and the test row is gone.
+# (Kept as a Job rather than kubectl exec even though exec works again since the 2026-09-29
+# cgroupfs fix — Jobs leave an auditable record; see the cgroup-driver note in Phase 2.)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: timescaledb-write-test
+  namespace: market-data
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: writetest
+          image: timescale/timescaledb:2.30.1-pg16
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: timescaledb-auth
+                  key: password
+          command:
+            - sh
+            - -c
+            - |
+              psql -h timescaledb -U postgres -d postgres -v ON_ERROR_STOP=1 \
+                -c "INSERT INTO index_prices (ticker, ts, open, high, low, close, volume) VALUES ('TEST', now(), 1, 2, 0.5, 1.5, 1000);" \
+                -c "SELECT ticker, close, volume FROM index_prices WHERE ticker='TEST';" \
+                -c "SELECT hypertable_name FROM timescaledb_information.hypertables ORDER BY 1;" \
+                -c "DELETE FROM index_prices WHERE ticker='TEST';" \
+                -c "SELECT count(*) AS leftover_test_rows FROM index_prices WHERE ticker='TEST';"
+              echo WRITE-OK
