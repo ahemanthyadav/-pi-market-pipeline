@@ -2,8 +2,10 @@
 
 k3s homelab market-data pipeline: 5-node Pi/Jetson cluster ingesting daily market
 data (indices, FX, yields, rates, news, sentiment, FII/DII flows, technicals)
-into TimescaleDB, with Grafana dashboards. Currently NOT a git repo — treat
-`docs/` as the record of truth and update it deliberately.
+into TimescaleDB, with Grafana dashboards. Git repo (since 2026-10-10, remote
+`origin` on GitHub, `main`) — conventional commits (see the `commit-and-changelog`
+skill); never commit credentials or IPs (rules 7–8; run the audit before any push).
+`docs/` stays the record of truth — update it deliberately.
 
 **Read before cluster mutations:** `docs/market-data-pipeline-operations-manual.md`
 (§5 DB queries, §6 image rebuild cycle, §7 daily checklist, §8 failure runbook,
