@@ -8,13 +8,17 @@ Single-user security model: only TELEGRAM_CHAT_ID is ever answered. Telegram
 bots are public — anyone who finds @Marketfredbot can message it — so the
 allow-list IS the door. Others are logged and silently ignored.
 
-DB access: read-only SELECTs (house rule). Connections open per command and
-close after — long-idle pod→DB connections get dropped (F26), so nothing is
-held across the sleep between polls. One retry per query.
+DB access: read-only SELECTs (house rule) with ONE exception — /watch add|rm
+writes the `watchlist` table, which this bot owns (no fetcher touches it).
+Connections open per command and close after — long-idle pod→DB connections
+get dropped (F26), so nothing is held across the sleep between polls. One
+retry per query.
 
 Commands: /help /status /vix /nifty /sensex /gold /fii /scores /digest
-  (/start also maps to help). /digest re-runs digest.build_message() — both
-  scripts share this image; the Deployment selects this entrypoint via args.
+  /stock /news /watch /top /movers /track /macro /world /index /fx /multibagger (stock/watchlist/screener
+  views live in stocks.py, 2026-10-10). /start also maps to help. /digest
+  re-runs digest.build_message() — the scripts share this image; the
+  Deployment selects this entrypoint via args.
 
 Crash semantics: offset is in-memory only. On start the backlog is DRAINED
 without replying (a restart must not replay old commands); commands are
@@ -37,6 +41,7 @@ from datetime import timedelta, timezone
 import psycopg
 import requests
 
+import stocks
 from digest import IST, TELEGRAM_LIMIT, build_message
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -69,39 +74,48 @@ def query(sql: str, args: tuple = ()) -> list:
             print(f"WARN db retry ({exc.__class__.__name__})", flush=True)
 
 
-# ---------------------------------------------------------------- commands
-
-def last_two(ticker: str):
-    rows = query(
-        "SELECT ts, close FROM index_prices WHERE ticker = %s ORDER BY ts DESC LIMIT 2",
-        (ticker,),
+def execute(sql: str, args: tuple = ()) -> int:
+    """One atomic write to the bot-owned watchlist table; returns rowcount."""
+    conn = psycopg.connect(
+        host=os.environ.get("PGHOST", "timescaledb.market-data.svc.cluster.local"),
+        user=os.environ.get("PGUSER", "postgres"),
+        password=os.environ["PGPASSWORD"],
+        dbname=os.environ.get("PGDATABASE", "postgres"),
     )
-    if not rows:
-        return None
-    ts, close = rows[0]
-    prev = rows[1][1] if len(rows) > 1 else None
-    return ts, close, prev
+    try:
+        conn.autocommit = True
+        with conn.transaction():  # house pattern: one short write unit
+            with conn.cursor() as cur:
+                cur.execute(sql, args)
+                return cur.rowcount
+    finally:
+        conn.close()
 
 
-def quote_line(label: str, ticker: str) -> str:
-    got = last_two(ticker)
-    if not got:
-        return f"{label}: no data"
-    ts, close, prev = got
-    pct = f" ({(close - prev) / prev * 100:+.2f}%)" if prev else ""
-    return f"{label}: <b>{close:,.2f}</b>{pct}  <i>{ts:%d %b}</i>"
-
+# ---------------------------------------------------------------- commands
 
 def cmd_help(_text: str) -> str:
     return (
         "<b>Marketfredbot</b> — read-only commands:\n"
         "/status — pipeline heartbeat freshness\n"
         "/vix — VIX + India VIX\n"
-        "/nifty · /sensex · /gold — latest close + day change\n"
+        "/nifty · /sensex · /gold — close, day, YTD, 52w range, trend\n"
         "/fii — latest FII/DII net + 5-session FII trend\n"
         "/scores — screener top-5 today\n"
+        "/stock TCS — price, trend, score, valuation, news for one stock\n"
+        "/news TCS — tagged headlines + sentiment\n"
+        "/top growth sp500 — best by value|quality|growth|momentum|risk\n"
+        "/multibagger sp500 — small, fast-growing, high-return candidates\n"
+        "/movers — who entered/left the screener top-20\n"
+        "/track — how the screener's picks have done\n"
+        "/watch — watchlist + holdings P&amp;L (add/rm)\n"
+        "/world — every index: close, day, 1m, YTD (/world asia)\n"
+        "/index nikkei — one index in depth: 1w–1y, 52w range, trend, RSI\n"
+        "/fx — USD/INR and the other pairs\n"
+        "/macro — gold in INR, yield spreads, FII vs Nifty\n"
         "/digest — full daily digest on demand\n"
-        "Daily digest: 08:00 IST · alerts: Grafana → this chat"
+        "Daily digest: 08:00 IST · change alerts after the screener run · "
+        "Grafana alerts → this chat"
     )
 
 
@@ -119,19 +133,23 @@ def cmd_status(_text: str) -> str:
 
 
 def cmd_vix(_text: str) -> str:
-    return quote_line("VIX", "^VIX") + "\n" + quote_line("India VIX", "^INDIAVIX")
+    return "<b>Volatility</b>\n" + stocks.quote_table(query, ["^VIX", "^INDIAVIX"])
 
 
 def cmd_nifty(_text: str) -> str:
-    return quote_line("Nifty 50", "^NSEI")
+    return stocks.index_card(query, "^NSEI", "Nifty 50")
 
 
 def cmd_sensex(_text: str) -> str:
-    return quote_line("Sensex", "^BSESN")
+    return stocks.index_card(query, "^BSESN", "Sensex")
 
 
 def cmd_gold(_text: str) -> str:
-    return quote_line("Gold fut", "GC=F")
+    return stocks.index_card(query, "GC=F", "Gold futures (USD/oz)")
+
+
+def cmd_index(text: str) -> str:
+    return stocks.index_text(query, text.partition(" ")[2].strip())
 
 
 def cmd_fii(_text: str) -> str:
@@ -151,22 +169,90 @@ def cmd_fii(_text: str) -> str:
 
 
 def cmd_scores(_text: str) -> str:
-    rows = query(
-        "SELECT COALESCE(t.name, s.symbol), s.composite, s.rank "
-        "FROM stock_scores s LEFT JOIN ticker_names t ON t.ticker = s.symbol "
-        "WHERE s.ts = (SELECT max(ts) FROM stock_scores) AND s.eligible "
-        "ORDER BY s.rank NULLS LAST LIMIT 5"
-    )
-    if not rows:
-        return "No scored rows yet (screener runs 02:15 node-local)"
-    return "Screener top-5 (latest run):\n" + "\n".join(
-        f"{rank}. <b>{html.escape(str(name))}</b> — {comp:.1f}"
-        for name, comp, rank in rows
-    )
+    return stocks.top_text(query, "composite", "NIFTY500", 5)
 
 
 def cmd_digest(_text: str) -> str:
     return build_message()
+
+
+def _arg(text: str) -> str:
+    return text.partition(" ")[2].strip()
+
+
+def cmd_stock(text: str) -> str:
+    row, problem = stocks.pick_one(query, _arg(text))
+    return problem or stocks.stock_card(query, row)
+
+
+def cmd_news(text: str) -> str:
+    row, problem = stocks.pick_one(query, _arg(text))
+    return problem or stocks.news_text(query, row)
+
+
+def cmd_top(text: str) -> str:
+    factor, universe, problem = stocks.parse_top(text)
+    return problem or stocks.top_text(query, factor, universe)
+
+
+def cmd_multibagger(text: str) -> str:
+    words = text.lower().split()[1:]
+    if len(words) > 1 or (words and words[0] not in stocks.UNIVERSES):
+        return "Usage: <code>/multibagger [nifty|sp500]</code>"
+    return stocks.multibagger_text(query, stocks.UNIVERSES[words[0]] if words else "NIFTY500")
+
+
+def cmd_movers(_text: str) -> str:
+    return stocks.movers_text(query)
+
+
+def cmd_track(_text: str) -> str:
+    return stocks.track_text(query)
+
+
+def cmd_macro(_text: str) -> str:
+    return stocks.macro_text(query)
+
+
+def cmd_world(text: str) -> str:
+    region, problem = stocks.parse_world(text)
+    return problem or stocks.world_text(query, region)
+
+
+def cmd_fx(_text: str) -> str:
+    return stocks.fx_text(query)
+
+
+def cmd_watch(text: str) -> str:
+    action, arg, qty, cost, note, problem = stocks.parse_watch(text)
+    try:
+        if problem:
+            return problem
+        if action == "list":
+            return stocks.watch_text(query)
+        row, problem = stocks.pick_one(query, arg)
+        if problem:
+            return problem
+        symbol = row[0]
+        if action == "rm":
+            gone = execute("DELETE FROM watchlist WHERE symbol = %s", (symbol,))
+            return f"Removed {html.escape(symbol)}." if gone else (
+                f"{html.escape(symbol)} was not on the watchlist.")
+        # Re-adding keeps an existing position/note unless new values are given.
+        execute(
+            "INSERT INTO watchlist (symbol, qty, avg_cost, note) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (symbol) DO UPDATE SET "
+            "qty = COALESCE(EXCLUDED.qty, watchlist.qty), "
+            "avg_cost = COALESCE(EXCLUDED.avg_cost, watchlist.avg_cost), "
+            "note = COALESCE(EXCLUDED.note, watchlist.note)",
+            (symbol, qty, cost, note),
+        )
+        held = f" — {qty:g} @ {cost:,.2f}" if qty else ""
+        return f"Watching <b>{html.escape(row[1])}</b> ({html.escape(symbol)}){held}."
+    except psycopg.Error as exc:
+        if stocks.table_missing(exc):
+            return "Watchlist table not created yet (schema-configmap.yaml → schema job)."
+        raise
 
 
 COMMANDS = {
@@ -180,6 +266,19 @@ COMMANDS = {
     "fii": cmd_fii,
     "scores": cmd_scores,
     "digest": cmd_digest,
+    "stock": cmd_stock,
+    "news": cmd_news,
+    "top": cmd_top,
+    "movers": cmd_movers,
+    "multibagger": cmd_multibagger,
+    "mb": cmd_multibagger,
+    "track": cmd_track,
+    "macro": cmd_macro,
+    "world": cmd_world,
+    "index": cmd_index,
+    "fx": cmd_fx,
+    "usdinr": cmd_fx,
+    "watch": cmd_watch,
 }
 
 
@@ -255,8 +354,44 @@ def poll_forever() -> None:
             handle(update)
 
 
+MENU = [
+    ("stock", "Price, trend, score, valuation, news — /stock TCS"),
+    ("watch", "Watchlist + holdings P&L (add / rm)"),
+    ("top", "Best by factor — /top growth sp500"),
+    ("multibagger", "Small, fast-growing, high-return candidates"),
+    ("movers", "Entered / left the screener top-20"),
+    ("track", "How the screener's picks have done"),
+    ("news", "Tagged headlines + sentiment — /news TCS"),
+    ("world", "All world indices: day, 1m, YTD — /world asia"),
+    ("index", "One index in depth — /index nikkei"),
+    ("fx", "USD/INR and other currency pairs"),
+    ("macro", "Gold in INR, yield spreads, FII vs Nifty"),
+    ("scores", "Screener top-5"),
+    ("digest", "Daily digest on demand"),
+    ("status", "Pipeline heartbeat freshness"),
+    ("vix", "VIX + India VIX"),
+    ("nifty", "Nifty 50"),
+    ("sensex", "Sensex"),
+    ("gold", "Gold futures"),
+    ("fii", "FII/DII net flows"),
+    ("help", "All commands"),
+]
+
+
+def register_menu() -> None:
+    """Best-effort: the Telegram command menu follows the code, not BotFather."""
+    try:
+        r = requests.post(f"{API}/setMyCommands", timeout=15, json={
+            "commands": [{"command": c, "description": d} for c, d in MENU]})
+        if r.status_code != 200 or not r.json().get("ok"):
+            print(f"WARN setMyCommands {r.status_code}: {r.text[:120]}", flush=True)
+    except (requests.RequestException, ValueError) as exc:
+        print(f"WARN setMyCommands failed ({exc.__class__.__name__})", flush=True)
+
+
 def main() -> int:
     me = requests.get(f"{API}/getMe", timeout=15).json().get("result", {})
+    register_menu()
     print(f"listening as @{me.get('username')} for chat {ALLOWED[:2]}***", flush=True)
     poll_forever()
     return 0

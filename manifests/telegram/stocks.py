@@ -1,0 +1,1304 @@
+"""Stock, index, watchlist, screener and macro views shared by the Telegram image
+(bot.py commands, digest.py sections, alerts.py) — added 2026-10-10.
+
+Everything here READS existing tables; the one table this image owns is
+`watchlist` (schema-configmap.yaml), written only by bot.py's /watch command.
+No psycopg/requests import on purpose: every function takes `q`, a callable
+`q(sql, args) -> list[tuple]`, so the logic runs under tests/test_stocks.py
+with a fake and under bot/digest/alerts with their own connection handling.
+
+Units as stored by the screener layer (stock_metrics.py / stock_screener.py):
+returns, ratios-minus-one, vol, drawdown, ROE and margins are FRACTIONS;
+factor scores are percentile ranks in [0,1], higher = better (risk_score too:
+higher = steadier); composite is 0-100. Timestamps are UTC midnight per
+trading date, identical across stock_prices / stock_metrics_daily / stock_scores.
+
+Message layout (Telegram HTML): lists are fixed-width tables inside <pre>,
+kept to ~36 characters so a phone shows them without wrapping; single
+instruments are a bold headline plus label/value blocks (`kv`).
+
+Chunk pruning: stock_prices has ~3,400 chunks. Its time bounds must be
+parameters or now() arithmetic — a date_trunc() or sub-select bound planned
+for 11 s / ran 79 s on 2026-10-10. Keep bounds computed in Python.
+"""
+
+import html
+import math
+import re
+from datetime import datetime, timedelta, timezone
+
+TOP_N = 20                    # "the shortlist" for movers / track record
+HORIZONS = (1, 5, 21, 63)     # trading days: 1d, 1w, 1m, 3m
+MIN_FULL_RUN = 40             # eligible rows a run needs to count (skips canaries)
+FRESH_DAYS = 1                # alerts fire only on data dated today/yesterday UTC
+BIG_MOVE = 0.05               # watchlist day-move alert threshold
+OZ_GRAMS = 31.1034768
+FACTORS = {
+    "composite": "composite", "value": "value_score", "quality": "quality_score",
+    "growth": "growth_score", "momentum": "momentum_score", "risk": "risk_score",
+}
+UNIVERSES = {"nifty": "NIFTY500", "nifty500": "NIFTY500", "india": "NIFTY500",
+             "sp500": "SP500", "sp": "SP500", "us": "SP500"}
+SYMBOL_RE = re.compile(r"[A-Za-z0-9 .&\-]{1,40}")
+
+# /world layout: region → index_prices tickers, in display order. A ticker the
+# fetchers add later shows up under "Other" until it is placed here.
+REGIONS = [
+    ("India", ["^NSEI", "^BSESN", "^NSEBANK", "^CRSLDX", "NIFTYMIDCAP150.NS",
+               "NIFTYSMLCAP250.NS", "^CNXIT", "^CNXPHARMA", "^INDIAVIX"]),
+    ("US", ["^GSPC", "^DJI", "^IXIC", "^RUI", "^RUT", "^VIX"]),
+    ("Europe", ["^STOXX50E", "^FTSE", "^GDAXI", "^FCHI", "FTSEMIB.MI", "^IBEX",
+                "^AEX", "^SSMI"]),
+    ("Asia-Pacific", ["^N225", "^HSI", "000001.SS", "399001.SZ", "^KS11", "^TWII",
+                      "^STI", "^AXJO"]),
+    ("Americas", ["^GSPTSE", "^BVSP", "^MXX"]),
+    ("Commodities & dollar", ["GC=F", "SI=F", "CL=F", "DX-Y.NYB"]),
+]
+REGION_WORDS = {"india": "India", "us": "US", "usa": "US", "europe": "Europe",
+                "asia": "Asia-Pacific", "apac": "Asia-Pacific", "americas": "Americas",
+                "commodities": "Commodities & dollar", "gold": "Commodities & dollar"}
+NOT_RANKED = {"^VIX", "^INDIAVIX"}   # volatility gauges: no "best/worst YTD"
+FX_ORDER = ["USDINR=X", "EURINR=X", "GBPINR=X", "JPYINR=X", "EURUSD=X", "GBPUSD=X",
+            "USDJPY=X", "USDCHF=X", "USDCNY=X", "AUDUSD=X"]
+# Table-width names for the long ticker_names entries (tables clip at 13 chars).
+SHORT = {
+    "Nifty Midcap 150": "Nifty Mid 150", "Nifty Smallcap 250": "Nifty Sml 250",
+    "Nasdaq Composite": "Nasdaq", "Shanghai Composite": "Shanghai",
+    "Shenzhen Component": "Shenzhen", "Straits Times Index": "Straits Times",
+    "Swiss Market Index": "Swiss SMI", "S&P/TSX Composite": "TSX Canada",
+    "Gold Futures": "Gold", "Silver Futures": "Silver",
+    "WTI Crude Oil Futures": "WTI crude", "US Dollar Index (DXY)": "Dollar (DXY)",
+}
+DIGEST_QUOTES = ["^NSEI", "^BSESN", "^GSPC", "^VIX", "^INDIAVIX", "DX-Y.NYB", "GC=F"]
+
+
+# ---------------------------------------------------------------- formatting
+
+def pct(x, digits=1):
+    return "n/a" if x is None else f"{x * 100:+.{digits}f}%"
+
+
+def share(x, digits=0):
+    """An unsigned percentage (ROE, margin, volatility)."""
+    return "n/a" if x is None else f"{x * 100:.{digits}f}%"
+
+
+def num(x, digits=2):
+    return "n/a" if x is None else f"{x:,.{digits}f}"
+
+
+def px(x):
+    """A price or index level sized for a table column."""
+    if x is None:
+        return "n/a"
+    return f"{x:,.0f}" if abs(x) >= 10000 else f"{x:,.1f}" if abs(x) >= 1000 else f"{x:,.2f}"
+
+
+def big(x):
+    """1.23T / 936.5B / 12.3M — market caps and the like."""
+    if x is None:
+        return "n/a"
+    for div, unit in ((1e12, "T"), (1e9, "B"), (1e6, "M")):
+        if abs(x) >= div:
+            return f"{x / div:,.2f}{unit}"
+    return f"{x:,.0f}"
+
+
+def esc(s):
+    return html.escape(str(s))
+
+
+def clip(s, width):
+    s = str(s)
+    return s if len(s) <= width else s[: width - 1] + "…"
+
+
+def table(header, rows, align):
+    """Fixed-width <pre> table. `align` is one 'l'/'r' per column; a row that
+    is a plain string becomes a section line (blank line before it)."""
+    cells = [header] + [r for r in rows if not isinstance(r, str)]
+    widths = [max(len(str(r[i])) for r in cells) for i in range(len(header))]
+
+    def line(r):
+        return " ".join(str(c).ljust(w) if a == "l" else str(c).rjust(w)
+                        for c, w, a in zip(r, widths, align)).rstrip()
+
+    out = [line(header)]
+    for r in rows:
+        out += ["", r] if isinstance(r, str) else [line(r)]
+    return "<pre>" + esc("\n".join(out)) + "</pre>"
+
+
+def kv(pairs):
+    """Label/value block; pairs whose value is None are left out."""
+    pairs = [(k, v) for k, v in pairs if v is not None]
+    if not pairs:
+        return ""
+    left = max(len(k) for k, _ in pairs)
+    right = max(len(v) for _, v in pairs)
+    return "<pre>" + esc("\n".join(f"{k.ljust(left)}  {v.rjust(right)}"
+                                   for k, v in pairs)) + "</pre>"
+
+
+def bare(symbol):
+    """TCS.NS → TCS for table columns (the suffix is implied by the universe)."""
+    return symbol[:-3] if symbol.endswith(".NS") else symbol
+
+
+def rsi(closes, period=14):
+    """Wilder RSI over closes ordered oldest → newest; None if too short."""
+    if len(closes) < period + 1:
+        return None
+    deltas = [b - a for a, b in zip(closes, closes[1:])]
+    gain = sum(d for d in deltas[:period] if d > 0) / period
+    loss = sum(-d for d in deltas[:period] if d < 0) / period
+    for d in deltas[period:]:
+        gain = (gain * (period - 1) + max(d, 0)) / period
+        loss = (loss * (period - 1) + max(-d, 0)) / period
+    if loss == 0:
+        return 100.0
+    return 100 - 100 / (1 + gain / loss)
+
+
+def sma(closes, n):
+    return sum(closes[-n:]) / n if len(closes) >= n else None
+
+
+def back(closes, n):
+    """Close `n` sessions before the latest (closes oldest → newest), or None."""
+    return closes[-1 - n] if len(closes) > n else None
+
+
+def change(now, then):
+    return None if now is None or not then else now / then - 1
+
+
+def jan1(now=None):
+    """Start of the current UTC year — always passed as a query parameter."""
+    return datetime((now or datetime.now(timezone.utc)).year, 1, 1, tzinfo=timezone.utc)
+
+
+def is_fresh(ts, now=None):
+    """True when a UTC-midnight data timestamp is dated today or yesterday."""
+    now = now or datetime.now(timezone.utc)
+    return ts is not None and ts.date() >= (now - timedelta(days=FRESH_DAYS)).date()
+
+
+def table_missing(exc):
+    """watchlist DDL not applied yet — callers degrade instead of crashing."""
+    return exc.__class__.__name__ == "UndefinedTable"
+
+
+# ---------------------------------------------------------------- indices, FX
+
+def performance_sql(table_name, key, value):
+    """Latest value per series with its previous-day, 1-month-ago and
+    last-of-previous-year values. Identifiers are code constants, never input.
+    (index_prices / fx_rates are small; stock_prices must NOT use this.)"""
+    def before(cutoff, alias):
+        return (
+            f"LEFT JOIN LATERAL (SELECT {value} AS v FROM {table_name} x "
+            f"  WHERE x.{key} = t.k AND x.ts < {cutoff} "
+            f"    AND x.ts >= {cutoff} - interval '20 days' "
+            f"  ORDER BY x.ts DESC LIMIT 1) {alias} ON true ")
+    return (
+        f"SELECT t.k, l.ts, l.v, d.v, m.v, y.v FROM ("
+        f"  SELECT DISTINCT {key} AS k FROM {table_name} "
+        f"  WHERE ts >= now() - interval '15 days') t "
+        f"INNER JOIN LATERAL (SELECT ts, {value} AS v FROM {table_name} x "
+        f"  WHERE x.{key} = t.k AND x.ts >= now() - interval '15 days' "
+        f"  ORDER BY x.ts DESC LIMIT 1) l ON true "
+        + before("date_trunc('day', l.ts)", "d")
+        + before("l.ts - interval '29 days'", "m")
+        + before("date_trunc('year', l.ts)", "y")
+    )
+
+
+def index_rows(q):
+    """({ticker: (ticker, ts, close, prev, month_ago, year_start)}, {ticker: name})"""
+    rows = {r[0]: r for r in q(performance_sql("index_prices", "ticker", "close"), ())}
+    return rows, dict(q("SELECT ticker, name FROM ticker_names", ()))
+
+
+def quote_row(name, row):
+    _key, _ts, value, prev, _month, year_start = row
+    return (clip(SHORT.get(name, name), 13), px(value),
+            pct(change(value, prev)), pct(change(value, year_start)))
+
+
+QUOTE_HEAD = ("", "Close", "Day", "YTD")
+
+
+def quote_table(q, tickers):
+    """Close / day / YTD table for a fixed list of index tickers (digest, /vix)."""
+    rows, names = index_rows(q)
+    body = [quote_row(names.get(t, t), rows[t]) for t in tickers if t in rows]
+    return table(QUOTE_HEAD, body, "lrrr") if body else "No index rows in the last 15 days."
+
+
+def parse_world(text):
+    """'/world asia' → (region or None, error)."""
+    words = text.lower().split()[1:]
+    if not words:
+        return None, None
+    if len(words) == 1 and words[0] in REGION_WORDS:
+        return REGION_WORDS[words[0]], None
+    return None, ("Usage: <code>/world [india|us|europe|asia|americas|commodities]</code>")
+
+
+def world_text(q, only=None):
+    rows, names = index_rows(q)
+    placed = {t for _, tickers in REGIONS for t in tickers}
+    body = []
+    for region, tickers in REGIONS + [("Other", sorted(set(rows) - placed))]:
+        present = [t for t in tickers if t in rows]
+        if not present or (only and region != only):
+            continue
+        body.append(region.upper())
+        body += [quote_row(names.get(t, t), rows[t]) for t in present]
+    if not body:
+        return "No index rows in the last 15 days."
+    as_of = max(r[1] for r in rows.values())
+    out = [f"<b>World markets</b>  <i>latest closes, to {as_of:%d %b}</i>",
+           table(QUOTE_HEAD, body, "lrrr")]
+    if not only:
+        ranked = sorted(
+            (change(r[2], r[5]), names.get(k, k)) for k, r in rows.items()
+            if r[5] and k not in NOT_RANKED)
+        if len(ranked) >= 2:
+            (worst, worst_name), (best, best_name) = ranked[0], ranked[-1]
+            out.append(f"Best this year: <b>{esc(best_name)}</b> {pct(best)}\n"
+                       f"Worst this year: <b>{esc(worst_name)}</b> {pct(worst)}")
+        out.append("<i>/index nikkei for one index in depth</i>")
+    return "\n".join(out)
+
+
+def fx_text(q):
+    rows = {r[0]: r for r in q(performance_sql("fx_rates", "pair", "rate"), ())}
+    if not rows:
+        return "No FX rows in the last 15 days."
+    order = [p for p in FX_ORDER if p in rows] + sorted(set(rows) - set(FX_ORDER))
+    has_ytd = any(r[5] for r in rows.values())
+    body = []
+    for pair in order:
+        _k, _ts, rate, prev, _m, year_start = rows[pair]
+        label = pair.replace("=X", "")
+        row = (f"{label[:3]}/{label[3:]}", f"{rate:,.4f}", pct(change(rate, prev), 2))
+        body.append(row + ((pct(change(rate, year_start)),) if has_ytd else ()))
+    head = ("Pair", "Rate", "Day") + (("YTD",) if has_ytd else ())
+    as_of = max(r[1] for r in rows.values())
+    out = [f"<b>Currencies</b>  <i>{as_of:%d %b}</i>", table(head, body, "lrrr"[:len(head)])]
+    if not has_ytd:
+        out.append("<i>Year-to-date appears once the FX history reaches back to 1 Jan.</i>")
+    return "\n".join(out)
+
+
+def find_index(q, arg):
+    """[(ticker, name)] for an index/commodity by name fragment or ticker."""
+    arg = (arg or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9 .&^=\-/]{1,40}", arg):
+        return []
+    return q(
+        "SELECT n.ticker, n.name FROM ticker_names n "
+        "WHERE (upper(n.ticker) = upper(%s) OR n.name ILIKE %s) "
+        "AND n.ticker IN (SELECT DISTINCT ticker FROM index_prices "
+        "                 WHERE ts >= now() - interval '15 days') "
+        "ORDER BY (upper(n.ticker) = upper(%s)) DESC, length(n.name) LIMIT 6",
+        (arg, f"%{arg}%", arg))
+
+
+def index_card(q, ticker, label, now=None):
+    """Full picture of one index from a single year-long read of index_prices."""
+    rows = q("SELECT ts, close FROM index_prices WHERE ticker = %s "
+             "AND ts >= now() - interval '380 days' AND close IS NOT NULL ORDER BY ts",
+             (ticker,))
+    if not rows:
+        return f"{esc(label)}: no data"
+    closes = [c for _, c in rows]
+    ts, last = rows[-1]
+    start = jan1(now or ts)
+    before_year = [c for t, c in rows if t < start]
+
+    def since(then):
+        return pct(change(last, then)) if then else None
+
+    window = closes[-252:]
+    ranged = len(window) >= 60
+    span = "52-week" if len(window) >= 240 else f"{len(window)}-session"
+    strength = rsi(closes[-60:])
+    parts = [
+        f"<b>{esc(label)}</b>",
+        f"<b>{num(last)}</b>  {pct(change(last, back(closes, 1)), 2)}  <i>{ts:%d %b} close</i>",
+        kv([("1 week", since(back(closes, 5))),
+            ("1 month", since(back(closes, 21))),
+            ("3 months", since(back(closes, 63))),
+            ("Year to date", since(before_year[-1] if before_year else None)),
+            ("1 year", since(back(closes, 252)))]),
+        kv([(f"{span} high", px(max(window)) if ranged else None),
+            (f"{span} low", px(min(window)) if ranged else None),
+            ("Below the high", pct(change(last, max(window))) if ranged else None),
+            ("vs 50-day average", since(sma(closes, 50))),
+            ("vs 200-day average", since(sma(closes, 200))),
+            ("RSI (14)", None if strength is None else f"{strength:.0f}")]),
+    ]
+    return "\n".join(p for p in parts if p)
+
+
+def index_text(q, arg):
+    if not arg:
+        return ("Give an index name, e.g. <code>/index nikkei</code> — or /world "
+                "for all of them.")
+    rows = find_index(q, arg)
+    if not rows:
+        return f"No index matching <b>{esc(arg)}</b>. /world lists them all."
+    if len(rows) > 1 and rows[0][0].upper() != arg.upper():
+        return "Several matches:\n" + "\n".join(
+            f"<code>/index {esc(t)}</code> — {esc(n)}" for t, n in rows)
+    return index_card(q, rows[0][0], rows[0][1])
+
+
+# ---------------------------------------------------------------- stock YTD
+
+def ytd_map(q, symbols, now=None):
+    """{symbol: YTD change} for stocks, two bounded scans of stock_prices."""
+    symbols = sorted(set(symbols))
+    if not symbols:
+        return {}
+    start = jan1(now)
+    base = dict(q(
+        "SELECT DISTINCT ON (symbol) symbol, close FROM stock_prices "
+        "WHERE symbol = ANY(%s) AND ts < %s::timestamptz AND ts >= %s::timestamptz "
+        "ORDER BY symbol, ts DESC", (symbols, start, start - timedelta(days=20))))
+    last = dict(q(
+        "SELECT DISTINCT ON (symbol) symbol, close FROM stock_prices "
+        "WHERE symbol = ANY(%s) AND ts >= now() - interval '15 days' "
+        "ORDER BY symbol, ts DESC", (symbols,)))
+    return {sym: change(last.get(sym), base.get(sym)) for sym in symbols
+            if change(last.get(sym), base.get(sym)) is not None}
+
+
+def ytd_tag(value):
+    return "" if value is None else f" · YTD {pct(value)}"
+
+
+# ---------------------------------------------------------------- symbols
+
+def resolve(q, arg):
+    """Universe rows matching a user-typed symbol or name fragment.
+
+    Exact symbol (bare NSE symbols get .NS tried too) wins outright; otherwise
+    up to 6 name matches so the caller can ask the user to pick.
+    Rows: (symbol, name, sector, universe, currency).
+    """
+    arg = (arg or "").strip()
+    if not SYMBOL_RE.fullmatch(arg):
+        return []
+    up = arg.upper()
+    rows = q(
+        "SELECT symbol, name, sector, universe, currency FROM universe_constituents "
+        "WHERE upper(symbol) = ANY(%s) ORDER BY (upper(symbol) = %s) DESC LIMIT 1",
+        ([up, up + ".NS"], up),
+    )
+    if rows:
+        return rows
+    return q(
+        "SELECT symbol, name, sector, universe, currency FROM universe_constituents "
+        "WHERE name ILIKE %s ORDER BY length(name), symbol LIMIT 6",
+        (f"%{arg}%",),
+    )
+
+
+def pick_one(q, arg):
+    """(row, None) for a unique match, else (None, message for the user)."""
+    if not arg:
+        return None, "Give a symbol or company name, e.g. <code>/stock TCS</code>"
+    rows = resolve(q, arg)
+    if not rows:
+        return None, f"No stock matching <b>{esc(arg)}</b> in NIFTY500 / SP500."
+    if len(rows) > 1:
+        return None, "Several matches — use the symbol:\n" + "\n".join(
+            f"<code>{esc(s)}</code> — {esc(n)}" for s, n, *_ in rows)
+    return rows[0], None
+
+
+# ---------------------------------------------------------------- /stock
+
+SNAPSHOT = ["pe", "pb", "ev_ebitda", "roe", "operating_margin", "market_cap"]
+ANNUAL = ["total_revenue", "eps", "net_income", "fcf", "total_debt", "shareholder_equity"]
+
+
+def series(rows):
+    """{metric: [(ts, value), …] newest first} from annual fundamentals.
+
+    rows: (metric, source, ts, value). Per metric the source with the newest
+    filing wins (yfinance on a tie), so growth never mixes two sources'
+    definitions of the same line item.
+    """
+    by = {}
+    for metric, source, ts, value in rows:
+        if value is not None:
+            by.setdefault(metric, {}).setdefault(source, []).append((ts, value))
+    out = {}
+    for metric, sources in by.items():
+        best = max(sources.items(),
+                   key=lambda item: (max(t for t, _ in item[1]), item[0] == "yfinance"))[1]
+        out[metric] = sorted(best, reverse=True)
+    return out
+
+
+def latest_two(rows):
+    """{metric: (latest, previous or None, fiscal ts)} — see series()."""
+    return {metric: (vals[0][1], vals[1][1] if len(vals) > 1 else None, vals[0][0])
+            for metric, vals in series(rows).items()}
+
+
+def yoy(annual, metric):
+    now_, prev, _ = annual.get(metric, (None, None, None))
+    # growth off a negative or zero base is not a meaningful percentage
+    return None if now_ is None or prev is None or prev <= 0 else pct(now_ / prev - 1)
+
+
+def reprice(snapshot, close, snapshot_close):
+    """Carry price-based ratios from the weekly Yahoo snapshot to today's close.
+
+    stock_fundamentals stores P/E, P/B and market cap as Yahoo reported them on
+    the fetch day (Saturdays). Earnings, book value and share count do not move
+    between fetches, so each scales with price. EV/EBITDA is left alone (net
+    debt does not scale). Returns (values, repriced?).
+    """
+    out = dict(snapshot)
+    if not close or not snapshot_close:
+        return out, False
+    factor = close / snapshot_close
+    for metric in ("pe", "pb", "market_cap"):
+        if out.get(metric) is not None:
+            out[metric] = out[metric] * factor
+    return out, True
+
+
+def stock_card(q, row):
+    symbol, name, sector, universe, currency = row
+    head = [f"<b>{esc(name)}</b>",
+            f"{esc(symbol)} · {esc(sector or 'n/a')} · {esc(universe)}"]
+
+    prices = q(
+        "SELECT ts, close FROM stock_prices WHERE symbol = %s "
+        "AND ts >= now() - interval '120 days' ORDER BY ts DESC LIMIT 60",
+        (symbol,),
+    )
+    if not prices:
+        return "\n".join(head + ["No price rows in the last 120 days."])
+    ts, close = prices[0]
+    prev = prices[1][1] if len(prices) > 1 else None
+    out = head + ["", f"<b>{num(close)} {esc(currency or '')}</b>  "
+                      f"{pct(change(close, prev), 2)}  <i>{ts:%d %b} close</i>"]
+
+    start = jan1(ts)
+    year_start = q(
+        "SELECT close FROM stock_prices WHERE symbol = %s "
+        "AND ts < %s::timestamptz AND ts >= %s::timestamptz "
+        "ORDER BY ts DESC LIMIT 1", (symbol, start, start - timedelta(days=20)))
+    ytd = change(close, year_start[0][0]) if year_start else None
+
+    m = dict(q(
+        "SELECT metric, value FROM stock_metrics_daily WHERE symbol = %s AND ts = ("
+        "SELECT max(ts) FROM stock_metrics_daily WHERE symbol = %s "
+        "AND ts >= now() - interval '30 days')",
+        (symbol, symbol),
+    ))
+
+    def frac(key, fmt=pct, shift=0.0):
+        return None if m.get(key) is None else fmt(m[key] + shift)
+
+    strength = rsi([c for _, c in reversed(prices)])
+    out += ["<b>Performance</b>", kv([
+        ("1 month", frac("ret_1m")), ("6 months", frac("ret_6m")),
+        ("Year to date", None if ytd is None else pct(ytd)),
+        ("12 months", frac("ret_12m"))])]
+    out += ["<b>Trend and risk</b>", kv([
+        ("vs 50-day average", frac("sma50_ratio", shift=-1.0)),
+        ("vs 200-day average", frac("sma200_ratio", shift=-1.0)),
+        ("Position in 52-week range", frac("pos_52w", share)),
+        ("RSI (14)", None if strength is None else f"{strength:.0f}"),
+        ("Volatility, annualised", frac("vol_180d", share)),
+        ("Max drawdown, 1 year", frac("max_dd_252d", lambda v: pct(v, 0))),
+        ("Traded per day, 20d avg", None if m.get("dol_vol_20d") is None
+         else big(m["dol_vol_20d"]))])]
+
+    score = q(
+        "SELECT ts, composite, rank, value_score, quality_score, growth_score, "
+        "momentum_score, risk_score, eligible, coverage FROM stock_scores "
+        "WHERE symbol = %s AND ts >= now() - interval '30 days' ORDER BY ts DESC LIMIT 1",
+        (symbol,),
+    )
+    if score:
+        sts, comp, rank, v, qu, g, mo, r, eligible, coverage = score[0]
+        total = eligible_count(q, sts, universe)
+        place = f"rank <b>{rank}</b> of {total}" if eligible and rank else "not eligible"
+        conf = screener_confidence(coverage, (v, qu, g, mo, r),
+                                   rank_history(q, [symbol]).get(symbol, []), total)
+        out += [f"<b>Screener</b>  {place}  <i>{sts:%d %b}</i>", kv([
+            ("Composite (0-100)", num(comp, 1)), ("Value", num(v)), ("Quality", num(qu)),
+            ("Growth", num(g)), ("Momentum", num(mo)), ("Risk (higher = steadier)", num(r)),
+            ("Confidence", f"{conf} {conf_label(conf)}")])]
+
+    snap = {metric: (value, fts) for metric, value, fts in q(
+        "SELECT DISTINCT ON (metric) metric, value, ts FROM stock_fundamentals "
+        "WHERE symbol = %s AND metric = ANY(%s) ORDER BY metric, ts DESC",
+        (symbol, SNAPSHOT))}
+    annual = latest_two(q(
+        "SELECT metric, source, ts, value FROM stock_fundamentals "
+        "WHERE symbol = %s AND metric = ANY(%s)", (symbol, ANNUAL)))
+    if snap:
+        snap_ts = max(fts for _, fts in snap.values())
+        then = q(
+            "SELECT close FROM stock_prices WHERE symbol = %s "
+            "AND ts <= %s::timestamptz AND ts >= %s::timestamptz "
+            "ORDER BY ts DESC LIMIT 1", (symbol, snap_ts, snap_ts - timedelta(days=10)))
+        f, repriced = reprice({k: v for k, (v, _) in snap.items()}, close,
+                              then[0][0] if then else None)
+        when = f"at the {ts:%d %b} close" if repriced else f"as reported {snap_ts:%d %b}"
+        fcf = annual.get("fcf", (None,))[0]
+        debt = annual.get("total_debt", (None,))[0]
+        equity = annual.get("shareholder_equity", (None,))[0]
+        out += [f"<b>Valuation</b>  <i>{when}</i>", kv([
+            ("P/E", None if f.get("pe") is None else num(f["pe"], 1)),
+            ("P/B", None if f.get("pb") is None else num(f["pb"], 1)),
+            ("Market cap", None if f.get("market_cap") is None else big(f["market_cap"])),
+            ("FCF yield", share(fcf / f["market_cap"], 1)
+             if fcf is not None and f.get("market_cap") else None),
+            (f"EV/EBITDA ({snap_ts:%d %b})",
+             None if f.get("ev_ebitda") is None else num(f["ev_ebitda"], 1)),
+            ("ROE", None if f.get("roe") is None else share(f["roe"])),
+            ("Operating margin", None if f.get("operating_margin") is None
+             else share(f["operating_margin"])),
+            ("Debt / equity", f"{debt / equity:.2f}"
+             if debt is not None and equity and equity > 0 else None)])]
+    if annual:
+        year = max(v[2] for v in annual.values())
+        block = kv([("Revenue", yoy(annual, "total_revenue")), ("EPS", yoy(annual, "eps")),
+                    ("Net income", yoy(annual, "net_income"))])
+        if block:
+            out += [f"<b>Latest fiscal year</b>  <i>to {year:%b %Y}, vs the year before</i>",
+                    block]
+
+    news = news_rows(q, symbol, days=14, limit=3)
+    if news:
+        out += ["<b>News</b>  <i>last 14 days</i>"] + [news_line(n) for n in news]
+    return "\n".join(line for i, line in enumerate(out) if line or i == 2)
+
+
+# ---------------------------------------------------------------- /news
+
+def news_rows(q, symbol, days=14, limit=5):
+    """[(ts, headline, source, sentiment or None, 'event, event' or None)]"""
+    return q(
+        "SELECT ts, headline, source, sentiment, events FROM ("
+        "  SELECT DISTINCT ON (h.id) h.ts, h.headline, h.source, "
+        "    (SELECT n.sentiment_score FROM news_sentiment n "
+        "      WHERE n.headline = h.headline ORDER BY n.ts DESC LIMIT 1) AS sentiment, "
+        "    (SELECT string_agg(DISTINCT e.event_type, ', ') FROM headline_events e "
+        "      WHERE e.headline_id = h.id) AS events "
+        "  FROM headline_entities en INNER JOIN raw_headlines h ON h.id = en.headline_id "
+        "  WHERE en.symbol = %s AND en.ts >= now() - %s * interval '1 day' "
+        "  ORDER BY h.id) x ORDER BY ts DESC LIMIT %s",
+        (symbol, days, limit),
+    )
+
+
+def news_line(row):
+    ts, headline, _source, sentiment, events = row
+    meta = [f"{ts:%d %b}"]
+    if events:
+        meta.append(esc(events))
+    if sentiment is not None:
+        meta.append(f"sentiment {sentiment:+.2f}")
+    return f"• {esc(headline)}\n  <i>{' · '.join(meta)}</i>"
+
+
+def news_text(q, row, days=14):
+    symbol, name = row[0], row[1]
+    rows = news_rows(q, symbol, days=days, limit=8)
+    out = [f"<b>{esc(name)}</b>", f"{esc(symbol)} · headlines, last {days} days"]
+    if not rows:
+        return "\n".join(out + ["No tagged headlines."])
+    scored = [r[3] for r in rows if r[3] is not None]
+    if scored:
+        out.append(f"Average sentiment <b>{sum(scored) / len(scored):+.2f}</b> "
+                   f"over {len(scored)} headline(s)")
+    return "\n".join(out + [""] + [news_line(r) for r in rows])
+
+
+# ---------------------------------------------------------------- watchlist
+
+WATCH_USAGE = (
+    "<b>/watch</b> — list\n"
+    "<code>/watch add TCS</code> — watch only\n"
+    "<code>/watch add TCS 10 3500 core holding</code> — qty, avg cost, note\n"
+    "<code>/watch rm TCS</code> — remove"
+)
+
+WATCH_SQL = (
+    "SELECT w.symbol, w.qty, w.avg_cost, w.note, u.name, u.currency, "
+    "       p.ts, p.close, p.prev, s.rank "
+    "FROM watchlist w "
+    "LEFT JOIN LATERAL (SELECT name, currency FROM universe_constituents uc "
+    "                   WHERE uc.symbol = w.symbol LIMIT 1) u ON true "
+    "LEFT JOIN LATERAL (SELECT max(ts) AS ts, "
+    "                          (array_agg(close ORDER BY ts DESC))[1] AS close, "
+    "                          (array_agg(close ORDER BY ts DESC))[2] AS prev "
+    "                   FROM (SELECT ts, close FROM stock_prices sp "
+    "                         WHERE sp.symbol = w.symbol "
+    "                           AND sp.ts >= now() - interval '15 days' "
+    "                         ORDER BY ts DESC LIMIT 2) last2) p ON true "
+    "LEFT JOIN LATERAL (SELECT rank FROM stock_scores ss WHERE ss.symbol = w.symbol "
+    "                     AND ss.ts >= now() - interval '15 days' AND ss.eligible "
+    "                   ORDER BY ts DESC LIMIT 1) s ON true "
+    "ORDER BY w.symbol"
+)
+
+
+def parse_watch(text):
+    """'/watch …' → (action, symbol_arg, qty, cost, note, error).
+
+    action is 'list', 'add' or 'rm'. qty and avg cost come as a pair of
+    positive numbers or not at all; anything after them is the note.
+    """
+    parts = text.split()[1:]
+    if not parts:
+        return "list", None, None, None, None, None
+    verb = parts[0].lower()
+    if verb in ("rm", "remove", "del", "delete"):
+        if len(parts) != 2:
+            return "rm", None, None, None, None, "Usage: <code>/watch rm TCS</code>"
+        return "rm", parts[1], None, None, None, None
+    if verb != "add" or len(parts) < 2:
+        return "list", None, None, None, None, WATCH_USAGE
+    symbol, rest = parts[1], parts[2:]
+    qty = cost = None
+    if rest:
+        try:
+            qty, cost = float(rest[0]), float(rest[1])
+        except (ValueError, IndexError):
+            qty = cost = None
+        else:
+            if not (math.isfinite(qty) and math.isfinite(cost) and qty > 0 and cost > 0):
+                return "add", symbol, None, None, None, "Quantity and cost must be positive."
+            rest = rest[2:]
+    note = " ".join(rest)[:200] or None
+    return "add", symbol, qty, cost, note, None
+
+
+def watch_block(rows, ytd=None, notes=True):
+    """Watchlist table + per-currency totals for held positions (+ notes).
+
+    rows: WATCH_SQL rows; ytd: optional {symbol: change} from ytd_map().
+    Returns a list of message lines.
+    """
+    ytd = ytd or {}
+    held = any(r[1] and r[2] for r in rows)
+    head = ("", "Close", "Day", "YTD") + (("P&L",) if held else ())
+    body, totals, noted = [], {}, []
+    for symbol, qty, cost, note, name, currency, _ts, close, prev, _rank in rows:
+        label = clip(bare(symbol), 10)
+        if close is None:
+            body.append((label, "n/a", "", "") + (("",) if held else ()))
+            continue
+        row = (label, px(close), pct(change(close, prev)),
+               "" if ytd.get(symbol) is None else pct(ytd[symbol], 0))
+        if held:
+            row += (pct(close / cost - 1, 0) if qty and cost else "",)
+        body.append(row)
+        if qty and cost:
+            t = totals.setdefault(currency or "?", [0.0, 0.0, 0.0])
+            t[0] += qty * close
+            t[1] += qty * cost
+            t[2] += qty * (close - prev) if prev else 0.0
+        if note and notes:
+            noted.append(f"<i>{esc(bare(symbol))}: {esc(note)}</i>")
+    lines = [table(head, body, "lrrrr"[:len(head)])]
+    for currency, (value, basis, day_pl) in sorted(totals.items()):
+        lines.append(
+            f"Holdings {esc(currency)}: <b>{num(value, 0)}</b> · "
+            f"P&amp;L <b>{value - basis:+,.0f}</b> ({pct((value - basis) / basis)}) · "
+            f"today {day_pl:+,.0f}")
+    return lines + noted
+
+
+def watch_text(q):
+    rows = q(WATCH_SQL, ())
+    if not rows:
+        return "Watchlist is empty.\n" + WATCH_USAGE
+    return "\n".join(["<b>Watchlist</b>"]
+                     + watch_block(rows, ytd_map(q, [r[0] for r in rows])))
+
+
+# ---------------------------------------------------------------- confidence
+
+# Every recommendation carries a 0-100 confidence. It measures how complete
+# and consistent the EVIDENCE behind the pick is — never the chance that the
+# price rises (nothing in this pipeline can estimate that).
+CONF_HIGH, CONF_MEDIUM = 70, 45
+CONF_NOTE = ("<i>Conf = how complete and consistent the evidence is (0-100), "
+             "not the chance the price rises.</i>")
+
+
+def conf_label(score):
+    return "high" if score >= CONF_HIGH else "medium" if score >= CONF_MEDIUM else "low"
+
+
+def screener_confidence(coverage, factors, ranks, universe_size):
+    """Confidence in a screener pick.
+
+    40 — data coverage: share of the factor inputs that were available.
+    30 — agreement: how many of the five factor scores are above the median.
+    30 — stability: how little the composite rank moved over the recent runs
+         (a 20%-of-universe swing scores zero; one run only earns half).
+    """
+    known = [f for f in factors if f is not None]
+    agree = sum(f >= 0.5 for f in known) / 5
+    if len(ranks) >= 2 and universe_size:
+        stable = 1 - scaled((max(ranks) - min(ranks)) / universe_size, 0.20)
+    else:
+        stable = 0.5
+    return round(40 * scaled(coverage, 1.0) + 30 * agree + 30 * stable)
+
+
+def rank_history(q, symbols):
+    """{symbol: [rank, …]} over the screener runs of the last 10 days."""
+    out = {}
+    for symbol, rank in q(
+            "SELECT symbol, rank FROM stock_scores WHERE symbol = ANY(%s) "
+            "AND ts >= now() - interval '10 days' AND eligible AND rank IS NOT NULL",
+            (sorted(set(symbols)),)):
+        out.setdefault(symbol, []).append(rank)
+    return out
+
+
+def eligible_count(q, ts, universe):
+    return q("SELECT count(*) FROM stock_scores WHERE ts = %s AND universe = %s "
+             "AND eligible", (ts, universe))[0][0]
+
+
+# ---------------------------------------------------------------- screener views
+
+def full_runs(q, universe, limit=2):
+    """Latest run timestamps that scored the whole universe (canaries skipped)."""
+    return [r[0] for r in q(
+        "SELECT ts FROM stock_scores WHERE universe = %s "
+        "AND ts >= now() - interval '30 days' GROUP BY ts "
+        "HAVING count(*) FILTER (WHERE eligible) >= %s ORDER BY ts DESC LIMIT %s",
+        (universe, MIN_FULL_RUN, limit),
+    )]
+
+
+def top_text(q, factor, universe, n=10):
+    """Recommendation list: best `n` eligible names by one factor score."""
+    column = FACTORS[factor]          # whitelist — never user text in SQL
+    runs = full_runs(q, universe, limit=1)
+    if not runs:
+        return f"No full screener run for {universe} in the last 30 days."
+    rows = q(
+        "SELECT s.symbol, COALESCE(u.name, s.symbol), s." + column + ", s.composite, s.rank, "
+        "s.coverage, s.value_score, s.quality_score, s.growth_score, s.momentum_score, "
+        "s.risk_score "
+        "FROM stock_scores s LEFT JOIN universe_constituents u "
+        "  ON u.symbol = s.symbol AND u.universe = s.universe "
+        "WHERE s.ts = %s AND s.universe = %s AND s.eligible AND s." + column + " IS NOT NULL "
+        "ORDER BY s." + column + " DESC, s.rank LIMIT %s",
+        (runs[0], universe, n),
+    )
+    symbols = [r[0] for r in rows]
+    ytd = ytd_map(q, symbols)
+    history = rank_history(q, symbols)
+    size = eligible_count(q, runs[0], universe)
+
+    def year(sym):
+        return "" if ytd.get(sym) is None else pct(ytd[sym], 0)
+
+    def conf(r):
+        return str(screener_confidence(r[5], r[6:11], history.get(r[0], []), size))
+
+    if factor == "composite":
+        tbl = table(("#", "", "Score", "YTD", "Conf"),
+                    [(r[4], clip(bare(r[0]), 11), num(r[3], 1), year(r[0]), conf(r))
+                     for r in rows], "rlrrr")
+    else:
+        tbl = table(("", factor.capitalize(), "Rank", "YTD", "Conf"),
+                    [(clip(bare(r[0]), 11), num(r[2]), r[4], year(r[0]), conf(r))
+                     for r in rows], "lrrrr")
+    names = "\n".join(f"{esc(bare(r[0]))} — {esc(r[1])}" for r in rows[:5])
+    return "\n".join([
+        f"<b>Top {len(rows)} by {factor} — {universe}</b>  <i>run of {runs[0]:%d %b}</i>",
+        tbl, names,
+        "<i>Scores are percentile ranks within the universe (1.00 = best); composite "
+        "is 0-100. Screening output, not advice — /track shows how picks have done.</i>",
+        CONF_NOTE])
+
+
+def parse_top(text):
+    """'/top growth sp500' → (factor, universe, error). Defaults: composite, NIFTY500."""
+    factor, universe = "composite", "NIFTY500"
+    for word in text.lower().split()[1:]:
+        if word in FACTORS:
+            factor = word
+        elif word in UNIVERSES:
+            universe = UNIVERSES[word]
+        else:
+            return None, None, ("Usage: <code>/top [" + "|".join(FACTORS) +
+                                "] [nifty|sp500]</code>")
+    return factor, universe, None
+
+
+def diff_shortlist(latest, previous):
+    """({symbol: (name, rank)} now, same before) → (entered, left), rank-sorted."""
+    entered = sorted(((r, s, n) for s, (n, r) in latest.items() if s not in previous))
+    left = sorted(((r, s, n) for s, (n, r) in previous.items() if s not in latest))
+    return ([(s, n, r) for r, s, n in entered], [(s, n, r) for r, s, n in left])
+
+
+def movers(q, universe):
+    """(latest_ts, prev_ts, entered, left) for the top-TOP_N shortlist, or None."""
+    runs = full_runs(q, universe, limit=2)
+    if len(runs) < 2:
+        return None
+    rows = q(
+        "SELECT s.ts, s.symbol, COALESCE(u.name, s.symbol), s.rank "
+        "FROM stock_scores s LEFT JOIN universe_constituents u "
+        "  ON u.symbol = s.symbol AND u.universe = s.universe "
+        "WHERE s.universe = %s AND s.ts = ANY(%s) AND s.eligible AND s.rank <= %s",
+        (universe, runs, TOP_N),
+    )
+    latest = {s: (n, r) for ts, s, n, r in rows if ts == runs[0]}
+    previous = {s: (n, r) for ts, s, n, r in rows if ts == runs[1]}
+    entered, left = diff_shortlist(latest, previous)
+    return runs[0], runs[1], entered, left
+
+
+def movers_lines(universe, result, ytd=None):
+    latest, prev, entered, left = result
+    if not entered and not left:
+        return []
+    ytd = ytd or {}
+    lines = [f"<b>{universe} top {TOP_N}</b>  <i>{prev:%d %b} → {latest:%d %b}</i>"]
+    lines += [f"▲ In at #{r}: <b>{esc(n)}</b> ({esc(bare(s))}){ytd_tag(ytd.get(s))}"
+              for s, n, r in entered]
+    lines += [f"▼ Out, was #{r}: {esc(n)} ({esc(bare(s))})" for s, n, r in left]
+    return lines
+
+
+def movers_text(q):
+    out = []
+    for universe in ("NIFTY500", "SP500"):
+        result = movers(q, universe)
+        if result is None:
+            out.append(f"<b>{universe}</b>: fewer than two full runs yet.")
+        else:
+            out += movers_lines(universe, result,
+                                ytd_map(q, [e[0] for e in result[2]])) or [
+                f"<b>{universe} top {TOP_N}</b>: unchanged "
+                f"<i>{result[1]:%d %b} → {result[0]:%d %b}</i>"]
+    return "\n".join(out)
+
+
+# ---------------------------------------------------------------- /multibagger
+
+# Gates a company must pass before it is scored. They describe what past
+# multibaggers usually looked like BEFORE the run — they do not predict one.
+MB_MIN_GROWTH = 0.15      # revenue AND earnings compounding, per year
+MB_MIN_ROE = 0.15
+MB_MAX_DEBT_EQUITY = 1.0  # not applied to financials (leverage is the business)
+MB_MAX_PEG = 2.0          # P/E divided by earnings growth in % per year
+MB_SIZE_CUT = 0.70        # largest 30% of the universe by market cap are out
+MB_MIN_YEARS = 1.9        # growth needs at least ~2 fiscal years between the ends
+MB_ANNUAL = ["total_revenue", "eps", "net_income", "fcf", "total_debt", "shareholder_equity"]
+MB_SNAPSHOT = ["pe", "roe", "market_cap", "operating_margin"]
+
+
+def cagr(points):
+    """Compound annual growth from [(ts, value), …] newest first, or None.
+
+    Uses the newest and oldest year; both must be positive (growth from a loss
+    is not a rate) and at least MB_MIN_YEARS apart.
+    """
+    if len(points) < 2:
+        return None
+    (new_ts, new), (old_ts, old) = points[0], points[-1]
+    years = (new_ts - old_ts).days / 365.25
+    if years < MB_MIN_YEARS or new <= 0 or old <= 0:
+        return None
+    return (new / old) ** (1 / years) - 1
+
+
+def scaled(value, full):
+    """0..1 share of `full`, clamped — one component of the score."""
+    return 0.0 if value is None else max(0.0, min(value / full, 1.0))
+
+
+def multibagger_candidate(symbol, sector, annual, snap, metrics, size_pct):
+    """Score one company, or return (None, reason) for the gate it failed.
+
+    annual: series() output; snap: {metric: value}; metrics: latest
+    stock_metrics_daily values; size_pct: market-cap percentile in the
+    universe (0 = smallest). Score is 0-100:
+      growth 35 · quality 25 · valuation 15 · momentum 15 · size 10.
+    """
+    rev = cagr(annual.get("total_revenue", []))
+    earn = cagr(annual.get("eps", [])) or cagr(annual.get("net_income", []))
+    if rev is None or earn is None:
+        return None, "growth history"
+    if rev < MB_MIN_GROWTH or earn < MB_MIN_GROWTH:
+        return None, "growth"
+    roe = snap.get("roe")
+    equity = annual.get("shareholder_equity", [(None, None)])[0][1]
+    income = annual.get("net_income", [(None, None)])[0][1]
+    if roe is None and equity and equity > 0 and income is not None:
+        roe = income / equity
+    if roe is None or roe < MB_MIN_ROE:
+        return None, "return on equity"
+    debt = annual.get("total_debt", [(None, None)])[0][1]
+    leverage = debt / equity if debt is not None and equity and equity > 0 else None
+    if sector != "Financial Services" and leverage is not None \
+            and leverage > MB_MAX_DEBT_EQUITY:
+        return None, "debt"
+    if size_pct is None or size_pct > MB_SIZE_CUT:
+        return None, "size"
+    pe = snap.get("pe")
+    peg = pe / (earn * 100) if pe and pe > 0 else None
+    if peg is None or peg > MB_MAX_PEG:
+        return None, "valuation"
+    trend = metrics.get("sma200_ratio")
+    if trend is None or trend < 1.0:
+        return None, "trend"
+
+    fcf = annual.get("fcf", [(None, None)])[0][1]
+    score = (
+        17.5 * scaled(rev, 0.40) + 17.5 * scaled(earn, 0.50)
+        + 15 * scaled(roe, 0.35) + (10 if fcf is not None and fcf > 0 else 0)
+        + 15 * (1 - scaled(peg - 0.5, MB_MAX_PEG - 0.5))
+        + 10 * scaled(metrics.get("ret_12m"), 1.0) + 5 * scaled(metrics.get("pos_52w"), 1.0)
+        + 10 * (1 - size_pct / MB_SIZE_CUT)
+    )
+    return {"symbol": symbol, "score": score, "rev": rev, "earn": earn, "roe": roe,
+            "peg": peg, "cap": snap.get("market_cap"), "leverage": leverage,
+            "conf": multibagger_confidence(annual, snap, metrics, rev, earn)}, None
+
+
+def multibagger_confidence(annual, snap, metrics, rev, earn):
+    """Confidence in a multibagger candidate (see the note above CONF_HIGH).
+
+    30 — history: a full three fiscal years behind the growth rate (two = half).
+    20 — earnings confirmed: EPS and net income both compound above the gate.
+    15 — margin over the gates: how far the slower growth rate clears 15%.
+    15 — cash: free cash flow is positive.
+    10 — return on equity is as reported, not derived from the statements.
+    10 — price sits in the upper half of its 52-week range.
+    """
+    revenue = annual.get("total_revenue", [])
+    years = (revenue[0][0] - revenue[-1][0]).days / 365.25 if len(revenue) > 1 else 0
+    both = [cagr(annual.get(k, [])) for k in ("eps", "net_income")]
+    confirmed = sum(c is not None and c >= MB_MIN_GROWTH for c in both)
+    fcf = annual.get("fcf", [(None, None)])[0][1]
+    pos = metrics.get("pos_52w")
+    return round(
+        30 * (1.0 if years >= 2.9 else 0.5)
+        + 10 * confirmed
+        + 15 * scaled(min(rev, earn) - MB_MIN_GROWTH, MB_MIN_GROWTH)
+        + (15 if fcf is not None and fcf > 0 else 0)
+        + (10 if snap.get("roe") is not None else 0)
+        + (10 if pos is not None and pos >= 0.5 else 0))
+
+
+def multibagger_rank(universe_rows, fundamentals, metric_rows):
+    """(candidates best-first, {gate: failures}) for a whole universe.
+
+    universe_rows: (symbol, name, sector); fundamentals: (symbol, metric,
+    source, ts, value); metric_rows: (symbol, metric, value) latest per symbol.
+    """
+    per, snap, metrics = {}, {}, {}
+    for symbol, metric, source, ts, value in fundamentals:
+        if metric in MB_SNAPSHOT:
+            if value is not None and (metric not in snap.get(symbol, {})
+                                      or ts > snap[symbol][metric][0]):
+                snap.setdefault(symbol, {})[metric] = (ts, value)
+        if metric in MB_ANNUAL:
+            per.setdefault(symbol, []).append((metric, source, ts, value))
+    for symbol, metric, value in metric_rows:
+        metrics.setdefault(symbol, {})[metric] = value
+    snap = {sym: {k: v for k, (_, v) in vals.items()} for sym, vals in snap.items()}
+
+    caps = sorted(v["market_cap"] for v in snap.values() if v.get("market_cap"))
+    out, failed = [], {}
+    for symbol, _name, sector in universe_rows:
+        cap = snap.get(symbol, {}).get("market_cap")
+        size_pct = (sum(c < cap for c in caps) / len(caps)) if cap and caps else None
+        got, reason = multibagger_candidate(
+            symbol, sector, series(per.get(symbol, [])), snap.get(symbol, {}),
+            metrics.get(symbol, {}), size_pct)
+        if got:
+            out.append(got)
+        else:
+            failed[reason] = failed.get(reason, 0) + 1
+    return sorted(out, key=lambda c: -c["score"]), failed
+
+
+def multibagger_text(q, universe, n=10):
+    names = q("SELECT symbol, name, sector FROM universe_constituents "
+              "WHERE universe = %s AND active", (universe,))
+    if not names:
+        return f"No constituents for {universe}."
+    fundamentals = q(
+        "SELECT f.symbol, f.metric, f.source, f.ts, f.value FROM stock_fundamentals f "
+        "INNER JOIN universe_constituents u ON u.symbol = f.symbol AND u.universe = %s "
+        "WHERE f.metric = ANY(%s)", (universe, MB_ANNUAL + MB_SNAPSHOT))
+    metric_rows = q(
+        "SELECT DISTINCT ON (m.symbol, m.metric) m.symbol, m.metric, m.value "
+        "FROM stock_metrics_daily m "
+        "INNER JOIN universe_constituents u ON u.symbol = m.symbol AND u.universe = %s "
+        "WHERE m.ts >= now() - interval '10 days' AND m.metric = ANY(%s) "
+        "ORDER BY m.symbol, m.metric, m.ts DESC",
+        (universe, ["sma200_ratio", "ret_12m", "pos_52w"]))
+    ranked, failed = multibagger_rank(names, fundamentals, metric_rows)
+    head = f"<b>Multibagger candidates — {universe}</b>"
+    if not ranked:
+        return head + "\nNo company passes every gate right now."
+    top = ranked[:n]
+    label = dict((s, nm) for s, nm, _ in names)
+    body = [(clip(bare(c["symbol"]), 9), f"{c['score']:.0f}", pct(c["rev"], 0),
+             pct(c["earn"], 0), share(c["roe"]), str(c["conf"])) for c in top]
+    detail = "\n".join(
+        f"{esc(bare(c['symbol']))} — {esc(label.get(c['symbol'], ''))} · "
+        f"cap {big(c['cap'])} · PEG {c['peg']:.1f} · confidence {conf_label(c['conf'])}"
+        for c in top[:5])
+    order = ["growth history", "growth", "return on equity", "debt", "size",
+             "valuation", "trend"]
+    funnel = ", ".join(f"{failed[k]} on {k}" for k in order if failed.get(k))
+    return "\n".join([
+        head,
+        f"{len(ranked)} of {len(names)} companies pass every gate",
+        table(("", "Score", "Rev", "EPS", "ROE", "Conf"), body, "lrrrrr"),
+        detail,
+        f"<i>Gates: revenue and earnings each compounding {share(MB_MIN_GROWTH)}+ a year "
+        f"over the fiscal years on file (2-3), ROE {share(MB_MIN_ROE)}+, debt/equity under "
+        f"{MB_MAX_DEBT_EQUITY:.0f} (financials exempt), outside the largest "
+        f"{share(1 - MB_SIZE_CUT)} by market cap, PEG under {MB_MAX_PEG:.0f}, price above "
+        f"its 200-day average. Dropped: {funnel}.</i>",
+        "<i>This finds companies with the profile multibaggers usually had before the "
+        "run. Most such companies still do not become one. Not advice.</i>",
+        CONF_NOTE])
+
+
+# The run list and start bound arrive as parameters (chunk-pruning note in the
+# module docstring).
+TRACK_SQL = """
+WITH px AS (
+  SELECT symbol, ts, close,
+         row_number() OVER (PARTITION BY symbol ORDER BY ts) AS rn
+  FROM stock_prices
+  WHERE ts >= %(start)s::timestamptz
+    AND symbol IN (SELECT symbol FROM universe_constituents WHERE universe = %(u)s)),
+entry AS (
+  SELECT s.ts AS run_ts, s.symbol, p.rn, p.close,
+         (s.eligible AND s.rank <= %(n)s) AS pick
+  FROM stock_scores s
+  INNER JOIN px p ON p.symbol = s.symbol AND p.ts = s.ts
+  WHERE s.universe = %(u)s AND s.ts = ANY(%(runs)s) AND p.close > 0),
+fwd AS (
+  SELECT e.run_ts, h.n, e.pick, x.close / e.close - 1 AS ret
+  FROM entry e
+  CROSS JOIN unnest(%(h)s::int[]) AS h(n)
+  INNER JOIN px x ON x.symbol = e.symbol AND x.rn = e.rn + h.n)
+SELECT n, run_ts,
+       avg(ret) FILTER (WHERE pick) AS picks_ret,
+       avg(ret) AS universe_ret,
+       count(*) FILTER (WHERE pick) AS picks,
+       count(*) FILTER (WHERE pick AND ret > 0) AS winners
+FROM fwd GROUP BY n, run_ts ORDER BY n, run_ts
+"""
+
+
+def track_rows(q, universe):
+    runs = [r[0] for r in q(
+        "SELECT ts FROM stock_scores WHERE universe = %s "
+        "AND ts >= now() - interval '400 days' GROUP BY ts "
+        "HAVING count(*) FILTER (WHERE eligible) >= %s ORDER BY ts",
+        (universe, MIN_FULL_RUN))]
+    if not runs:
+        return []
+    return q(TRACK_SQL, {"u": universe, "n": TOP_N, "h": list(HORIZONS),
+                         "runs": runs, "start": runs[0]})
+
+
+def summarise_track(rows):
+    """Per horizon: runs, mean pick return, mean universe return, share of runs
+    where the picks beat the universe, share of individual picks that rose."""
+    out = {}
+    for n, _run, picks_ret, univ_ret, picks, winners in rows:
+        if picks_ret is None or not picks:
+            continue
+        h = out.setdefault(n, {"runs": 0, "picks": 0.0, "univ": 0.0, "beat": 0,
+                               "n_picks": 0, "winners": 0})
+        h["runs"] += 1
+        h["picks"] += picks_ret
+        h["univ"] += univ_ret
+        h["beat"] += picks_ret > univ_ret
+        h["n_picks"] += picks
+        h["winners"] += winners
+    for h in out.values():
+        h["picks"] /= h["runs"]
+        h["univ"] /= h["runs"]
+    return out
+
+
+def track_text(q):
+    labels = {1: "1 day", 5: "1 week", 21: "1 month", 63: "3 months"}
+    out = ["<b>Screener track record</b>",
+           f"Top-{TOP_N} picks against the whole universe, equal-weighted, close to close."]
+    for universe in ("NIFTY500", "SP500"):
+        stats = summarise_track(track_rows(q, universe))
+        body = []
+        for n in HORIZONS:
+            h = stats.get(n)
+            body.append((labels[n], "–", "–", "–", "–") if not h else (
+                labels[n], pct(h["picks"], 2), pct(h["univ"], 2),
+                pct(h["picks"] - h["univ"], 2), f"{h['beat']}/{h['runs']}"))
+        out += [f"<b>{universe}</b>",
+                table(("After", "Picks", "All", "Edge", "Won"), body, "lrrrr")]
+    out.append("<i>Won = runs where the picks beat the universe; – = that horizon has not "
+               "completed yet. Daily runs overlap, so longer horizons are not independent; "
+               "under ~60 runs this is anecdote.</i>")
+    return "\n".join(out)
+
+
+# ---------------------------------------------------------------- /macro
+
+def gold_inr_10g(usd_per_oz, usdinr):
+    """International gold parity in rupees per 10 g (no duty/GST/premium)."""
+    return usd_per_oz * usdinr / OZ_GRAMS * 10
+
+
+def spread_bp(yields, a, b):
+    if a not in yields or b not in yields:
+        return None
+    return (yields[a] - yields[b]) * 100
+
+
+def macro_text(q):
+    out = ["<b>Derived macro</b>"]
+
+    gold = q("SELECT ts, close FROM index_prices WHERE ticker = 'GC=F' "
+             "AND ts >= now() - interval '15 days' ORDER BY ts DESC LIMIT 2", ())
+    vals = []
+    for ts, close in gold:
+        fx = q("SELECT rate FROM fx_rates WHERE pair = 'USDINR=X' "
+               "AND ts < %s::timestamptz + interval '1 day' "
+               "AND ts >= %s::timestamptz - interval '7 days' "
+               "ORDER BY ts DESC LIMIT 1", (ts, ts))
+        if fx:
+            vals.append((ts, gold_inr_10g(close, fx[0][0])))
+    if vals:
+        day = f"  {pct(vals[0][1] / vals[1][1] - 1, 2)}" if len(vals) > 1 else ""
+        out += [f"<b>Gold in rupees</b>  <i>{vals[0][0]:%d %b}</i>",
+                f"<b>{num(vals[0][1], 0)}</b> per 10 g{day}",
+                "<i>International parity — before duty, GST and premium.</i>"]
+
+    y = dict((i, v) for i, _, v in q(
+        "SELECT DISTINCT ON (instrument) instrument, ts, yield FROM bond_yields "
+        "WHERE ts >= now() - interval '15 days' ORDER BY instrument, ts DESC", ()))
+    spreads = kv([(label, None if spread_bp(y, a, b) is None
+                   else f"{spread_bp(y, a, b):+.0f} bp")
+                  for label, a, b in (("US 10Y - 3M", "^TNX", "^IRX"),
+                                      ("US 30Y - 5Y", "^TYX", "^FVX"),
+                                      ("India 10Y - 3Y", "IN_GS_10Y", "IN_GS_3Y"),
+                                      ("India 10Y - 91d bill", "IN_GS_10Y", "IN_TBILL_91D"),
+                                      ("India 10Y - US 10Y", "IN_GS_10Y", "^TNX"))])
+    if spreads:
+        out += ["<b>Yield spreads</b>", spreads]
+
+    flow = q(
+        "WITH f AS (SELECT ts::date AS d, sum(amount) AS fii FROM capital_flows "
+        "           WHERE flow_type = 'FII' AND direction = 'net' "
+        "             AND ts >= now() - interval '90 days' GROUP BY 1), "
+        "n AS (SELECT ts::date AS d, close / lag(close) OVER (ORDER BY ts) - 1 AS ret "
+        "      FROM index_prices WHERE ticker = '^NSEI' "
+        "        AND ts >= now() - interval '100 days'), "
+        "j AS (SELECT f.d, f.fii, n.ret FROM f INNER JOIN n ON n.d = f.d "
+        "      WHERE n.ret IS NOT NULL ORDER BY f.d DESC LIMIT 20) "
+        "SELECT count(*), corr(fii, ret), sum(fii), exp(sum(ln(1 + ret))) - 1 FROM j", ())
+    if flow and flow[0][0] and flow[0][0] >= 5:
+        sessions, corr, fii_sum, nifty_ret = flow[0]
+        out += [f"<b>FII flows and the Nifty</b>  <i>last {sessions} sessions</i>", kv([
+            ("FII net, Rs cr", f"{fii_sum:+,.0f}"),
+            ("Nifty 50", pct(nifty_ret)),
+            ("Daily correlation", None if corr is None else f"{corr:+.2f}")])]
+    return "\n".join(out) if len(out) > 1 else "No macro inputs in the last 15 days."
+
+
+# ---------------------------------------------------------------- alerts
+
+def crosses(metric_rows, now=None):
+    """Moving-average crossings from stock_metrics_daily rows.
+
+    metric_rows: (symbol, metric, ts, value) newest first per (symbol, metric).
+    Returns [(symbol, 'sma200_ratio', 'above'|'below', ts)] where the latest
+    FRESH value sits on the other side of 1.0 from the one before it.
+    """
+    seen, out = {}, []
+    for symbol, metric, ts, value in metric_rows:
+        pair = seen.setdefault((symbol, metric), [])
+        if len(pair) < 2 and value is not None:
+            pair.append((ts, value))
+    for (symbol, metric), pair in sorted(seen.items()):
+        if len(pair) < 2 or not is_fresh(pair[0][0], now):
+            continue
+        (ts, cur), (_, prev) = pair
+        if (cur - 1) * (prev - 1) < 0:
+            out.append((symbol, metric, "above" if cur > 1 else "below", ts))
+    return out
+
+
+def alert_sections(q, now=None):
+    """Lines for the daily change alert; empty list = nothing worth sending."""
+    lines = []
+
+    for universe in ("NIFTY500", "SP500"):
+        result = movers(q, universe)
+        if result and is_fresh(result[0], now):
+            lines += movers_lines(universe, result, ytd_map(q, [e[0] for e in result[2]]))
+
+    try:
+        watch = q(WATCH_SQL, ())
+    except Exception as exc:  # noqa: BLE001 - only the missing-table case is expected
+        if not table_missing(exc):
+            raise
+        print("WARN watchlist table missing — watchlist alerts skipped", flush=True)
+        watch = []
+    symbols = [r[0] for r in watch]
+    if not symbols:
+        return lines
+
+    mine = []
+    for symbol, *_rest, ts, close, prev, _rank in watch:
+        if close and prev and is_fresh(ts, now) and abs(close / prev - 1) >= BIG_MOVE:
+            mine.append(f"<b>{esc(bare(symbol))}</b> moved {pct(close / prev - 1)} "
+                        f"to {num(close)}  <i>{ts:%d %b}</i>")
+
+    labels = {"sma50_ratio": "50-day", "sma200_ratio": "200-day"}
+    for symbol, metric, side, ts in crosses(q(
+            "SELECT symbol, metric, ts, value FROM stock_metrics_daily "
+            "WHERE symbol = ANY(%s) AND metric = ANY(%s) "
+            "AND ts >= now() - interval '15 days' ORDER BY symbol, metric, ts DESC",
+            (symbols, list(labels))), now):
+        mine.append(f"<b>{esc(bare(symbol))}</b> crossed {side} its {labels[metric]} "
+                    f"average  <i>{ts:%d %b}</i>")
+
+    events = q(
+        "SELECT DISTINCT ON (h.id) e.symbol, e.event_type, h.headline, h.ts "
+        "FROM headline_events e INNER JOIN raw_headlines h ON h.id = e.headline_id "
+        "WHERE e.symbol = ANY(%s) AND e.ts >= now() - interval '24 hours' "
+        "ORDER BY h.id, e.event_type", (symbols,))
+    for symbol, event, headline, _ts in events:
+        mine.append(f"<b>{esc(bare(symbol))}</b> · {esc(event)}\n  {esc(headline)}")
+    if mine:
+        lines += ["<b>Your watchlist</b>"] + mine
+    return lines
