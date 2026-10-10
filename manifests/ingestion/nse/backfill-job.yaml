@@ -1,5 +1,6 @@
 # One-shot 1y backfill for NSE indices. Image must be >= v2
-# (FETCH_PERIOD/BACKFILL support). Run once:
+# (FETCH_PERIOD/BACKFILL support); v3 carries ^CRSLDX (Nifty 500), whose
+# history only starts 2026-10-09 until this is re-run. Run once:
 #   kubectl apply -f backfill-nse.yaml
 # Idempotent — safe to re-run. Delete afterwards.
 apiVersion: batch/v1
@@ -14,7 +15,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: backfill
-          image: local/nse-fetcher:v2
+          image: local/nse-fetcher:v3
           imagePullPolicy: Never
           env:
             - name: PGHOST

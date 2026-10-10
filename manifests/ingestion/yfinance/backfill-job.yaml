@@ -1,5 +1,6 @@
 # One-shot 1y backfill for the global batch (seeds history for TA/dashboards).
-# Image must be >= v3 (FETCH_PERIOD/BACKFILL support). Run once:
+# Image must be >= v3 (FETCH_PERIOD/BACKFILL support); v4 adds ^RUI (Russell
+# 1000, 2026-10-10) — re-run once after the v4 import to seed its history. Run once:
 #   kubectl apply -f backfill-yfinance.yaml
 # Idempotent (same DELETE+INSERT as daily runs) — safe to re-run. Delete the
 # Job object afterwards to keep history tidy.
@@ -15,7 +16,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: backfill
-          image: local/yfinance-fetcher:v3
+          image: local/yfinance-fetcher:v4
           imagePullPolicy: Never
           env:
             - name: PGHOST

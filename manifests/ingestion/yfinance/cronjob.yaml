@@ -20,7 +20,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: fetcher
-              image: local/yfinance-fetcher:v3
+              image: local/yfinance-fetcher:v4
               imagePullPolicy: Never
               env:
                 - name: PGHOST

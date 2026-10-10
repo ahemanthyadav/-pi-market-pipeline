@@ -18,6 +18,7 @@ import yfinance as yf
 TICKERS = [
     # US
     "^GSPC", "^IXIC", "^DJI", "^RUT", "^VIX",
+    "^RUI",  # Russell 1000 (added 2026-10-10; Yahoo probe: 251 daily bars over 1y)
     # Europe
     "^FTSE", "^GDAXI", "^FCHI", "^STOXX50E", "^IBEX",
     "FTSEMIB.MI", "^SSMI", "^AEX",
