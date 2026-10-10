@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""pre-commit guard — blocks credentials, real IPs and forbidden files from entering git.
+
+Enable once per clone:   git config core.hooksPath .githooks
+Never prints a matched value — only file:line and the rule name.
+
+Checks (all on STAGED changes):
+  1. forbidden paths   (secret manifests, local env files, keys, installers, caches)
+  2. exact local values: every value in the local credentials file (weak words only
+     in credential context) and every address in the local hosts file
+  3. private/tailnet-range IPv4 literals and common credential patterns
+  4. gitleaks (--staged), if installed
+
+Test hooks: HOOK_SECRETS_FILE / HOOK_HOSTS_FILE override the local files.
+"""
+import os
+import re
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
+SECRETS = Path(os.environ.get("HOOK_SECRETS_FILE", ROOT / ".secrets.env"))
+HOSTS = Path(os.environ.get("HOOK_HOSTS_FILE", ROOT / ".hosts.env"))
+WEAK_KEYS = {"PI_PASS", "TX2_PASS"}  # short/common words: match only in credential context
+# The guard's own source and its test fixtures necessarily contain the bad patterns.
+PATTERN_EXEMPT = {".githooks/pre-commit", "tests/test-precommit-hook.sh"}
+
+FORBIDDEN = re.compile(
+    r"(^|/)(secret\.yaml|\.secrets\.env|\.hosts\.env|kubeconfig[^/]*|[^/]*\.(pem|key|kubeconfig))$"
+    r"|__pycache__/|^validation/grafana/|(^|/)td-setup[^/]*"
+)
+PRIVATE_IP = re.compile(
+    r"(?<![\d.])(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}"
+    r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3})(?![\d])"
+)
+PATTERNS = {
+    "ssh-pass-on-cmdline": re.compile(
+        r"SSH_PASS=(?:'(?![<$])[^']+'|\"(?![<$])[^\"]+\"|(?![<$'\"])[^\s]+)\s+python3"),
+    "sudo-echo-literal": re.compile(r"echo\s+['\"]?(?!@@PW@@)[A-Za-z0-9]+['\"]?\s*\|\s*sudo -S"),
+    "telegram-token": re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{30,}\b"),
+    "private-key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    "url-with-credentials": re.compile(r"://[^/\s:@]+:[^/\s@<$]{3,}@"),
+    "chat-id-literal": re.compile(r"(?i)chat_?id\W{0,6}-?\d{7,}"),
+}
+
+
+def load_env(path: Path) -> dict:
+    out = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            m = re.match(r"^([A-Z0-9_]+)=(.*)$", line.strip())
+            if m:
+                try:
+                    parts = shlex.split(m.group(2))
+                except ValueError:
+                    parts = [m.group(2)]
+                if parts and parts[0]:
+                    out[m.group(1)] = parts[0]
+    return out
+
+
+def main() -> int:
+    problems = []
+    names = subprocess.run(
+        ["git", "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"],
+        capture_output=True, text=True).stdout.split("\0")
+    names = [n for n in names if n]
+    for n in names:
+        if FORBIDDEN.search(n):
+            problems.append((n, 0, "forbidden-path"))
+
+    secrets = load_env(SECRETS)
+    strong = {k: v for k, v in secrets.items() if k not in WEAK_KEYS and len(v) >= 6}
+    weak_rx = [re.compile(r"(?i)(['\"]%s['\"]|(pass(word)?|pw)\s*[=:]\s*['\"]?%s\b|echo\s+%s\s*\||-p\s+%s\b)"
+                          % ((re.escape(secrets[k]),) * 4)) for k in WEAK_KEYS if secrets.get(k)]
+    hosts = [v.split("/")[0] for v in load_env(HOSTS).values() if v]
+
+    diff = subprocess.run(["git", "diff", "--cached", "-U0", "--no-color", "--diff-filter=ACMR"],
+                          capture_output=True, text=True, errors="replace").stdout
+    cur, lineno = None, 0
+    for raw in diff.splitlines():
+        if raw.startswith("+++ b/"):
+            cur = raw[6:]
+        elif raw.startswith("@@"):
+            m = re.search(r"\+(\d+)", raw)
+            lineno = int(m.group(1)) - 1 if m else 0
+        elif raw.startswith("+") and not raw.startswith("+++"):
+            lineno += 1
+            line = raw[1:]
+            if cur is None:
+                continue
+            for k, v in strong.items():
+                if v in line:
+                    problems.append((cur, lineno, "local-secret-value"))
+            for h in hosts:
+                if h in line:
+                    problems.append((cur, lineno, "real-address"))
+            if cur in PATTERN_EXEMPT:
+                continue  # fixtures/regex source only; real local values were still checked above
+            for rx in weak_rx:
+                if rx.search(line):
+                    problems.append((cur, lineno, "local-password-in-context"))
+            if PRIVATE_IP.search(line):
+                problems.append((cur, lineno, "private-ip-literal"))
+            for name, rx in PATTERNS.items():
+                if rx.search(line) and "@@PW@@" not in line:
+                    problems.append((cur, lineno, name))
+
+    if problems:
+        print("pre-commit: BLOCKED — sensitive content staged (values not shown):", file=sys.stderr)
+        for f, ln, why in sorted(set(problems)):
+            print(f"  {f}:{ln}  [{why}]" if ln else f"  {f}  [{why}]", file=sys.stderr)
+        print("Fix: use placeholders / the local gitignored files (AGENTS.md rules 7-8).", file=sys.stderr)
+        return 1
+
+    gl = subprocess.run(["gitleaks", "git", "--staged", "--redact", "--no-banner"],
+                        capture_output=True, text=True) if subprocess.run(
+        ["sh", "-c", "command -v gitleaks"], capture_output=True).returncode == 0 else None
+    if gl is not None and gl.returncode != 0:
+        print("pre-commit: BLOCKED by gitleaks (values redacted):", file=sys.stderr)
+        print((gl.stdout + gl.stderr).strip()[-1500:], file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
