@@ -102,6 +102,24 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   `local/telegram-digest:v3` (live tags verified); canary
   `telegram-alerts-validate` → `ALERTS-OK 3 line(s) sent`. Detail:
   telegram-bot doc §1a.
+- [ ] ⛔ **Apply Telegram v6 — blocked on pi2** (API refused from ~13:50 UTC
+  2026-10-10, mid-rollout; no SSH for 6+ min). Image `local/telegram-digest:v6`
+  is already imported on pi1 and the manifests carry the tag; live objects are
+  still on v5 (working). When the API answers:
+  `kubectl apply -f manifests/telegram/cronjob.yaml -f manifests/telegram/deployment.yaml`,
+  verify the three live tags, then in-pod check
+  `kubectl -n market-data exec deploy/telegram-bot -- python -c "import bot; print(bot.COMMANDS['nifty']('/nifty'))"`
+  and bump the manual's tag references v5 → v6.
+- [x] ✅ 2026-10-10 **Index long-term reference** (v5): 1/3/5-year averages +
+  low/normal/high reading on `/index` `/nifty` `/sensex` `/gold`; index history
+  backfilled to 5 years (47,408 rows, no duplicates). Detail: telegram-bot doc
+  §1a "v5 / v6". 95 unit tests.
+- [ ] 🔶 Index history beyond 5 years needs a fetcher that commits per time range
+  (one-transaction backfill hits the lock table) — then 10y+/monthly history for
+  a 5-year reading that includes a bear market.
+- [ ] 🔶 pi2 keeps rebooting under shared-charger power (six+ times on
+  2026-10-10, each taking API + cluster DNS + the bot down). Dedicated 5.1 V
+  supply for pi2 is the fix; nothing in software will hold until then.
 - [x] ✅ 2026-10-10 **Telegram v4 live** (same day as v3): table layout,
   `/index`, YTD everywhere, valuation repriced to the latest close,
   `/multibagger`, confidence score on every recommendation. 85 unit tests;
@@ -112,8 +130,9 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 - [ ] 🤔 Screener value factor uses weekly Yahoo ratio snapshots (P/E, P/B,
   EV/EBITDA, market cap from Saturday's `stock-fundamentals` run), not the
   day's close. Reprice inside `stock_screener.py` the way `/stock` now does?
-- [ ] 🤔 Multibagger screen has no backtest — needs point-in-time fundamentals
-  (store each weekly snapshot instead of latest-only) before it can be scored.
+- [ ] 🤔 Multibagger screen is unbacktested. Possible now for the S&P 500 (EDGAR
+  history with filing dates since 2007), not for the Nifty 500 (4 annual points,
+  no filing dates). Superseded by the replacement screen in the evidence roadmap §3.
 - [x] ✅ 2026-10-10 Schema Job rerun (`08-watchlist.sql` → table `watchlist`;
   `^RUI` in ticker_names). `yfinance-fetcher:v4` live (pi1 + pi3 imports),
   1y backfills run for both index fetchers: `^RUI` 251 rows, `^CRSLDX` (Nifty
@@ -197,6 +216,109 @@ Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §
 - [ ] 🔶 **AR-12 (Phase 1)** repair/verify the 5-min stats logger (one sample on pi0/pi1/pi3; no cron entry seen
   on pi0) — the power fix's 24 h acceptance depends on it; install `nodewatch` on pi0; decide the watcher /
   power-controller host (pi0 vs MCU vs smart plugs; relays normally-closed; external dead-man's switch).
+
+### Prioritised implementation order (value × effort — `stock-screener-implementation-plan.md` §16)
+
+P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate after the first EV-0 run.
+- [ ] 🔶 **P0 (in order):** **G-1/DQ-1** adjusted prices + corporate actions → **G-2a** weekly membership snapshots, **EV-2**
+  keep fundamentals snapshots, **G-3/PV-0** prediction ledger + outcome resolver (parallel; design in `prediction-validation-and-training-2026-10-10.md`) → **EV-0 + ML-0** test harness → **EV-1** historical
+  membership. Prerequisite: power + backup fixes (§1, AR-11).
+- [ ] 🔶 **P1:** **G-6** India fundamentals source (decision: quarterly filings vs paid API) · **EV-3/4/5/7** price signals under
+  EV-0 · **EV-9 → EV-10…13** statement lines + signals · **ML-2** store embeddings now · **PV-1** model-health dashboard + alerts.
+- [ ] 🔶 **P2:** **EV-17/18** composite v2 + measured confidence (after EV-0 results) · **EV-14/15/6/8** · **G-9** US insider +
+  short interest · **G-10** India promoter pledge/holding · **EV-16** portfolio rules + risk dashboard · **ML-1/3/5/7a** ·
+  **G-12** breadth/sector rotation · **G-13** macro series · **G-18** second price source · **PV-2/PV-3** extend the ledger (sentiment, alerts, confidence) + drift monitor · **TP-0/TP-1** training infrastructure (registry, shadow, promotion) + scheduled refits.
+- [ ] 🔶 **P3:** **ML-4/6/7b–d** · **G-11** India delivery/bulk/OI · **G-16** filing-text analytics · **G-17** mid/small-cap
+  universe · **G-19** 13F holdings · **TP-2** GBM quarterly retrain + gate.
+
+### Data correctness — prerequisite for EV-0 and every ML backtest (found 2026-10-10)
+
+- [ ] 🔶 **P0 · DQ-1 (G-1) corporate actions / adjusted prices.** Verified: `stock_prices` keeps only OHLCV from yfinance with
+  `auto_adjust=False` — Yahoo's raw `Close` is split-adjusted but **not dividend-adjusted**, `Adj Close` is dropped, and
+  there is no splits/dividends/corporate-actions table. The daily job refreshes only the last 5 days, so a split or
+  spin-off *after* a symbol's backfill leaves a discontinuity in its older rows. Evidence it matters: 3 symbols show
+  > 40 % single-day moves in the last 60 days (CTVA −84 % on 2026-10-01, HEGAM.NS −63 % on 2026-09-06, MRNA +177 % on
+  2026-08-19 — causes **not verified**: spin-off, bonus/demerger or bad bars). Returns, momentum and volatility are
+  wrong across such events. Fix (additive): `adj_close` column + `corporate_actions` table; re-backfill a symbol when an
+  action is detected; flag > 40 % moves (ML-1); then run EV-0 on adjusted series. Total-return (dividend) effects are
+  currently omitted from every return metric.
+- [ ] 🔶 **P0 · DQ-2 fundamentals period + point-in-time errors** (verified 2026-10-10, live DB; design + DDL in
+  `data-foundations-schema-draft-2026-10-10.md`). (a) `edgar_facts()` ignores period length, so quarterly rows hold
+  year-to-date values (MSFT net income 27.75 → 66.21 → 97.98 → 133.75 bn across Sep/Dec/Mar/Jun) and
+  `annual_series()` can compare 12-month with 6-month figures for non-December fiscal years; (b) `filing_published_at`
+  is the *latest* re-filing (MSFT FY2024 shows 2026-07-29), so history is not point-in-time. Plan: new append-only
+  `financial_facts` table keyed by duration + first-filing date. Measure the effect on live scores (non-December-FY
+  companies) before switching readers. Blocks EV-0 on fundamentals and EV-9…EV-15.
+  **Measured 2026-10-10** (emulating `annual_series`, 477 S&P symbols with EDGAR revenue): median "3-year revenue
+  CAGR" = **−17.8 %** vs like-for-like YoY **+8.8 %**; 400 of 477 understated by > 10 pp, 351 sign-flipped, because the
+  newest entry per calendar year is a half-year YTD figure compared with a full year. `growth_score` (20 % of the
+  composite), EPS growth and `fcf_yield` are affected; percentile ranking hides part of it for companies at the same
+  point in their reporting cycle, but it distorts ranks between companies at different points. Fix before trusting any
+  growth/FCF ranking, not only before EV-0.
+  **Status 2026-10-10: interim fix coded in the repo, NOT built or deployed.** `stock_screener.py`
+  (`annual_series`, `latest_fundamentals`) and `stock_report.py` now read flow metrics (revenue, net income, operating
+  income, EPS, FCF) from full-year yfinance rows only — on live data the median 3-y revenue CAGR becomes +8.5 % (was
+  −17.8 %), no symbol loses coverage (every EDGAR symbol also has yfinance rows). Cost: US flow figures are the last
+  fiscal year, up to ~12 months old, until `financial_facts` gives true TTM. Tests: `tests/test_stock_fundamentals_fixes.py`.
+  Remaining: `/rebuild` as `screener:v9` → canary `stock-screener` → diff top-50 before/after → note in digest.
+  **Same flaw, not fixed:** Telegram `stocks.py` `series()` (picks the newest-`ts` source, i.e. EDGAR YTD for US) — own image.
+- [ ] 🔶 **P0 · DQ-3 weekly fundamentals job is effectively every-other-week + resets first-seen dates.**
+  `stock_fundamentals.py:228` uses undefined `failed`. Evidence it is live in v8: the 2026-10-04 full pass left the
+  cursor un-cleared (last update 10:39:13 UTC, the last symbol's write); the 2026-10-10 13:00 UTC run logged only
+  "pass already complete — cursor cleared" and finished in 20 s with **no data refreshed** (`pe` still one `ts`,
+  2026-10-04). The cursor is now NULL, so **2026-10-17 06:00 PDT does a full pass, then hits the NameError again**
+  (Job fails after writing everything; the week after is another no-op). Also each full pass resets yfinance statement
+  rows' `filing_published_at` to the fetch date (EV-2). Image v8 not inspected (not in TX2 Docker; repo file is the
+  best evidence). Fix in the next image, `/rebuild`; if v9 won't land before 10-17, accept the one failing Job.
+  **Status 2026-10-10: coded in the repo, NOT built or deployed.** `failed` now initialised and counted (also printed in
+  `FUNDAMENTALS-OK`); `upsert()` keeps the earliest `filing_published_at` (`LEAST`) so re-fetches stop resetting
+  first-seen dates. Covered by `tests/test_stock_fundamentals_fixes.py` (7 tests pass).
+- [ ] 🔶 **P1 · G-20** factor returns (US Ken French library, India IIM-A library — URLs/terms **not verified**) into
+  `factor_returns`; extend EV-0 §5 test 4 to "beyond the standard factors".
+- [ ] 🔶 **P2 · G-21** extra signals testable from data on hand: net payout yield (Boudoukh et al. 2007), distress score,
+  Amihud illiquidity (2002), max daily return / idiosyncratic volatility (Bali et al. 2011), industry momentum
+  (Moskowitz & Grinblatt 1999) — citations from memory, verify; each must pass EV §5.
+- [ ] 🔶 **P2 · G-22** 12 of 503 S&P symbols have no EDGAR rows (e.g. AAPL) — check the `cik` gap in
+  `universe_constituents`.
+
+### Evidence-based signals (plan 2026-10-10 — `evidence-based-signals-roadmap.md`)
+
+- [ ] 🔶 **EV-0** signal test harness (monthly IC, t-stat, quintile spread, costs)
+  — prerequisite for every item below; acceptance test in roadmap §5.
+- [ ] 🔶 **EV-2** keep every weekly fundamentals snapshot (stop overwriting) —
+  cheap now, unrecoverable later.
+- [ ] 🔶 **EV-3/EV-4/EV-5/EV-7** price-only signals, data on hand: 12-1 momentum,
+  nearness to 52-week high, beta, index trend flag.
+- [ ] 🔶 **EV-9** more statement lines (total assets, gross profit, operating cash
+  flow, shares) → **EV-10…EV-14** profitability, investment, accruals, issuance,
+  F-score / G-score.
+- [ ] 🔶 **EV-17** composite v2: replace the growth factor with profitability +
+  investment, equal weights. **EV-18** replace the heuristic confidence score with
+  measured IC and hit rate.
+- [ ] 🔶 **EV-1** historical index membership (removes survivorship bias);
+  **EV-6/EV-8/EV-15/EV-16** risk-scaled and residual momentum, post-earnings
+  drift, portfolio rules.
+
+### ML roadmap (plan 2026-10-10 — `ml-roadmap-2026-10-10.md`; reuses EV-0, never bypasses EV §5)
+
+Labels = research backing of the idea (legend in the roadmap): 🟢 research-backed · 🟡 conditional · 🔵 engineering
+practice · ⚪ unproven here · ⚠️ citation not verified.
+
+- [ ] 🔶 **ML-0 🟢** experiment infrastructure (`ml_runs`, Parquet export, walk-forward splitter, leakage test, trial
+  budget) — shares the EV-0 harness. **ML-1 🔵** anomaly detection (v1 rules: bad bars, feed/row drops, scraper
+  breakage; the node wedge signature is ⚪ — one outage) — needs the stats logger repaired (AR-12).
+- [ ] 🔶 **ML-2 🔵** news embeddings + story clustering on the TX2 (return benefit ⚪) — **start storing embeddings now**
+  (`float4[]`; pgvector not bundled in the DB image — verify). **ML-3 🟢** volatility forecasts (add GJR-GARCH/EGARCH),
+  **ML-5 🟡** peer clusters (also test text-based similarity), **ML-4 ⚪** regime model (descriptive only until EV-0
+  shows an out-of-sample difference).
+- [ ] 🔶 **ML-7 🔵 (LLM via hosted API — decided 2026-10-10; "never in scoring" is 🟢)** ML-7a daily narrative first; provider-agnostic
+  adapter, `LLM_API_KEY` only in the gitignored local file + an out-of-band cluster Secret, facts-JSON grounding +
+  number verifier, hard $ cap, `llm_calls`/`llm_outputs` tables, deterministic digest as fallback. Needs a new ADR
+  (provider, data-retention terms, what may be sent). **ML-7d** `/ask` stays gated.
+- [ ] 🔶 **ML-6 🟡** cross-sectional GBM ranker — **hard-gated** on EV-0, EV-1 and composite v2 passing EV §5; weakest
+  fit for large caps, expect small/null; a documented "no" is an acceptable outcome. **ML-8 🔵** TX2 stays CPU; DB move (AR-10) frees it for ML.
+- [ ] 🤔 **Provide the LLM provider choice and place the key yourself** (`LLM_API_KEY` in the local credentials
+  file; cluster Secret created out-of-band — never paste it into chat or a file in git).
 
 ## 4. v2+ (target architecture — build on v1's tables)
 

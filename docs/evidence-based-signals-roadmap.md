@@ -1,0 +1,178 @@
+# Evidence-Based Signals Roadmap
+
+> **Status:** plan, written 2026-10-10. Nothing here is built. Items are tracked in
+> `pending-tasks.md` as EV-0…EV-18; accepted ones follow the usual build cycle
+> (`pipeline-dev` → `canary-validate` → docs).
+> **Purpose:** (1) which additional signals with strong research backing this pipeline
+> can add, in build order; (2) for every piece graded weak or none today, the
+> best-supported replacement.
+> **What "backing" means here:** published in a peer-reviewed finance or accounting
+> journal, replicated by independent authors, and observed outside the original
+> sample (other countries or later years). A book, a broker note or a rule of thumb
+> is "practitioner", not backing.
+> Companion docs: `stock-screener-implementation-plan.md` (the v1 formulas this
+> revises), `market-data-telegram-bot.md` §1a (where the outputs are shown).
+
+## 1. The one rule: measure before adding
+
+Published evidence says a signal worked on someone else's data. It does not say it
+works on this universe, at this rebalance frequency, after costs. Most published
+anomalies fail replication once tiny illiquid stocks are down-weighted (Hou, Xue &
+Zhang 2020), and on average a published signal loses roughly a quarter of its return
+outside the original sample and more than half after publication (McLean & Pontiff
+2016).
+
+So every item below enters the composite only after it passes EV-0's test **on this
+database**. The data to do that already exists, which was not obvious before:
+
+| Data on hand (measured 2026-10-10) | What it allows |
+|---|---|
+| Daily prices: S&P 500 — 465 of 503 symbols with 10+ years (from 1990); Nifty 500 — 321 of 494 with 10+ years (median start 2007) | Every price-only signal can be backtested over decades, today |
+| US fundamentals from EDGAR: quarterly + annual since 2007, ~60 periods per symbol, **with filing dates** (`filing_published_at`) | Point-in-time fundamental signals can be backtested for the S&P 500 |
+| India fundamentals from Yahoo: 4 annual points per symbol, no filing dates | Fundamental signals for the Nifty 500 **cannot** be backtested yet (EV-9) |
+| Valuation ratios (`pe`, `pb`, `ev_ebitda`, `market_cap`): latest weekly snapshot only | Historical valuation must be rebuilt from price × EDGAR per-share data (US) |
+
+**Correction to earlier notes:** the Telegram doc and tracker said the multibagger
+screen "cannot be backtested — no point-in-time history". That is true for the
+Nifty 500 and false for the S&P 500, where EDGAR history with filing dates exists.
+
+**Standing limitation — survivorship.** Both universes are *today's* constituents.
+A backtest over them only contains companies that survived and grew enough to be in
+the index now, which inflates every result. Until historical constituent lists are
+added (EV-1), treat backtests as useful for *ranking* signals against each other,
+not as estimates of achievable return.
+
+## 2. Build order
+
+Effort: S = under a day, M = a few days, L = a week or more. "Have" = data already
+in the database.
+
+### Phase 0 — measurement harness (prerequisite for everything)
+
+| ID | Item | Why it has backing | Data | Effort |
+|---|---|---|---|---|
+| EV-0 | **Signal test harness**: monthly cross-sectional rank correlation between a signal and next-month return (the information coefficient), its t-statistic, quintile spread, turnover, and results split by decade and by universe | Standard methodology since Fama & MacBeth (1973). Acceptance bar follows Harvey, Liu & Zhu (2016): because hundreds of signals have been tried, require **t > 3**, not 2 | Have (prices; EDGAR for US fundamentals) | M |
+| EV-1 | Historical index membership (S&P 500 changes list; NSE reconstitution circulars) | Removes survivorship bias from EV-0 | New feed | M |
+| EV-2 | **Keep every weekly fundamentals snapshot** instead of overwriting, starting now | Builds the point-in-time history India lacks; costs nothing today, unrecoverable later | Schema: key snapshots by fetch date | S |
+
+### Phase 1 — price-only signals (data on hand, testable immediately)
+
+| ID | Signal | Evidence | Change needed | Effort |
+|---|---|---|---|---|
+| EV-3 | **12-1 momentum**: return from 12 months ago to 1 month ago | Jegadeesh & Titman (1993); found in 20 emerging markets including India (Rouwenhorst 1999) and across asset classes (Asness, Moskowitz & Pedersen 2013). The most recent month is skipped because it *reverses* (Jegadeesh 1990) | `stock_metrics.py`: today's `ret_12m` includes the last month. Add `ret_12_1` | S |
+| EV-4 | **Nearness to the 52-week high**: close ÷ 52-week high | George & Hwang (2004) — explains much of momentum and does not reverse later | Today's `pos_52w` is position in the high–low *range*, a different quantity. Add `near_high` | S |
+| EV-5 | **Low risk**: 1-year volatility and market beta | Ang, Hodrick, Xing & Zhang (2006) for volatility; Frazzini & Pedersen (2014) for beta | Volatility exists (`vol_180d`); add beta against the universe's index | S |
+| EV-6 | **Risk-scaled momentum**: scale momentum exposure down when its recent volatility is high | Barroso & Santa-Clara (2015); Daniel & Moskowitz (2016) on momentum crashes | Applies at portfolio level (EV-16) | M |
+| EV-7 | **Index trend filter** as a regime flag: index above its 10-month average | Moskowitz, Ooi & Pedersen (2012) time-series momentum, across 58 futures markets | `index_prices` has it; show in digest and `/index` | S |
+| EV-8 | **Residual momentum**: 12-1 momentum of the part of return not explained by the market | Blitz, Huij & Martens (2011) — about half the volatility of plain momentum | Needs EV-5's beta | M |
+
+### Phase 2 — fundamental signals
+
+| ID | Signal | Evidence | Data | Effort |
+|---|---|---|---|---|
+| EV-9 | **More statement lines** in `stock_fundamentals.py`: total assets, gross profit, operating cash flow, current assets and liabilities, shares outstanding, dividends paid | Prerequisite for EV-10…EV-14 | Yahoo statements carry all of them; EDGAR for the US back to 2007 | M |
+| EV-10 | **Gross profitability**: gross profit ÷ total assets | Novy-Marx (2013). As strong as value, and negatively correlated with it, so the two combine well | EV-9 | S |
+| EV-11 | **Investment (asset growth)**: year-on-year growth in total assets, *lower is better* | Cooper, Gulen & Schill (2008); the investment factor in Fama & French (2015) | EV-9 | S |
+| EV-12 | **Accruals**: (net income − operating cash flow) ÷ total assets, lower is better | Sloan (1996) | EV-9 | S |
+| EV-13 | **Net share issuance**: change in shares outstanding, lower (buybacks) is better | Pontiff & Woodgate (2008); Daniel & Titman (2006) | EV-9 | S |
+| EV-14 | **Piotroski F-score** (9 yes/no tests of improving profitability, leverage and efficiency) among cheap stocks; **Mohanram G-score** (8 tests) among expensive growth stocks | Piotroski (2000); Mohanram (2005). Both are *within-group* selectors — they separate winners from losers inside a value or growth bucket | EV-9 | M |
+
+### Phase 3 — earnings momentum
+
+| ID | Signal | Evidence | Data | Effort |
+|---|---|---|---|---|
+| EV-15 | **Post-earnings drift**: standardised surprise = (this quarter's EPS − same quarter last year) ÷ its historical volatility; returns keep drifting in the surprise's direction for about 60 days | Ball & Brown (1968); Bernard & Thomas (1989). One of the oldest and most replicated anomalies | US: quarterly EPS + filing dates in EDGAR today. India: needs quarterly results feed | M (US) / L (India) |
+
+### Phase 4 — combining and sizing
+
+| ID | Item | Evidence | Effort |
+|---|---|---|---|
+| EV-16 | **Portfolio rules**: hold 30–50 names, cap any sector, rebalance monthly, deduct trading costs in every test | DeMiguel, Garlappi & Uppal (2009) — equal weighting beats optimised weights out of sample; Novy-Marx & Velikov (2016) — costs erase high-turnover signals | M |
+| EV-17 | **Composite v2** (see §3) | Fama & French (2015) five factors; Asness, Frazzini & Pedersen (2019) quality | M |
+| EV-18 | **Measured confidence** (see §3) | Grinold & Kahn (1999) information coefficient; calibration is standard forecast verification | M |
+
+## 3. Replacements for the weak and unbacked pieces
+
+| Today | Grade | Problem | Replace with | Backing of the replacement |
+|---|---|---|---|---|
+| **Growth factor** — 3-year revenue growth + 1-year EPS growth, 20% of the composite | Weak | Past growth does not predict returns, and fast balance-sheet growth predicts *lower* returns | Split in two: **profitability** (EV-10 gross profitability, plus ROE) and **investment** (EV-11, lower is better) | Strong — these are the two factors Fama & French added in 2015 because they subsume growth-style effects |
+| **Composite weights** 25/25/20/20/10 | None | Chosen by hand, never tested | **Equal weight** across value, momentum, profitability, investment and low risk, each a z-score. Change weights only if EV-0 shows a factor fails on this data | Strong for the default: equal weighting is hard to beat out of sample (DeMiguel et al. 2009). Value and momentum are negatively correlated, so combining them cuts risk (Asness et al. 2013) |
+| **Momentum inputs** — 6m, 12m, range position, 200-day ratio, equally averaged | Mixed | 12-month return includes the reversing last month; range position is not the documented signal | EV-3 (12-1) + EV-4 (nearness to high) | Strong |
+| **RSI** shown on `/stock` and `/index` | Convention only | No robust evidence it predicts | Keep as a description, never as a score input. If a short-horizon signal is wanted: **1-month reversal** (Jegadeesh 1990) — but it trades so often that costs usually consume it | Strong statistically, weak after costs. Recommendation: do not add |
+| **Multibagger gates** — 15% growth, ROE 15%, PEG < 2, largest 30% excluded | Practitioner | Thresholds are judgement; PEG has no academic support; source books study survivors | **Small × quality × momentum**: bottom half by size, top third on profitability and low investment (EV-10, EV-11), positive 12-1 momentum (EV-3), then rank by **G-score** (EV-14) | Strong per ingredient. Size only pays among quality companies (Asness, Frazzini, Israel, Moskowitz & Pedersen 2018); G-score is the published tool for picking winners among growth stocks (Mohanram 2005) |
+| **PEG ratio** | None | — | **Earnings yield** (EBIT ÷ enterprise value) | Strong as a value measure; enterprise multiples outperform P/E (Loughran & Wellman 2011) |
+| **Confidence score** — coverage 40, factor agreement 30, rank stability 30 | None | Weights invented; it is not a probability and says so | Two measured numbers per list: the signal's **information coefficient with its t-statistic** from EV-0, and the **realised hit rate** of past picks at this score level (from `/track`), with a confidence interval. Keep data coverage as a separate "data completeness" figure | This is measurement, not a model — it is what the track record supports |
+| **FII flow vs Nifty correlation** | None at 7 sessions | Sample far too small | Backfill FII/DII history (NSE publishes years of it), then report the 60-session correlation only when it is statistically distinguishable from zero | Moderate: foreign flows are persistent and move *with* returns, but predict them weakly (Froot, O'Connell & Seasholes 2001). Present as context, not a signal |
+| **Headline sentiment** (FinBERT) as a gauge | Moderate, short-lived | Media tone predicts returns for days, then reverses (Tetlock 2007) | Keep for alerts and context. Do not add to the composite | — |
+| **Valuation from weekly snapshot** in the screener's value factor | Sound signal, stale input | Up to a week old | Reprice in `stock_screener.py` as `/stock` already does | Already tracked |
+
+## 4. What the composite looks like after Phases 1–2
+
+| Factor | Inputs | Direction |
+|---|---|---|
+| Value | Earnings yield (EBIT/EV), book-to-price, free-cash-flow yield | Higher is better |
+| Momentum | 12-1 return, nearness to 52-week high | Higher is better |
+| Profitability | Gross profit/assets, ROE | Higher is better |
+| Investment | Asset growth, net share issuance, accruals | **Lower** is better |
+| Low risk | 1-year volatility, beta | Lower is better |
+
+Equal weights. Sector-relative ranking (already planned as v2 scoring) applies on top.
+
+## 5. Acceptance test for any signal (EV-0, written before testing)
+
+A signal joins the composite only if, on this database:
+
+1. Its monthly information coefficient has **t > 3** over the full history;
+2. the sign is the same in each half of the sample and in both universes (or the
+   exception is explained);
+3. the top-minus-bottom quintile return stays positive after a cost of 0.2% per
+   trade (US) and 0.4% (India);
+4. it adds information beyond the factors already in — its coefficient stays
+   significant when the existing five are controlled for.
+
+Signals that fail stay out, and the result is recorded here so they are not retried.
+
+## 6. Deliberately not adding
+
+- Chart patterns, MACD or Bollinger-band rules as predictors — no robust evidence.
+- Analyst price targets — biased upward, poor predictors.
+- Any machine-learned return forecast without a multi-year out-of-sample test under
+  §5. The data volume here (about 1,000 stocks) is small for that.
+- Daily FII flow or headline sentiment as timing signals — see §3.
+
+## 7. Caveats that no amount of evidence removes
+
+- **Evidence is thinner for India.** Most studies are US or developed-market.
+  Rouwenhorst (1999) and later emerging-market work find value, momentum and size
+  there too, but with fewer years and more noise.
+- **These are portfolio effects.** They were measured on hundreds of stocks held for
+  decades. A shortlist of twenty will often disagree with the average for years.
+- **Costs and taxes** are outside every academic number above.
+
+## 8. References
+
+Ang, Hodrick, Xing & Zhang (2006), *J. Finance* · Asness, Frazzini, Israel, Moskowitz
+& Pedersen (2018), *J. Financial Economics* · Asness, Frazzini & Pedersen (2019),
+*Review of Accounting Studies* · Asness, Moskowitz & Pedersen (2013), *J. Finance* ·
+Ball & Brown (1968), *J. Accounting Research* · Barroso & Santa-Clara (2015),
+*J. Financial Economics* · Bernard & Thomas (1989), *J. Accounting Research* · Blitz,
+Huij & Martens (2011), *J. Empirical Finance* · Cooper, Gulen & Schill (2008),
+*J. Finance* · Daniel & Moskowitz (2016), *J. Financial Economics* · Daniel & Titman
+(2006), *J. Finance* · DeMiguel, Garlappi & Uppal (2009), *Review of Financial
+Studies* · Fama & French (2015), *J. Financial Economics* · Fama & MacBeth (1973),
+*J. Political Economy* · Frazzini & Pedersen (2014), *J. Financial Economics* · Froot,
+O'Connell & Seasholes (2001), *J. Financial Economics* · George & Hwang (2004),
+*J. Finance* · Grinold & Kahn (1999), *Active Portfolio Management* · Harvey, Liu &
+Zhu (2016), *Review of Financial Studies* · Hou, Xue & Zhang (2020), *Review of
+Financial Studies* · Jegadeesh (1990), *J. Finance* · Jegadeesh & Titman (1993),
+*J. Finance* · Loughran & Wellman (2011), *J. Financial and Quantitative Analysis* ·
+McLean & Pontiff (2016), *J. Finance* · Mohanram (2005), *Review of Accounting
+Studies* · Moskowitz, Ooi & Pedersen (2012), *J. Financial Economics* · Novy-Marx
+(2013), *J. Financial Economics* · Novy-Marx & Velikov (2016), *Review of Financial
+Studies* · Piotroski (2000), *J. Accounting Research* · Pontiff & Woodgate (2008),
+*J. Finance* · Rouwenhorst (1999), *J. Finance* · Sloan (1996), *The Accounting
+Review* · Tetlock (2007), *J. Finance*.
+
+Citations are from memory of well-known papers and were not re-checked against the
+journals when this was written; verify a reference before relying on a specific
+figure from it.

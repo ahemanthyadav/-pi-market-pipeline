@@ -138,7 +138,7 @@ schedules are left as-is; do not "fix" them without re-validating everything.
 |---|---|---|---|
 | nse-fetcher | 15 11 * * * | local/nse-fetcher:v3 | index_prices (9 Indian indices incl. ^CRSLDX Nifty 500, restored 2026-10-09) |
 | fiidii-fetcher | 0 14 * * * | local/fiidii-fetcher:v2 | capital_flows (FII/DII net) |
-| yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v4 | index_prices (29 tickers — `^RUI` Russell 1000 added 2026-10-10, 1y backfilled) |
+| yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v4 | index_prices (29 tickers — `^RUI` Russell 1000 added 2026-10-10; **5 years of history** backfilled 2026-10-10 for all 38 index tickers, 47,408 rows, 262 chunks — do not go longer without a fetcher change, see `yfinance/backfill-job.yaml`) |
 | fx-fetcher | 0 23 * * * | local/fx-fetcher:v1 | fx_rates (10 pairs) |
 | yields-fetcher | 15 23 * * * | local/yields-fetcher:v1 | bond_yields (^TNX/^FVX/^TYX/^IRX) |
 | rates-fetcher | 20 23 * * * | local/rates-fetcher:v1 | interest_rates DFF + bond_yields DGS2/10/30 |
@@ -157,8 +157,8 @@ schedules are left as-is; do not "fix" them without re-validating everything.
 | rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (7 IN_* policy rates) + bond_yields (5 G-Sec tenors + 3 T-bills) + pipeline_heartbeat self-row 'rbi' |
 | headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (gazetteer extraction over raw_headlines, ADR 0010) |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only (manual INSERT follows) |
-| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v4 (pinned pi1) | Telegram digest (read-only; no DB write) |
-| telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v4, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
+| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v5 (pinned pi1) | Telegram digest (read-only; no DB write) |
+| telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v5, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
 
 ### Always-on / one-shot resources
 
@@ -183,7 +183,7 @@ schedules are left as-is; do not "fix" them without re-validating everything.
   alerting-provisioning error and the section is all-or-nothing per file —
   a bad alerting.yaml crash-loops the pod (finds F29–F32).
 - Telegram two-way listener (2026-10-09, Tier 2): Deployment `telegram-bot`
-  (1×, pi1), `local/telegram-digest:v4` (since 2026-10-10: stock/watchlist/
+  (1×, pi1), `local/telegram-digest:v5` (since 2026-10-10: stock/watchlist/
   screener/world commands, telegram-bot doc §1a) with `args: bot.py` — the ONLY
   getUpdates consumer (Telegram 409s a second poller; the digest CronJob and
   Grafana only sendMessage). Single-user: answers only the allow-listed chat,
@@ -704,7 +704,7 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
 - **One local secrets file: `.secrets.env`** (repo root; gitignored, mode 600; the
   committed `.secrets.env.example` lists the keys). It holds `PI_PASS`, `TX2_PASS`,
   `PGPASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `FRED_API_KEY`, plus the out-of-band
-  `PIHOLE_ADMIN_PASSWORD` / `TELEGRAM_*`. `ops-tools/*.py` read it automatically
+  `PIHOLE_ADMIN_PASSWORD` / `TELEGRAM_*` / `LLM_*` (planned, ML-7). `ops-tools/*.py` read it automatically
   (host-aware); for your own shell: `set -a; source .secrets.env; set +a`.
   **Docs never carry values** — commands use the `@@PW@@` token (see §6), any
   `@@KEY@@` from `.secrets.env` (e.g. `@@TELEGRAM_BOT_TOKEN@@` for a direct

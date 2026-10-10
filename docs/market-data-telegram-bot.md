@@ -3,8 +3,8 @@
 > **Purpose:** everything about the Marketfredbot Telegram channel — how the
 > deployed digest + alert pipeline is wired, how to operate and change it, and
 > the tiered menu of two-way/next-step upgrades with their real constraints.
-> **Last verified: 2026-10-10** (v4 deployed — §1a; alerts canary delivered;
-> commands log-verified, not yet checked from the phone).
+> **Last verified: 2026-10-10** (v5 live and validated in-pod; v6 imported on
+> pi1 but not applied — §1a; commands not yet checked from the phone).
 > **v2 verification:** (digest live-fire-delivered; alert chain
 > validated end-to-end with a real FII firing; two-way listener deployed and
 > command-validated from the phone — /status /nifty /digest /scores answered).
@@ -104,8 +104,10 @@ driver import — unit-tested with a fake in `tests/test_stocks.py`) and
   market cap, PEG ≤ 2, price above the 200-day average. Score — growth 35,
   quality 25, valuation 15, momentum 15, size 10. The message prints how many
   names each gate dropped. First live run: 16 of 495 (NIFTY500), 1 of 503
-  (SP500). **Not backtested** — fundamentals are current snapshots, there is
-  no point-in-time history to test against.
+  (SP500). **Not backtested.** Corrected 2026-10-10: a backtest is possible
+  for the S&P 500 (EDGAR history with filing dates) but not for the Nifty 500
+  (4 annual points). The gates are practitioner rules; the research-backed
+  replacement is in `evidence-based-signals-roadmap.md` §3.
 - **Confidence (0-100) on every recommendation** — `/top`, `/scores`,
   `/stock`, `/multibagger`. It measures evidence quality, never the chance of
   a gain, and every message says so. Screener picks: data coverage 40, factor
@@ -113,6 +115,34 @@ driver import — unit-tested with a fake in `tests/test_stocks.py`) and
   of history 30, EPS and net income both confirming 20, margin over the gates
   15, positive FCF 15, reported ROE 10, upper half of the 52-week range 10.
   ≥ 70 high · ≥ 45 medium · else low.
+
+### v5 / v6 (2026-10-10) — long-term reference on the index card
+
+`/index`, `/nifty`, `/sensex`, `/gold` now end with a **Long-term reference**
+block: the 1-, 3- and 5-year average level with today's distance from each, the
+high on file, and a reading — very low / low / normal / high / very high.
+
+- **How the reading is made** (`stocks.long_term_block`): a rising index is
+  almost always above its long average, so the level alone says nothing. The
+  reading ranks today's *gap to the 3-year average* against that same gap on
+  every earlier day (mid-rank percentile; bands at 10/25/75/90). Volatility
+  indices (`^VIX`, `^INDIAVIX`) mean-revert, so their level is ranked directly.
+  With 7.5+ years of history it switches to the 5-year average by itself.
+- **History:** `index_prices` was backfilled from 1 to **5 years** for all 38
+  tickers. That leaves about two years of gap history behind each reading
+  (the message says "since 2024") — thin, and it contains no bear market.
+- **Why not 10 years:** the backfill writes in one transaction and
+  `index_prices` has 7-day chunks. The 5-year run held ~2,900 of ~6,400 lock
+  slots and took 26 minutes; 10 years would need ~6,000. Longer history needs
+  a fetcher that commits per time range (tracked).
+- **Evidence:** distance from a long-run average is context, not a timing
+  signal. Valuation measures (earnings-based, e.g. CAPE) have better backing
+  for "expensive or cheap" but need index earnings, which no feed here carries.
+- **Deployed state:** `v5` is live on the bot and both CronJobs and was
+  validated inside the pod against the live DB. `v6` only rewords the reading
+  sentence ("Relative to that average it was lower on N% of days"); its image
+  is imported on pi1 and the manifests carry the tag, but **the apply did not
+  happen — pi2's API went down mid-rollout** (see pending-tasks).
 
 ## 2. Decisions already paid for (ADR 0009 — don't re-litigate)
 
