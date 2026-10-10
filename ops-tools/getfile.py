@@ -13,6 +13,7 @@ from _creds import password_for, resolve_host
 
 host, user, remote, local = sys.argv[1:5]
 pw = password_for(host, user)
+label = host            # print the alias, not the resolved address
 host = resolve_host(host)
 client = paramiko.SSHClient()
 client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -21,4 +22,4 @@ sftp = client.open_sftp()
 sftp.get(remote, local)
 sftp.close()
 client.close()
-print(f"GOT {host}:{remote} -> {local}")
+print(f"GOT {label}:{remote} -> {local}")
