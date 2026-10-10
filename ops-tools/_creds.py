@@ -1,0 +1,66 @@
+"""Credential + host lookup for ops-tools — nothing sensitive in args, docs or tracked files.
+
+Passwords (resolution order):
+  1. SSH_PASS environment variable (explicit override)
+  2. <repo>/.secrets.env (gitignored, mode 600), host-aware:
+       TX2 (alias tx2 / its IPs / ahytx2-desktop / user ahytx2) -> TX2_PASS
+       everything else (the Pis)                               -> PI_PASS
+
+Hosts: tools accept the aliases pi0 pi1 pi2 pi3 tx2, resolved from the gitignored
+<repo>/.hosts.env (PI0_IP … TX2_IP). A raw IP still works.
+
+Remote commands may contain the token @@PW@@, replaced by the shell-quoted host
+password (e.g. 'echo @@PW@@ | sudo -S systemctl restart k3s-agent').
+"""
+import os
+import shlex
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+ENV_FILE = REPO / ".secrets.env"
+HOSTS_FILE = REPO / ".hosts.env"
+ALIASES = {"pi0": "PI0_IP", "pi1": "PI1_IP", "pi2": "PI2_IP", "pi3": "PI3_IP", "tx2": "TX2_IP"}
+
+
+def _load(path: Path) -> dict:
+    out = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            try:
+                parts = shlex.split(val)
+            except ValueError:
+                parts = [val]
+            out[key.strip()] = parts[0] if parts else ""
+    return out
+
+
+def resolve_host(host: str) -> str:
+    key = ALIASES.get(host.lower())
+    if key:
+        ip = _load(HOSTS_FILE).get(key, "")
+        if not ip:
+            raise SystemExit(f"alias '{host}' not found: set {key} in .hosts.env")
+        return ip
+    return host
+
+
+def _is_tx2(host: str, user: str) -> bool:
+    if user == "ahytx2" or host.lower() in {"tx2", "ahytx2-desktop"}:
+        return True
+    hosts = _load(HOSTS_FILE)
+    return host in {hosts.get("TX2_IP"), hosts.get("TX2_TS_IP")} - {None, ""}
+
+
+def password_for(host: str, user: str) -> str:
+    if os.environ.get("SSH_PASS"):
+        return os.environ["SSH_PASS"]
+    key = "TX2_PASS" if _is_tx2(host, user) else "PI_PASS"
+    return _load(ENV_FILE).get(key, "")
+
+
+def expand(cmd: str, pw: str) -> str:
+    return cmd.replace("@@PW@@", shlex.quote(pw))
