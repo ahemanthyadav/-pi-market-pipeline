@@ -32,7 +32,8 @@ skill); never commit credentials or IPs (rules 7–8; run the audit before any p
 7. **Secrets never enter tracked files, code, docs, or chat output.** The only
    local store is the gitignored `.secrets.env` (template: `.secrets.env.example`);
    `ops-tools/*.py` read it themselves and remote commands use the `@@PW@@` token —
-   never write a password on a command line. Agents must not read, print or copy
+   never write a password on a command line. Any `@@KEY@@` from the credentials file expands
+   the same way — only in commands that CONSUME the value; never echo/cat one back (that prints it). Agents must not read, print or copy
    `.secrets.env` (denied in `opencode.jsonc`). Credential rotation is not a
    priority — don't propose or track it. Missing value? Ask the user; never guess.
 
@@ -47,7 +48,7 @@ skill); never commit credentials or IPs (rules 7–8; run the audit before any p
 - One-time per clone: `git config core.hooksPath .githooks` — pre-commit guard (gitleaks + exact local
   secret/address values + private-IP + forbidden-file checks; never prints a value).
 - Must pass: `python3 ops-tools/workloads.py --check` (docs agree with manifests),
-  `bash tests/test-precommit-hook.sh`, `bash tests/test-nodewatch.sh`.
+  `bash tests/test-precommit-hook.sh`, `bash tests/test-nodewatch.sh`, `python3 tests/test_creds.py`.
 - Conventional commits (`commit-and-changelog` skill); push over SSH.
 
 ## DB access (read-only by default)

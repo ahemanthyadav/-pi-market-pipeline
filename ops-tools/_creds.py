@@ -9,11 +9,17 @@ Passwords (resolution order):
 Hosts: tools accept the aliases pi0 pi1 pi2 pi3 tx2, resolved from the gitignored
 <repo>/.hosts.env (PI0_IP … TX2_IP). A raw IP still works.
 
-Remote commands may contain the token @@PW@@, replaced by the shell-quoted host
-password (e.g. 'echo @@PW@@ | sudo -S systemctl restart k3s-agent').
+Remote commands may contain tokens: @@PW@@ is replaced by the shell-quoted host
+password (e.g. 'echo @@PW@@ | sudo -S systemctl restart k3s-agent'); any other
+@@KEY@@ present in .secrets.env is replaced by its shell-quoted value (e.g.
+@@TELEGRAM_BOT_TOKEN@@ for a getMe/sendMessage channel check, run via runcmd).
+Unknown tokens are left literal with a stderr warning — a typo'd key must be
+visible, not silently shipped to a host as text.
 """
 import os
+import re
 import shlex
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -62,5 +68,23 @@ def password_for(host: str, user: str) -> str:
     return _load(ENV_FILE).get(key, "")
 
 
+TOKEN_RE = re.compile(r"@@([A-Za-z0-9_]+)@@")
+
+
 def expand(cmd: str, pw: str) -> str:
-    return cmd.replace("@@PW@@", shlex.quote(pw))
+    """Substitute @@PW@@ and any @@KEY@@ found in .secrets.env, shell-quoted."""
+    secrets = _load(ENV_FILE)
+    warned: set[str] = set()
+
+    def _sub(m: re.Match) -> str:
+        key = m.group(1)
+        if key == "PW":
+            return shlex.quote(pw)
+        if key in secrets:
+            return shlex.quote(secrets[key])
+        if key not in warned:
+            warned.add(key)
+            print(f"WARN: @@{key}@@ not found in .secrets.env — left literal", file=sys.stderr)
+        return m.group(0)
+
+    return TOKEN_RE.sub(_sub, cmd)

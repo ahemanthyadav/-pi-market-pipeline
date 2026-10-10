@@ -5,6 +5,8 @@ Usage:
     # <host> is an alias (pi0 pi1 pi2 pi3 tx2, resolved from the gitignored .hosts.env)
     # or a raw IP. sudo on the remote: use the @@PW@@ token, e.g.
     python3 ops-tools/runcmd.py pi2 pi2 'echo @@PW@@ | sudo -S systemctl status k3s'
+    # any @@KEY@@ from .secrets.env also expands (shell-quoted), e.g.
+    #   @@TELEGRAM_BOT_TOKEN@@ / @@TELEGRAM_CHAT_ID@@ for a channel sanity check
 
 Notes:
 - Passwords come from the gitignored `.secrets.env` (PI_PASS / TX2_PASS, picked by

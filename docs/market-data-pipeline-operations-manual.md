@@ -263,7 +263,11 @@ tarball. `Never` pull policy makes missing images immediately visible.
 password themselves from the gitignored `.secrets.env` (PI_PASS for the Pis, TX2_PASS
 for the TX2). In a remote command, write sudo as `echo @@PW@@ | sudo -S …` — the
 tool swaps in the shell-quoted host password at run time. Never type a password on
-the command line; `SSH_PASS` in the environment still works as an override.
+the command line; `SSH_PASS` in the environment still works as an override. Other `@@KEY@@`
+tokens (see §10) work the same way; an unknown key is left literal with a stderr warning.
+**Use a token only in a command that CONSUMES the value — never in one whose output is shown
+(`echo`, `cat`): that would print the secret.** Covered by `tests/test_creds.py` (quoting
+round-trips; a hostile value cannot inject a command).
 
 **Full cycle — e.g., updating the yfinance fetcher to v4:**
 
@@ -678,7 +682,7 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
 - **Repo hygiene (git, since 2026-10-10):** one-time `git config core.hooksPath .githooks` enables the
   pre-commit guard (gitleaks + exact local secret/address values + private-IP + forbidden-file checks).
   Before a push: `python3 ops-tools/workloads.py --check` (docs vs manifests), `bash tests/test-precommit-hook.sh`,
-  `bash tests/test-nodewatch.sh`.
+  `bash tests/test-nodewatch.sh`, `python3 tests/test_creds.py`.
 - **Out-of-cluster watcher:** `ops-tools/nodewatch.sh` (ping every node + TCP-probe the API; Telegram message
   only on state change, 6 h reminders). Built + tested 2026-10-10, **not yet deployed** — install on pi0 (outside
   k3s): copy the script, create `/etc/nodewatch.hosts` (PI0_IP…TX2_IP) and `/etc/nodewatch.secrets` (mode 600:
