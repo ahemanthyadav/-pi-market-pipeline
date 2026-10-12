@@ -139,6 +139,17 @@ schedules are left as-is; do not "fix" them without re-validating everything.
 | nse-fetcher | 15 11 * * * | local/nse-fetcher:v4 (commits per calendar year) | index_prices (9 Indian indices incl. ^CRSLDX Nifty 500, restored 2026-10-09; history from each index's Yahoo start — Sensex 1997, Nifty 50 2007) |
 | fiidii-fetcher | 0 14 * * * | local/fiidii-fetcher:v2 | capital_flows (FII/DII net) |
 | yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v5 (commits per calendar year) | index_prices (29 tickers — `^RUI` Russell 1000 added 2026-10-10; **history from 1985** backfilled 2026-10-10 for all 38 index tickers: 292,387 rows, 299 chunks — 262 weekly for 2021-10 → 2026-10 plus one-year chunks for everything created since `set_chunk_time_interval('index_prices', '365 days')`; see `yfinance/backfill-job.yaml`) |
+**Safeguards (review AR-1) — in the repo manifests since 2026-10-11, APPLIED to the cluster 2026-10-12 (all 23 CronJobs, still suspended at the time).** Every CronJob now carries
+`concurrencyPolicy: Forbid`, `startingDeadlineSeconds` (1 h for jobs whose next run recovers the data — their pulls cover 2–5
+days; 10 min for hourly `intraday-fetcher`; 6 h for latest-snapshot feeds `fiidii`/`news`/`rbi` and the weekly jobs, where late
+beats skipped; 24 h for monthly `fdi-watch`), `activeDeadlineSeconds` (3–10× measured runtime: 300 s intraday, 600 s fast
+fetchers, 900 `rates`/`sentiment`/`universe-refresh`, 1200 `stock-metrics`/`stock-report`, 1800 `pg-backup`/`headline-ner`,
+3600 `stock-screener`, 7200 `stock-prices`, 14400 `stock-fundamentals`) and `ttlSecondsAfterFinished: 604800` (7 days — long
+enough to read a failed Job's logs). Evidence: on 2026-10-10 `intraday-fetcher` and `rbi-fetcher` ran 91,368 s (25 h) and
+`sentiment-scorer` 9,128 s because nothing capped them. `headline-ner` (1800), `stock-screener` (3600), `stock-report` and
+the two Telegram jobs have no clean measured runtime — their values are estimates: if one trips, raise it, no data is lost.
+Applied with `kubectl apply` after a `kubectl diff` review; it did not change `suspend`. With a start deadline set, un-suspending fires only runs due inside the window (no catch-up storm).
+
 | fx-fetcher | 0 23 * * * | local/fx-fetcher:v1 | fx_rates (10 pairs) |
 | yields-fetcher | 15 23 * * * | local/yields-fetcher:v1 | bond_yields (^TNX/^FVX/^TYX/^IRX) |
 | rates-fetcher | 20 23 * * * | local/rates-fetcher:v1 | interest_rates DFF + bond_yields DGS2/10/30 |

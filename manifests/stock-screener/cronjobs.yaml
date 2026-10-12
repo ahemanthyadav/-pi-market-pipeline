@@ -12,11 +12,15 @@ metadata:
   namespace: market-data
 spec:
   schedule: "0 9 * * 0"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 21600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 2
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure
@@ -48,11 +52,15 @@ metadata:
   namespace: market-data
 spec:
   schedule: "30 23 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 2
+      activeDeadlineSeconds: 7200
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure
@@ -84,11 +92,15 @@ metadata:
   namespace: market-data
 spec:
   schedule: "0 6 * * 6"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 21600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 1
+      activeDeadlineSeconds: 14400
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure
@@ -122,11 +134,15 @@ metadata:
   namespace: market-data
 spec:
   schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 1
+      activeDeadlineSeconds: 1200
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure
@@ -158,11 +174,15 @@ metadata:
   namespace: market-data
 spec:
   schedule: "15 2 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure
@@ -194,11 +214,15 @@ metadata:
   namespace: market-data
 spec:
   schedule: "30 2 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 1
+      activeDeadlineSeconds: 1200
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure
