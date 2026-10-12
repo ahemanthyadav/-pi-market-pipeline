@@ -45,8 +45,10 @@ echo "postgres://user:hunter22pw@db/x" > "$SCRATCH/a.md";      expect blocked "U
 echo "GRAFANA_ADMIN_PASSWORD=zq9-fake-local-secret-value" > "$FAKEENV"
 echo "text zq9-fake-local-secret-value text" > "$SCRATCH/a.md"
 HOOK_SECRETS_FILE="$FAKEENV" expect blocked "exact value from local credentials file"
-RND=$(head -c 400 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 36)   # high entropy, or gitleaks rightly ignores it
-echo "t ghp_$RND" > "$SCRATCH/a.md";                            expect blocked "gitleaks: GitHub token shape"
+if command -v gitleaks >/dev/null 2>&1; then
+  RND=$(head -c 400 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 36)   # high entropy, or gitleaks rightly ignores it
+  echo "t ghp_$RND" > "$SCRATCH/a.md";                            expect blocked "gitleaks: GitHub token shape"
+else echo "  skip  gitleaks token shape (gitleaks not installed — the hook skips it too; CI installs it)"; fi
 
 echo "== must PASS"
 echo "# runbook: use placeholders like <pi2-ip> and the @@PW@@ token" > "$SCRATCH/a.md"; expect passes "placeholders + @@PW@@ token"
