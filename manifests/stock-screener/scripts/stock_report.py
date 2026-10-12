@@ -79,8 +79,11 @@ def render_report(cur, row, medians):
         if metric not in seen:
             mets[metric] = val
             seen.add(metric)
+    # flow metrics: full-year (yfinance) rows only — EDGAR 10-Q rows are YTD (DQ-2)
     cur.execute("SELECT DISTINCT ON (metric) metric, value FROM stock_fundamentals "
-                "WHERE symbol=%s ORDER BY metric, ts DESC", (sym,))
+                "WHERE symbol=%s AND (source='yfinance' OR metric NOT IN "
+                "('total_revenue','net_income','operating_income','eps','fcf')) "
+                "ORDER BY metric, ts DESC", (sym,))
     fund = dict(cur.fetchall())
     nb, sent = news_block(cur, sym, name)
     md = []

@@ -24,6 +24,7 @@ import psycopg
 
 W = {"value": 0.25, "quality": 0.25, "growth": 0.20, "momentum": 0.20, "risk": 0.10}
 NEUTRAL = 0.5
+FLOW_METRICS = ("total_revenue", "net_income", "operating_income", "eps", "fcf")
 
 
 def connect():
@@ -49,13 +50,16 @@ def pct_rank(s: pd.Series, negate=False) -> pd.Series:
 
 
 def latest_fundamentals(cur, symbols, as_of):
-    """{symbol: {metric: value}} — latest statement facts + live ratios ≤ as_of."""
+    """{symbol: {metric: value}} — latest statement facts + live ratios ≤ as_of.
+    Flow metrics come from full-year (yfinance) rows only: EDGAR period rows are
+    year-to-date for 10-Q periods (DQ-2, 2026-10-10)."""
     cur.execute(
         """SELECT DISTINCT ON (symbol, metric) symbol, metric, value
            FROM stock_fundamentals
            WHERE symbol = ANY(%s) AND ts <= %s AND filing_published_at <= %s
+             AND (metric <> ALL(%s) OR source = 'yfinance')
            ORDER BY symbol, metric, ts DESC""",
-        (symbols, as_of, as_of))
+        (symbols, as_of, as_of, list(FLOW_METRICS)))
     out = {}
     for sym, metric, val in cur.fetchall():
         out.setdefault(sym, {})[metric] = val
@@ -63,13 +67,15 @@ def latest_fundamentals(cur, symbols, as_of):
 
 
 def annual_series(cur, symbols, metric, as_of, years_back):
-    """{symbol: [(period_end, value)]} annualized: EDGAR mixes quarterly and
-    annual period ends; per calendar year of the period end, keep the max-end
-    entry (the 10-K for standard fiscal years). Returns DESC list."""
+    """{symbol: [(period_end, value)]} annual (full-year) values, newest first.
+    Reads yfinance annual statements only. EDGAR rows mix 3/6/9/12-month
+    year-to-date periods under one key, so "max period end per calendar year"
+    compared a half-year with a full year (median 3y revenue CAGR −17.8 % vs
+    +8.5 %, DQ-2). The EDGAR path returns via financial_facts (TTM, later)."""
     cur.execute(
         """SELECT symbol, ts, value FROM stock_fundamentals
            WHERE symbol = ANY(%s) AND metric = %s AND ts <= %s
-             AND filing_published_at <= %s
+             AND filing_published_at <= %s AND source = 'yfinance'
            ORDER BY symbol, ts DESC""",
         (symbols, metric, as_of, as_of))
     raw = {}
