@@ -4,7 +4,7 @@
 > the linked docs — this file is the index + status. Maintained per AGENTS.md docs
 > discipline: mark items ✅ with a date (and where the completion is recorded) when
 > done; prune ✅ lines into the relevant doc's history at housekeeping time.
-> **Last reviewed: 2026-10-12 08:30 UTC** (recovery complete except the power acceptance review; see §1. Previously 2026-10-10: the 2026-10-09→10 outage —
+> **Last reviewed: 2026-10-12 09:50 UTC** (maintenance pass: scheduled runs verified, Grafana alerts retuned and applied, data-quality findings DQ-1/DQ-4/G-22, power review interim = pi1 FAIL; see §1. Previously 2026-10-10: the 2026-10-09→10 outage —
 > node-local stats logging deployed per ADR 0011; screener v8 fixes + first
 > full-quality run verified 2026-10-09; Grafana screener dashboard live).
 
@@ -36,6 +36,14 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
     `throttle_hex` bit `0x1/0x2/0x4`, no new since-boot undervolt bit, no sample gap > 15 min; heat is a WARN, not a power fail;
     exit 0 = PASS). Also compare `dmesg | grep -ci undervoltage` with the baseline. The CronJobs are already running
     (re-activated 10-12), so this is under real load. Record the verdict per node here and in ops manual §8.
+  - **Re-check 2026-10-12 08:41 UTC (`power-review.sh`, 69 samples/node): pi0 PASS · pi2 PASS · pi3 PASS · pi1 FAIL (same 2 samples; exit 1).**
+    Per-Pi `dmesg` undervoltage count since boot: **pi1 = 25** (up ~5.7 h; baseline 1 at 02:59; first 02:56 UTC power-on, last stamped 01:22
+    host-local ≈ 08:22 UTC if PDT — not verified), **pi0/pi2/pi3 = 0**. Live `get_throttled`: pi0 `0x0`, pi1 `0x50000`, pi2 `0x80000`, pi3 `0x0`;
+    pi1 load 0.24 at that moment, so its events are not only the import bursts. The remaining ~18 h of the window cannot rescue pi1
+    (the rule fails on any live hit); the physical swap test does not need to wait for 02:59 UTC.
+  - **Update 09:46 UTC (82 samples/node): pi0/pi2/pi3 still PASS (pi3 max load 1.83, 0 events); pi1 FAIL with a third live sample `0x50005` at 09:10 UTC —
+    at load 0.41, no image transfer running** — and 27 `dmesg` events (was 25 at 08:41). pi1 undervolts at near-idle, so this is its supply/cable
+    (or the board), not workload: do the swap test now (spare PSU + cable first). `collect-node-stats.sh` no longer errors (`tail -1` on several files).
   - **Early read, 2026-10-12 02:59 → 08:25 UTC (5.4 h, 65 samples/node):** **pi0 PASS** (max 36 °C), **pi2 PASS** (max load 1.74,
     56 °C, 0 live hits), **pi3 PASS** (0 live hits) — but **pi1 FAIL: 2 samples read `0x50005` (undervolt + throttle live) at 04:35 and
     04:50 UTC**, during the screener-v9 and telegram-v7 image imports (CPU 58–73 %, load 3.35). So pi1 still undervolts under a burst
@@ -55,6 +63,17 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   - **Later (decision, not part of this fix):** one shared regulated 5 V rail with fused branches — architecture review AR-10;
     needs an enclosed supply and careful mains-side wiring. Detail: `architecture-review-2026-10-10.md` AR-10; skill
     `node-power-health`; ADR 0011.
+- [x] ✅ 2026-10-12 **Maintenance pass (09:00–09:50 UTC) — what was verified, changed, found:**
+  - **First scheduled runs verified:** `stock-metrics` 09:00 Completed (3 m 27 s) · `stock-screener` 09:15 `SCREENER-OK scored=997 eligible=884 shortlisted=50`
+    (on pi3; no duplicate score rows; `stock_scores` now 10-12) · `stock-report` 09:30 `REPORT-OK reports=50 digest=yes` · **`telegram-alerts` 09:45 — its first
+    ever scheduled run — `ALERTS-OK 3 message(s) for 3 user(s) rc=0`** (owner + both member rows incl. the group chat: multi-user fan-out works). `pipeline-health`
+    08:45 Completed; `pg-backup` 08:30 Completed. `stock-prices` heartbeat is fresh; `stock_scores` turns fresh at the next daily health run (01:45 PDT).
+  - **Grafana alerts retuned and applied** (ConfigMap via `apply-grafana-provisioning.sh`, pod restarted on pi3; all 4 rules `health ok`): VIX 25 → **30**, FII −3000 → **−5000**,
+    and the **sentiment-drop rule — which was in the repo but had never been applied — is now live**. Evidence and re-tune plan: telegram-bot doc §3.3. Known noise: the
+    stale-feed rule is firing (counts `stock_fundamentals` + `stock_scores`) until the data catches up (see the Grafana item below).
+  - **Second backup copy refreshed:** `pull-backups.py` pulled `marketdata-2026-10-12.dump` (172 MB, sha256 ok) to `out/backups/`.
+  - **CI:** lint step (`py_compile` every tracked `.py`, `bash -n` every `.sh`, the Python-shebang pre-commit hook) and push triggers for `main`, `feat/**`, `fix/**`.
+  - **New data-quality finding DQ-4** (mixed `stock_prices` timestamp conventions + 4,434 duplicate rows) and evidence for DQ-1 and G-22 — see §1 "Data correctness".
 - [x] ✅ 2026-10-11 **`nodewatch` deployed on pi0** — out-of-cluster dead-man's switch. Script in `/usr/local/bin`,
   `/etc/nodewatch.hosts` + `/etc/nodewatch.secrets` (mode 600, root), root cron `*/5` (log overwritten each run at
   `/var/tmp/nodewatch.log`); its own dedicated Telegram bot, separate from the in-cluster `telegram-bot`; delivery test HTTP 200.
@@ -84,8 +103,9 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   silent + owner notified once + stranger `/adduser` blocked; member `/watch` private; member cannot `/adduser`; removed member gets 0 replies; digest and
   alerts `main()` give each user only their own content. `tests/test_multiuser.py` 38 tests (allow-list and watchlist-scoping mutation-checked); added to CI.
   **The Secret's `chat-id` is the owner's PRIVATE chat again** (restored from `telegram-bot-prev-chat-id`; it had been pointed at a group, which made the whole
-  group the owner). 🔶 Still to do by the owner: have each person message `@Marketfredbot`, then `/adduser` them from the access notice and ask them to
-  `/start`. Open extension: per-user digest time and alert threshold. Side notes: the schema Job could not be re-run under its own name (delete guard on
+  group the owner). **Progress 2026-10-12 08:31/08:32 UTC: the owner ran `/adduser` twice** — `bot_users` now has 2 active rows, both named `sailu`, one
+  private chat and one *group* chat (a group shares one watchlist — consider `/rmuser` on it if separate lists are wanted); `watchlist` is still
+  empty. Not verified: that each has sent `/start` (the log shows one `/start` answered). Any further people: same flow, then `/start`. Open extension: per-user digest time and alert threshold. Side notes: the schema Job could not be re-run under its own name (delete guard on
   `timescaledb…`) — ran as `schema-multiuser-09`; `timescaledb-schema-09` (broken first attempt, suspended) and `telegram-bot-prev-chat-id` (rollback copy of the
   old owner id) remain in the namespace.
 - [x] ✅ **2026-10-12 Screener v9 rolled out (DQ-2 + DQ-3 fixes).** Image content verified byte-identical to the repo scripts (sha256 per
@@ -98,8 +118,8 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   figures with full years. `stock_fundamentals` DQ-3 (NameError) is unit-tested only; **its first real validation is the Sat 2026-10-17
   06:00 PDT full pass** (watch for `FUNDAMENTALS-OK` with a `failed=` count and a Completed Job). US price data ended 10-08 after the outage; **recovered — verified 2026-10-12 08:25 UTC:
   S&P 500 through Fri 10-09 (506 symbols), Nifty 500 through 10-12 (494)** (Monday's US close lands in tonight's run).
-  `stock_fundamentals` is still stale (last 10-04) until the Sat 10-17 pass; the heartbeat rows read at 03:14 UTC showed
-  `stock_prices`/`stock_scores` not fresh at that moment — `pipeline-health` re-runs 08:45 UTC. Previously: History of the 2026-10-10 second wedge:** Sequence: v9 built on
+  `stock_fundamentals` is still stale (last 10-04) until the Sat 10-17 pass. **`pipeline-health` ran 08:45 UTC (Completed, 22 s): `stock_prices` is now
+  fresh; the only stale feeds are `stock_scores` (last 10-09 — the 09:15 UTC `stock-screener` run should fix it) and `stock_fundamentals` (last 10-04, until 10-17).** Previously: History of the 2026-10-10 second wedge:** Sequence: v9 built on
   TX2 and imported on pi3 (63 s), then pi1's tarball push/import → API `ServiceUnavailable`, pi1 `ctr` EOF; pi1/pi2 SSH
   banner resets with ping alive, pi3 off the network; pi2 + pi3 later came back (~17:41 UTC, "up 0 min"); **pi1 still
   NotReady with no ping at 17:50 UTC — needs a physical power check.** Cause unproven (a 116 MB push + import on
@@ -187,10 +207,11 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   2026-10-10 08:00 IST. Rollout gotchas recorded as finds F29–F32.
   Detail: findings Tier 1 #6, §3; ADR 0009; `manifests/telegram/`.
 - [ ] 🔶 **Grafana alerting tuning** — Telegram contact point + policy tree +
-  3 rules (stale feed, VIX spike, FII outflow) deployed AND live-fire-validated
-  2026-10-09 (FII rule fired on real data: −12,944 Rs cr). Remaining:
-  sentiment-drop rule; threshold tuning (VIX 25 / FII −3000 are first guesses —
-  FII fired at −12.9K, consider −5000+ if too chatty).
+  rules deployed AND live-fire-validated 2026-10-09 (FII rule fired on real data: −12,944 Rs cr).
+  **2026-10-12: retuned and applied — VIX 30, FII −5000, sentiment-drop rule now live (4 rules, health ok).** Remaining: re-tune FII/sentiment at ~60 days of
+  history (only 8 FII days and ~2 weeks of sentiment exist); and the **stale-feed noise** — the rule counts every `fresh=false` heartbeat row, so it fires while
+  `stock_fundamentals` (stale until the Sat 10-17 pass + the next health run 10-18) and `stock_scores` (until 10-13 08:45 UTC) are stale; consider a per-feed
+  exclusion or a Grafana silence for `stock_fundamentals` until then (not applied — a true alert, owner's call).
   Detail: findings Tier 1 #1; architecture §12.4; ADR 0009.
 - [x] ✅ **Telegram two-way interface** — deployed + validated 2026-10-09:
   listener Deployment `telegram-bot` (pi1, image v2, long-poll getUpdates —
@@ -232,7 +253,7 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 ### Architecture review follow-ups (2026-10-10 — recommendations, none applied)
 
 Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §5 phases.
-- [ ] 🔶 **AR-1 (Phase 0)** CronJob safeguards — **applied 2026-10-12 02:5x UTC to all 23 CronJobs (since un-suspended — live and protecting them)** (22 applied by
+- [x] ✅ **AR-1 (Phase 0)** CronJob safeguards — **applied 2026-10-12 02:5x UTC to all 23 CronJobs (since un-suspended — live and protecting them)** (22 applied by
   this session after a `kubectl diff` review showing only the 4 safeguard fields; `pg-backup` was already on the new spec).
   Live values verified (`concurrencyPolicy Forbid`, `startingDeadlineSeconds`, `activeDeadlineSeconds`, TTL 604800); values +
   rationale in ops manual §3. Effect on resume: only runs due inside each job's start window fire — no 23-job catch-up storm.
@@ -240,7 +261,11 @@ Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §
   **Checked 2026-10-12 08:25 UTC:** live values are in place (`Forbid`, start 3600 s; active deadlines headline-ner 1800, stock-screener 3600,
   stock-report 1200, telegram-alerts 600). `headline-ner` ran on schedule at 07:45 UTC and Completed inside its window; the others have
   only run as canaries — their scheduled slots are 09:15 / 09:30 / 09:45 UTC (telegram-alerts has **never** been scheduled yet).
-  Verify those three after 09:50 UTC today: `kubectl -n market-data get jobs` and the OK markers.
+  **DONE 2026-10-12 09:50 UTC — the deadlines held:** screener 23 s (limit 3600), report 12 s (1200), `telegram-alerts` 14 s (600), `stock-metrics` 3 m 27 s, all Complete
+  with their OK markers (details in the maintenance-pass item above). Only `stock-fundamentals` (Sat 10-17) is still to be seen under its deadline.
+  Earlier note: verify those three after 09:50 UTC today: `kubectl -n market-data get jobs` and the OK markers.
+  **2026-10-12 08:46 UTC:** none of the three is due yet (09:15 / 09:30 / 09:45 UTC); `pipeline-health` ran on schedule at 08:45 and Completed, and `pg-backup`
+  ran on schedule at 08:30 — `lastScheduleTime` for `stock-metrics` (due 09:00), `stock-screener`, `stock-report`, `telegram-alerts` still 10-10 / empty.
 - [ ] 🔶 **AR-2/AR-3 (Phase 1)** shared job module (DB connect+retry, `write_window()`,
   logging, `main()` wrapper) and a durable `job_runs` table (start/end/rows/status/error).
 - [ ] 🔶 **AR-5 (Phase 1→2)** ✅ step 1 done 2026-10-12: a `requirements.lock` for every Python image (13 new frozen from the running images + the 3
@@ -251,7 +276,8 @@ Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §
 - [ ] 🔶 **AR-8 (Phase 1→2)** read-only DB roles for Grafana/bot, writer role for jobs;
   fixture tests for pure job logic (`tests/test_stocks.py` is the model).
 - [ ] 🔶 **AR-9 (Phase 2)** GitHub Actions CI **written 2026-10-12** (`.github/workflows/ci.yml`: docs/manifest drift check, all unit + shell tests,
-  manifest sanity, gitleaks; no secrets; verified step-by-step in a clean venv) — **has not run on GitHub yet (needs a push)**. Remaining: lint, and a
+  manifest sanity, gitleaks; no secrets; verified step-by-step in a clean venv) — **first GitHub run = the push of 2026-10-12 (result recorded in the maintenance item if checked)**. Lint
+  (syntax: `py_compile` + `bash -n`) added 2026-10-12 and the workflow now also runs on `feat/**` / `fix/**` pushes. Remaining: a real linter (ruff/shellcheck) and a
   branch/worktree per session so WIP is never committed by the wrong session.
 - [ ] 🔶 **AR-4 (Phase 3)** DB `Guaranteed` QoS + readiness probe, bot liveness (StatefulSet
   change restarts the single DB — quiet window only).
@@ -266,7 +292,7 @@ Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §
   `timescaledb_pre_restore()` — `-j2` fails on the catalog foreign keys); 12 of 13 tables match the live DB row-for-row (6,340,928 `stock_prices`,
   292,313 `index_prices`, …); the 13th, `universe_constituents` (1001 vs 998), differs by exactly the 3 rows `universe-refresh` added after the dump.
   **Second copy:** `ops-tools/pull-backups.py` pulls the newest verified dump(s) to the workstation, sha256-checked against the sidecar, exit 2 if the
-  newest verified dump is > 36 h old (tested: stale path, and a corrupted local copy is detected and re-pulled). Remaining: off-site copy, and an
+  newest verified dump is > 36 h old (tested: stale path, and a corrupted local copy is detected and re-pulled). 2026-10-12 09:00 UTC: the 10-12 dump (172 MB, scheduled run) pulled and verified. Remaining: off-site copy, and an
   in-cluster staleness alert (the Grafana `stale-feed` rule only counts `fresh=false` rows from the health job's own FEEDS, so a self-written row
   cannot go stale — needs a rule change or a health-job rebuild; run `pull-backups.py` from cron meanwhile). `tests/test-pg-backup.sh` 21/21.
 - [x] ✅ **AR-12 (Phase 1)** — re-verified 2026-10-12 04:30 UTC: all five hosts logging every 5 min, `nodewatch` cron present on pi0. Repair/verify the 5-min stats logger (one sample on pi0/pi1/pi3; **all five hosts fixed 2026-10-11**: each
@@ -302,6 +328,23 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   wrong across such events. Fix (additive): `adj_close` column + `corporate_actions` table; re-backfill a symbol when an
   action is detected; flag > 40 % moves (ML-1); then run EV-0 on adjusted series. Total-return (dividend) effects are
   currently omitted from every return metric.
+  **Evidence 2026-10-12 (the three > 40 % moves, checked against Yahoo now):** **CTVA is the mechanism, proven** — the 10-01 drop is a spin-off that Yahoo records as a
+  `Stock Splits = 6.66` row and has already back-adjusted (Yahoo's 09-28 close is 11.66; our DB still holds 77.74), so every older CTVA row in `stock_prices` is
+  on the wrong scale. **MRNA (+177 % on 08-19) and HEGAM.NS (−63 %) are not adjustment errors**: Yahoo shows the same jumps (MRNA volume ×40 — a real event; HEGAM.NS has
+  no split flag, so a demerger/real drop) — they must not be "corrected". Design hint for the fix: the daily job should read Yahoo's `Stock Splits` column and re-backfill
+  a symbol when it is non-zero in the refresh window; a > 40 % move *without* a split flag is a review item, not an auto-fix.
+- [ ] 🔶 **P0 · DQ-4 `stock_prices` mixes timestamp conventions and holds 4,434 duplicate rows (found 2026-10-12, verified on the live DB).** The pre-10-02 history was written with
+  exchange-local midnight (US `04:00`/`05:00` UTC, NSE `18:30` UTC *of the previous calendar day*) — **6,324,536 of 6,343,427 rows (99.7 %)** — while the rows written since ~09-28
+  are `00:00` UTC on the trade date. Consequences: (a) **4,434 duplicate symbol-days across 987 symbols, 2026-09-28 → 10-02** (same trade stored twice; the unique index is on
+  `(symbol, ts)` so it cannot see them) — row-count lookbacks in `stock_metrics.py` (`iloc[-1-lag]`, `LIMIT BARS`) are shortened by up to 5 bars for those symbols, and duplicate
+  days add zero-return observations to volatility; (b) `ts::date` of every old NSE row is **one day early** (Monday's bar sits on Sunday — e.g. HEGAM.NS's 09-07 bar is
+  stored 09-06), which breaks date joins and the monthly buckets EV-0 will use; (c) the Nifty 500 bar dated today is a **partial intraday bar** (the 06:30 UTC run fires while NSE is
+  open) — it is overwritten by the next run, harmless. **Proposed repair — needs approval, NOT run** (non-SELECT on the live DB; fresh verified dumps exist, 10-12 08:30 UTC, on pi3 and
+  `out/backups/`): step 1, delete the 4,434 old-convention duplicates (keep the `00:00` row): `DELETE FROM stock_prices o WHERE o.ts >= '2026-09-27' AND extract(hour FROM o.ts) <> 0
+  AND EXISTS (SELECT 1 FROM stock_prices n WHERE n.symbol = o.symbol AND extract(hour FROM n.ts) = 0 AND n.ts >= '2026-09-27' AND n.ts::date = CASE WHEN o.symbol LIKE '%.NS'
+  THEN (o.ts + interval '6 hours')::date ELSE o.ts::date END);` — the SELECT form of exactly this predicate returned 4,434 rows / 987 symbols; step 2 (later, maintenance window): normalise the
+  6.3 M old rows to `00:00` UTC on the trade date (heavy: 3,381 chunks, rows cross chunk boundaries — batch per year, off-peak) or add a `trade_date` expression every reader uses;
+  step 3: make the writer set `ts` explicitly to the trade date at `00:00` UTC so the convention cannot drift again. Interacts with DQ-1 (re-backfills must use the same convention).
 - [ ] 🔶 **P0 · DQ-2 fundamentals period + point-in-time errors** (verified 2026-10-10, live DB; design + DDL in
   `data-foundations-schema-draft-2026-10-10.md`). (a) `edgar_facts()` ignores period length, so quarterly rows hold
   year-to-date values (MSFT net income 27.75 → 66.21 → 97.98 → 133.75 bn across Sep/Dec/Mar/Jun) and
@@ -338,8 +381,11 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
 - [ ] 🔶 **P2 · G-21** extra signals testable from data on hand: net payout yield (Boudoukh et al. 2007), distress score,
   Amihud illiquidity (2002), max daily return / idiosyncratic volatility (Bali et al. 2011), industry momentum
   (Moskowitz & Grinblatt 1999) — citations from memory, verify; each must pass EV §5.
-- [ ] 🔶 **P2 · G-22** 12 of 503 S&P symbols have no EDGAR rows (e.g. AAPL) — check the `cik` gap in
-  `universe_constituents`.
+- [ ] 🔶 **P2 · G-22** S&P symbols without EDGAR rows — **root cause found 2026-10-12: not a `cik` gap.** All 503 active S&P rows have a CIK; 10 lack EDGAR
+  rows: `A, AAPL, ABBV, ABNB, ABT, ACGL, ACN` (the first 7 alphabetically — they missed the first full pass) and `SKYD, TWLO, VYLR` (added by `universe-refresh` after it). SEC
+  `companyfacts` answers HTTP 200 with data for 9 of the 10 (e.g. AAPL 441 annual/quarterly facts); only `VYLR` has none (new spin-off). The weekly job re-processes the whole
+  universe, so **the Sat 10-17 pass should fill them — verify then** (active S&P symbols with EDGAR rows should rise from 493 to 502); if not, run a
+  `BACKFILL=1` canary for those symbols.
 
 ### Evidence-based signals (plan 2026-10-10 — `evidence-based-signals-roadmap.md`)
 
@@ -395,7 +441,8 @@ practice · ⚪ unproven here · ⚠️ citation not verified.
   check) and the tailnet nameserver set in the admin console. Detail: ops manual §12.6.
 - [ ] 🔶 Remove the dead router UDP 51820 port-forward (WireGuard leftover) — owner, router-side. Detail: roadmap §11.
 - [ ] 🔶 **Find out who messaged the bot** — the old `telegram-bot` pod's log showed a chat NOT on the allow-list sending `/status`
-  (ignored; the allow-list works). Worth knowing who it was.
+  (ignored; the allow-list works). Worth knowing who it was. 2026-10-12 08:46 UTC: the current pod's log shows a group chat (`/top`, `/status`,
+  `/gold`) and a private chat (`/start`) being ignored just before the two `/adduser` calls — probably the person now added as `sailu`; owner to confirm, then close.
 - [x] ✅ 2026-10-12 pi2 cordon dated: taint `node.kubernetes.io/unschedulable` `timeAdded` = 2026-10-10 06:11:25 UTC (during the outage
   recovery). Reason inferred from timing, not recorded — owner may confirm; **keep it cordoned** (1 GB control plane).
 

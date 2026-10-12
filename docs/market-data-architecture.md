@@ -762,9 +762,9 @@ sequenceDiagram
     HB->>PH: upsert freshness per feed — 13 feeds (max age + row counts)
     RB->>PH: self-row 'rbi' (heartbeat v2 pattern — new jobs write their own row)
     PH->>GR: rules query freshness, VIX level, FII flows
-    GR->>TP: rule fires — stale feed, VIX above 25, or FII below -3000 Rs cr
+    GR->>TP: rule fires — stale feed, VIX above 30, FII below -5000 Rs cr, or 7-day sentiment below -0.15
     TP->>PHN: alert message to allow-listed chat (notification policy tree)
-    Note over GR,PHN: deployed 2026-10-09 (ADR 0009); thresholds are first guesses —<br/>sentiment-drop rule + tuning still pending (§12)
+    Note over GR,PHN: deployed 2026-10-09 (ADR 0009); thresholds retuned 2026-10-12 (VIX 30, FII -5000, sentiment rule applied) —<br/>re-tune FII/sentiment once ~60 days of data exist (§12)
 ```
 
 ---

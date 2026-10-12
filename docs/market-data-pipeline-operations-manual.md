@@ -210,13 +210,13 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
   Backlog drained on start; offset in-memory (commands are idempotent).
 - One-shot Jobs (kept as manifests, run on demand): `backfill-*-1y` (history
   seeding), `timescaledb-schema`, `timescaledb-write-test`, `restore-drill`.
-- Intraday (2026-10-03): `intraday-fetcher` hourly at :10 — yfinance 1h×2d
   **Re-running the schema Job:** after editing `schema-configmap.yaml`, `kubectl apply` it, then run the Job under a NEW name
   (e.g. `sed '8s/name: timescaledb-schema$/name: schema-<tag>/' manifests/timescaledb/schema-job.yaml | kubectl apply -f -`;
   replace only line 8 — the ConfigMap reference further down must keep its name). The permission config denies deleting
   anything named `timescaledb…` (rule 5), so the old Job cannot be deleted and re-created. Schema 09 (multi-user bot) was applied
   this way on 2026-10-12 as `schema-multiuser-09`; a first attempt (`timescaledb-schema-09`, ConfigMap name rewritten by a too-broad
   sed) never started and was suspended, not deleted.
+- Intraday (2026-10-03): `intraday-fetcher` hourly at :10 — yfinance 1h×2d
   candles; FX → `fx_rates` (hourly rows, coexists with daily), gold/silver/
   oil/DXY → `intraday_prices` (separate hypertable — `index_prices` stays
   pure-daily because ta-compute iterates every ticker over all rows).
@@ -443,6 +443,20 @@ kubectl -n market-data port-forward svc/grafana 3000:3000
 > **Why:** Grafana panels cache "No data" state and **do not auto-requery** when time range changes. Manual refresh is required. API queries work perfectly (validated).
 
 ## 8. Failure recovery runbook (copy-paste commands)
+
+### Power acceptance trial (started 2026-10-12 02:59 UTC) — interim verdicts
+Rule and tool: `bash ops-tools/power-review.sh` (no live `throttle_hex` bit `0x1/0x2/0x4`, no new since-boot undervolt bit, no sample
+gap > 15 min; heat is a WARN). Final review due ~02:59 UTC 2026-10-13; record the final verdict here and in `pending-tasks.md` §1.
+
+| Node | Interim (02:59→09:46 UTC, 82 samples) | `dmesg` undervoltage events (since boot) | Note |
+|---|---|---|---|
+| pi0 | PASS (max 36 °C, load 1.13) | 0 | `0x0` |
+| pi1 | **FAIL** — 3 live samples `0x50005` (04:35, 04:50, **09:10 UTC at load 0.41**) | **27** at 09:46 (25 at 08:41) | the first two during image imports; the third at near-idle with no transfer → its own supply/cable (or board) |
+| pi2 | PASS (max 56 °C, load 1.94) | 0 | `0x80000` = heat since boot only |
+| pi3 | PASS (max 52 °C, load 1.83) | 0 | held through the 170 MB `pg-backup` write at 08:30 UTC |
+
+Next if pi1 still fails at the 24 h mark: swap-test ladder on pi1 (spare PSU + cable first; skill `node-power-health` §4), no bulk
+imports/transfers to pi1 meanwhile. Never swap boot SSDs between nodes.
 
 ### pi2 wedged ~16 h + live undervoltage found (2026-10-09→10) — full post-mortem
 **Root cause (first catch of the node-stats logger, ADR 0011):** pi2 ran
@@ -791,8 +805,10 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
    ^CNXAUTO / ^CNXFMCG / NIFTYAUTO.NS / NIFTYFMCG.NS all confirmed dead on
    Yahoo (current-quote ghost only, no history) — NSE direct (session-cookie
    API, like fiidii-fetcher) or jugaad-data are the only remaining avenues.
-3. Grafana alert rules not configured (panels are alert-ready; `pipeline_heartbeat`
-   table now exists as the alert source — next: notification channel decision).
+3. ~~Grafana alert rules not configured~~ ✅ 4 rules live (2026-10-12): stale feed, VIX > 30, FII < −5000 Rs cr, 7-day sentiment < −0.15,
+   all to the Telegram contact point (telegram-bot doc §3.3). Known noise: the stale-feed rule counts every `fresh=false` heartbeat row, so it
+   keeps firing while `stock_fundamentals` (weekly, next full pass Sat 10-17) and `stock_scores` are stale — it clears only after the next
+   daily `pipeline-health` run (08:45 UTC) following the data. Re-tune FII/sentiment at ~60 days of history.
 4. ~~TX2 LAN IP still DHCP~~ ✅ resolved 2026-10-03: router DHCP reservation
    (user-confirmed); host stays DHCP client by design.
 5. news_sentiment / raw_headlines have NO unique constraints yet (INSERT-only
