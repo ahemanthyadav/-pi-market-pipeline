@@ -5,8 +5,8 @@
 # stocks.py is the shared stock/watchlist/screener view layer (no entrypoint).
 # Same build/distribute pattern (native TX2 docker build, tarball import —
 # pinned node pi1 only, see cronjob.yaml/deployment.yaml):
-#   docker build -t local/telegram-digest:v6 .
-#   docker save local/telegram-digest:v6 | gzip > telegram-digest-v6.tar.gz
+#   docker build -t local/telegram-digest:v7 .
+#   docker save local/telegram-digest:v7 | gzip > telegram-digest-v7.tar.gz
 FROM python:3.12-slim
 WORKDIR /app
 RUN pip install --no-cache-dir "psycopg[binary]" requests

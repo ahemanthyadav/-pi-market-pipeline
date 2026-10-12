@@ -38,7 +38,7 @@ spec:
             kubernetes.io/hostname: pi1
           containers:
             - name: digest
-              image: local/telegram-digest:v6
+              image: local/telegram-digest:v7
               imagePullPolicy: Never
               env:
                 - name: PGHOST
@@ -102,7 +102,7 @@ spec:
             kubernetes.io/hostname: pi1
           containers:
             - name: alerts
-              image: local/telegram-digest:v6
+              image: local/telegram-digest:v7
               imagePullPolicy: Never
               args: ["python", "alerts.py"]
               env:

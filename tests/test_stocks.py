@@ -388,6 +388,22 @@ class FundamentalsTest(unittest.TestCase):
         self.assertEqual(out["fcf"][0], 7.0)           # same filing date → yfinance wins
         self.assertNotIn("pe", out)
 
+    def test_flow_metrics_ignore_edgar_year_to_date_rows(self):
+        # MSFT-like: EDGAR 10-Q rows (3/6/9-month YTD) are newer than the last full
+        # fiscal year, so the newest-filing rule would pick a half-year (DQ-2).
+        rows = [("total_revenue", "edgar", day(9), 133.0),      # newest, year-to-date
+                ("total_revenue", "edgar", fy(2025), 66.0),
+                ("total_revenue", "yfinance", fy(2026), 300.0),
+                ("total_revenue", "yfinance", fy(2025), 270.0),
+                ("shareholder_equity", "edgar", day(9), 500.0)]  # balance sheet: unchanged
+        self.assertEqual(stocks.series(rows)["total_revenue"],
+                         [(fy(2026), 300.0), (fy(2025), 270.0)])
+        self.assertEqual(stocks.latest_two(rows)["total_revenue"][:2], (300.0, 270.0))
+        self.assertEqual(stocks.series(rows)["shareholder_equity"], [(day(9), 500.0)])
+        # no yfinance rows at all: falls back to the old rule rather than showing nothing
+        self.assertEqual(stocks.series([("fcf", "edgar", fy(2026), 5.0)])["fcf"],
+                         [(fy(2026), 5.0)])
+
     def test_yoy_refuses_a_negative_base(self):
         annual = {"total_revenue": (110.0, 100.0, fy(2026)),
                   "eps": (5.0, -2.0, fy(2026)), "fcf": (3.0, None, fy(2026))}

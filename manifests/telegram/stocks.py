@@ -517,6 +517,9 @@ SNAPSHOT = ["pe", "pb", "ev_ebitda", "roe", "operating_margin", "market_cap"]
 ANNUAL = ["total_revenue", "eps", "net_income", "fcf", "total_debt", "shareholder_equity"]
 
 
+FLOW_METRICS = frozenset({"total_revenue", "eps", "net_income", "fcf"})
+
+
 def series(rows):
     """{metric: [(ts, value), …] newest first} from annual fundamentals.
 
@@ -530,6 +533,11 @@ def series(rows):
             by.setdefault(metric, {}).setdefault(source, []).append((ts, value))
     out = {}
     for metric, sources in by.items():
+        if metric in FLOW_METRICS and "yfinance" in sources:
+            # EDGAR 10-Q rows are year-to-date (3/6/9 months), so the "newest filing"
+            # rule below would compare a half-year with a full year (DQ-2, 2026-10-10).
+            out[metric] = sorted(sources["yfinance"], reverse=True)
+            continue
         best = max(sources.items(),
                    key=lambda item: (max(t for t, _ in item[1]), item[0] == "yfinance"))[1]
         out[metric] = sorted(best, reverse=True)
