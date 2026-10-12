@@ -5,9 +5,10 @@
 > commodities, yields, rates, news, FinBERT sentiment, FII/DII flows, technicals,
 > and a 998-stock fundamental screener (Nifty 500 + S&P 500) — into TimescaleDB,
 > with Grafana dashboards, Tailscale-only access, and no container registry.
-> **Status 2026-10-10 — ⚠ cluster degraded** since 2026-10-09 15:02 UTC (control-plane wedge; pi1 rejoined,
-> pi3 + TX2/DB not yet, API intermittent — ops manual §8, pending-tasks §1). Last fully healthy check
-> 2026-10-09: all 4 nodes Ready · **23 CronJobs** (per `manifests/`; telegram-digest 08:00 IST) · Telegram alert channel
+> **Status 2026-10-12 — recovered, power fix on trial.** The 2026-10-09→10 outages are over: all 4 nodes Ready, DB Running,
+> all 23 CronJobs active and completing (verified 08:22 UTC); the root cause (Pi power) is only *claimed* fixed — all Pis moved
+> to separate supplies ~02:30 UTC, 24 h acceptance review due ~02:59 UTC 2026-10-13 (pending-tasks §1; per-node roles: `node-roles.md`).
+> Earlier healthy check 2026-10-09: all 4 nodes Ready · **23 CronJobs** (per `manifests/`; telegram-digest 08:00 IST) · Telegram alert channel
 > live (contact point + 3 rules) · **Telegram two-way listener live**
 > (Deployment telegram-bot: /status /vix /nifty /sensex /gold /fii /scores
 > /digest) · screener toolkit `local/screener:v9` ·

@@ -36,9 +36,12 @@
   allow-list — ADR 0012), CronJobs `telegram-digest` (08:00 IST — the only job with an explicit timeZone) and `telegram-alerts` (02:45).
   Pinned so image imports are needed on one node only.
 - **Unpinned jobs:** eligible for any of the 18 unpinned CronJobs (§3.1) — **only if the image is imported on pi1** (no registry).
-  Known gap: `yfinance-fetcher:v5` and `nse-fetcher:v4` are imported on pi3 only (tracker §3).
-- **Host jobs:** node-stats logger — root cron added 2026-10-11 (the crontab was empty; AR-12). Throttle flags read
-  `0x50000` (since boot, none live) on 2026-10-11.
+  The earlier image gap is closed: `yfinance-fetcher:v5`, `nse-fetcher:v4` and `screener:v9` are imported on **both** pi1 and
+  pi3 (verified with `ctr images ls` 2026-10-12 08:22 UTC) — and since then most floating jobs run here (§3.1).
+- **Host jobs:** node-stats logger — root cron added 2026-10-11 (the crontab was empty; AR-12).
+- **Power (2026-10-12):** the only Pi that **failed** the early power review — live undervolt + throttle (`0x50005`) at 04:35 and
+  04:50 UTC under image-import load (CPU 58–73 %), even after the move to separate supplies; pi0/pi2/pi3 passed. Suspect its own
+  supply/cable. No bulk imports/transfers to it until the swap-test ladder is done (tracker §1).
 - **Also holds:** a leftover `screener:v9` tarball in the SSH user's home (tracker §1). Planned second copy of DB dumps (AR-11) — not done.
 - **Watch:** accumulates undervolt events; was NotReady during the 2026-10-10 wedge. Agent runs with
   `--disable-apiserver-lb` (direct to the control plane).
@@ -46,9 +49,10 @@
 ### pi2 — control plane (fragile)
 - **Does:** k3s server — API on :6443, scheduler, controllers, datastore (`state.db`, no backup yet — AR-10), CoreDNS,
   Traefik, metrics-server, local-path-provisioner.
-- **Scheduling:** **cordoned (`SchedulingDisabled`) as of the 2026-10-11 live check** — no workload pods run on it.
-  *Not documented anywhere until now; the date and reason it was cordoned are unknown — verify with the owner before
-  un-cordoning.* Do not un-cordon without a reason: 1 GB RAM.
+- **Scheduling:** **cordoned (`SchedulingDisabled`)** — no workload pods run on it. The `node.kubernetes.io/unschedulable`
+  taint carries `timeAdded` **2026-10-10 06:11:25 UTC**, i.e. during the 2026-10-09→10 outage recovery (agents being
+  rejoined), so it was most likely set then to keep workloads off the 1 GB control plane. The *reason* is inferred from
+  timing, not recorded; confirm with the owner. Keep it cordoned: 1 GB RAM, and it has wedged under load twice.
 - **Rules (AGENTS.md rule 2):** never restart more than one agent at a time; if load > 3 sustained, follow ops manual §8
   cool-down first. This node's health gates everything else.
 - **Power:** the node that showed live undervolt + throttle (`0xd0005`) and wedged ~16 h on 2026-10-09→10. Its dedicated
@@ -88,9 +92,10 @@
 
 Two kinds of scheduled work exist: **Kubernetes CronJobs** (23, all in namespace `market-data`) and **host-level cron**
 (on the machines themselves, outside k3s). *Verified live 2026-10-11.* CronJob schedules are **node-local PDT, not UTC**
-(ops manual §3); "last scheduled" below is the controller's `lastScheduleTime` in UTC. Suspended from
-2026-10-10 ~17:44 UTC; **re-activated 2026-10-12 03:04–03:27 UTC (22 of 23; `nse-fetcher` still suspended)** — the
-"last scheduled" values below are from the 2026-10-11 check, before that, so they are out of date for the 22 active jobs.
+(ops manual §3); "last scheduled" below is the controller's `lastScheduleTime` in UTC. Suspended 2026-10-10 ~17:44 UTC,
+**all 23 active again since 2026-10-12** (staggered un-suspend 03:04–03:27 UTC; `nse-fetcher` was the last and is active now —
+verified 08:22 UTC, no CronJob has `spec.suspend: true`). Jobs dated 10-09/10-10 below simply have not come due yet today
+(their PDT slot falls later in the UTC day). Refreshed 2026-10-12 08:25 UTC.
 
 ### 3.1 Kubernetes CronJobs — which node runs each
 
@@ -107,31 +112,34 @@ its image (tracker §3).
 | **pi2** | none | cordoned control plane |
 | **pi0** | none | not a k3s node |
 
-Pinned jobs, last scheduled: sentiment-scorer 10-10 07:15 · headline-ner 10-10 07:45 · pg-backup 10-10 08:30 ·
-telegram-digest 10-10 02:30 · **telegram-alerts: never scheduled** (`lastScheduleTime` empty — only its canary Job ran).
+Pinned jobs, last scheduled (UTC): sentiment-scorer 10-12 07:15 · headline-ner 10-12 07:45 · pg-backup 10-10 08:30 (next due
+10-12 08:30) · telegram-digest 10-12 02:30 · **telegram-alerts: never scheduled yet** (`lastScheduleTime` empty — only its canary
+Job ran; first scheduled run is due 10-12 09:45 UTC).
 
-**Floating jobs (18).** "Seen on" = the node of the retained pods; the rest have no retained pod, so the node is unknown.
+**Floating jobs (18).** "Seen on" = the node of the retained pods (including refire/canary/validation runs). Since the
+re-activation almost everything has landed on **pi1**, not pi3 — so pi1 now carries most of the daily load (and is the node that
+logged undervolt events during bulk imports; tracker §1).
 
 | CronJob | Schedule (PDT) | Last scheduled (UTC) | Seen on |
 |---|---|---|---|
-| yfinance-fetcher | `30 22 * * *` | 10-10 05:30 | unknown |
-| fx-fetcher | `0 23 * * *` | 10-10 06:00 | unknown |
-| yields-fetcher | `15 23 * * *` | 10-10 06:15 | unknown |
-| rates-fetcher | `20 23 * * *` | 10-10 06:20 | unknown |
-| news-fetcher | `45 23 * * *` | 10-10 06:45 | unknown |
-| stock-prices | `30 23 * * *` | 10-10 06:30 | unknown |
-| ta-compute | `30 0 * * *` | 10-09 07:30 | unknown |
-| pipeline-health | `45 1 * * *` | 10-10 08:45 | unknown |
-| stock-metrics | `0 2 * * *` | 10-10 09:00 | unknown |
-| stock-screener | `15 2 * * *` | 10-10 09:15 | unknown |
-| stock-report | `30 2 * * *` | 10-10 09:30 | unknown |
-| rbi-fetcher | `0 7 * * *` | 10-10 14:00 | pi3 |
-| nse-fetcher | `15 11 * * *` | 10-09 18:15 | unknown |
-| fiidii-fetcher | `0 14 * * *` | 10-09 21:00 | unknown |
-| intraday-fetcher | `10 * * * *` (hourly) | 10-10 17:10 | pi3 |
-| stock-fundamentals | `0 6 * * 6` (Sat) | 10-10 13:00 | pi3 |
-| universe-refresh | `0 9 * * 0` (Sun) | 10-04 16:00 | unknown |
-| fdi-watch | `0 9 1 * *` (monthly) | 10-01 16:00 | unknown |
+| yfinance-fetcher | `30 22 * * *` | 10-12 05:30 | pi1 |
+| fx-fetcher | `0 23 * * *` | 10-12 06:00 | pi1 |
+| yields-fetcher | `15 23 * * *` | 10-12 06:15 | pi1 |
+| rates-fetcher | `20 23 * * *` | 10-12 06:20 | pi1 |
+| stock-prices | `30 23 * * *` | 10-12 06:30 | pi1 |
+| news-fetcher | `45 23 * * *` | 10-12 06:45 | pi1, pi3 |
+| ta-compute | `30 0 * * *` | 10-12 07:30 | pi1 |
+| pipeline-health | `45 1 * * *` | 10-10 08:45 (due 10-12 08:45) | pi1 |
+| stock-metrics | `0 2 * * *` | 10-10 09:00 (due 10-12 09:00) | unknown |
+| stock-screener | `15 2 * * *` | 10-10 09:15 (due 10-12 09:15) | pi1 (canary) |
+| stock-report | `30 2 * * *` | 10-10 09:30 (due 10-12 09:30) | pi1 (canary) |
+| rbi-fetcher | `0 7 * * *` | 10-10 14:00 (due 10-12 14:00) | pi1 |
+| nse-fetcher | `15 11 * * *` | 10-09 18:15 (due 10-12 18:15) | pi1 (validation run) |
+| fiidii-fetcher | `0 14 * * *` | 10-09 21:00 (due 10-12 21:00) | pi1 |
+| intraday-fetcher | `10 * * * *` (hourly) | 10-12 08:10 | pi1, pi3 |
+| stock-fundamentals | `0 6 * * 6` (Sat) | 10-10 13:00 (next Sat 10-17 13:00) | pi3 |
+| universe-refresh | `0 9 * * 0` (Sun) | 10-04 16:00 (refire ran 10-12) | pi1 |
+| fdi-watch | `0 9 1 * *` (monthly) | 10-01 16:00 (next 11-01) | unknown |
 
 Non-CronJob workloads: `timescaledb` StatefulSet (tx2), `grafana` Deployment (pi3), `telegram-bot` Deployment (pi1).
 One-off Jobs (manual): `restore-drill` (pi3), `timescaledb-schema` (floating), backfills (floating), GPU smoke test (tx2).
@@ -165,9 +173,8 @@ scheduled); fixed that day on all five (ADR 0011 amendment).
 ## 5. Current state (2026-10-11 live check)
 
 - Nodes: pi1, pi3, tx2 Ready; pi2 Ready but **cordoned**. (The tracker had pi1 NotReady — it has since come back.)
-- *(2026-10-11 check)* all 23 CronJobs were suspended. **Updated 2026-10-12 03:44 UTC:** 22 are active again, only
-  `nse-fetcher` is suspended (its `v4` image is on pi3 only — a run on pi1 would fail `ErrImageNeverPull`); the missed
-  runs were refired and completed (tracker §1).
+- **CronJobs (08:22 UTC 2026-10-12): all 23 active, none suspended.** All jobs since the re-activation Completed; no failed or
+  pending pods. `nse-fetcher:v4` is imported on both pi1 and pi3, so floating jobs can run on either.
 - Running: `timescaledb-0` (tx2), `telegram-bot` (pi1), `grafana` (pi3).
 - Host-level on 2026-10-11 (all five nodes now run the 5-min stats logger): throttle `0x0` pi0, `0x50000` pi1/pi3,
   `0xd0000` pi2, n/a TX2 — none live. Not re-verified today: the TX2 fixed config, the Telegram v6 command check.

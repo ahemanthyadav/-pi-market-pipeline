@@ -4,7 +4,7 @@
 > the linked docs — this file is the index + status. Maintained per AGENTS.md docs
 > discipline: mark items ✅ with a date (and where the completion is recorded) when
 > done; prune ✅ lines into the relevant doc's history at housekeeping time.
-> **Last reviewed: 2026-10-10** (2026-10-09→10 outage — recovery in progress, see §1;
+> **Last reviewed: 2026-10-12 08:30 UTC** (recovery complete except the power acceptance review; see §1. Previously 2026-10-10: the 2026-10-09→10 outage —
 > node-local stats logging deployed per ADR 0011; screener v8 fixes + first
 > full-quality run verified 2026-10-09; Grafana screener dashboard live).
 
@@ -15,6 +15,54 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 
 ## 1. Immediate (next checkpoint: tomorrow's `/health`)
 
+> **Restored 2026-10-12:** commit `c455687` dropped the power-fix item, §2 (Security & hygiene), the `nodewatch` and
+> stats-logger records from this file. They are back below (power item and `nodewatch` here, §2 before §4), brought up to date
+> from `a4b9567` + the 2026-10-11/12 sessions. Check `git show a4b9567:docs/pending-tasks.md` if anything else looks missing.
+
+- [ ] 🔶 **Fix the Pi power supplies — IN TEST, acceptance NOT passed** (owner reports all Pis moved to separate power
+  ~2026-10-12 02:30 UTC; before that pi1/pi2/pi3 shared one multiport block). **24 h review due ~02:59 UTC 2026-10-13.**
+  - **Evidence (2026-10-10/11):** pi2 live undervolt+throttle (`0xd0005`, 62 °C) and wedged ~16 h. A 5 V 2 A adapter still gave
+    9 `Undervoltage detected` events in 5.5 min at near-idle load. pi1/pi2/pi3 dropped off together while pi0 stayed up; pi2 and
+    pi3 logged events within ~0.5 s of each other; pi3 went from clean to ~80–110 events/h from ~11:40 UTC 10-11 (1,364 by
+    20:16 UTC) then the counter stopped rising (cause never established). The shared charger is a single point of failure.
+  - **Baseline after the rewire (2026-10-12 02:59 UTC, all four Pis up, nodes Ready):** pi0 `0x0`, 0 events · pi1 `0x50000`,
+    1 event (power-on transient, none live) · pi2 `0x80000`, 0 events (58 °C; soft-temp flag since boot only; 246 MB avail) ·
+    pi3 `0x0`, 0 events. **Since then:** pi1 logged undervolt events during bulk image imports (2 for the telegram v7 import, 3 for
+    the screener v9 import; node stayed Ready) — it is still sensitive to heavy SSD/IO bursts; avoid bulk transfers to pi1.
+  - **Review = pass/fail:** run **`bash ops-tools/power-review.sh`** (new 2026-10-12; pulls the CSVs and applies the rule: no live
+    `throttle_hex` bit `0x1/0x2/0x4`, no new since-boot undervolt bit, no sample gap > 15 min; heat is a WARN, not a power fail;
+    exit 0 = PASS). Also compare `dmesg | grep -ci undervoltage` with the baseline. The CronJobs are already running
+    (re-activated 10-12), so this is under real load. Record the verdict per node here and in ops manual §8.
+  - **Early read, 2026-10-12 02:59 → 08:25 UTC (5.4 h, 65 samples/node):** **pi0 PASS** (max 36 °C), **pi2 PASS** (max load 1.74,
+    56 °C, 0 live hits), **pi3 PASS** (0 live hits) — but **pi1 FAIL: 2 samples read `0x50005` (undervolt + throttle live) at 04:35 and
+    04:50 UTC**, during the screener-v9 and telegram-v7 image imports (CPU 58–73 %, load 3.35). So pi1 still undervolts under a burst
+    **even on its own supply** → suspect pi1's supply or cable specifically (the earlier rewire fixed pi2/pi3/pi0, not pi1). Next:
+    the swap-test ladder on pi1 (spare PSU+cable first; skill `node-power-health` §4) — physical, owner. Until then treat pi1 as
+    the fragile worker: no bulk imports to it, and note that the daily floating jobs now mostly land on pi1.
+  - **Open questions for the owner:** is each Pi's supply truly dedicated (rating, cable length/gauge)? what changed ~11:40 UTC
+    10-11 when pi3's events started and later stopped?
+  - **Buy/do (if any Pi still faults):** 5.1 V / 3 A supplies + short (≤ 0.5 m), thick (≥ 20 AWG) micro-USB cables for
+    **pi2 first, then pi1, then pi0**; keep **one spare** supply+cable set for swap tests. Power pi2's SSD **separately from the
+    Pi's 5 V rail** (it is the BOOT drive — keep its data path direct): a powered enclosure or a separate-power Y-cable. A hub in
+    the boot path is **unverified on Pi 3 / 3B+** — test on pi3 or a spare first, never first on pi2. Optional: an inline USB power meter.
+  - **Method:** the identity-free swap-test ladder (skill `node-power-health` §4): PSU+cable first, then USB-SATA adapter,
+    board last. **Never swap boot SSDs between nodes** (hostname, static IP, k3s certs and cluster state travel with the disk).
+  - **Open (heat, not power):** pi2 touched the 60 °C soft-temp limit right after boot (`0x80008` live at 02:44 UTC, gone by
+    02:52). If it recurs once the node is calm, it needs a heatsink/airflow.
+  - **Later (decision, not part of this fix):** one shared regulated 5 V rail with fused branches — architecture review AR-10;
+    needs an enclosed supply and careful mains-side wiring. Detail: `architecture-review-2026-10-10.md` AR-10; skill
+    `node-power-health`; ADR 0011.
+- [x] ✅ 2026-10-11 **`nodewatch` deployed on pi0** — out-of-cluster dead-man's switch. Script in `/usr/local/bin`,
+  `/etc/nodewatch.hosts` + `/etc/nodewatch.secrets` (mode 600, root), root cron `*/5` (log overwritten each run at
+  `/var/tmp/nodewatch.log`); its own dedicated Telegram bot, separate from the in-cluster `telegram-bot`; delivery test HTTP 200.
+  **First real alert 2026-10-11 23:45 UTC (pi3 down) — chain verified end-to-end.** Gotcha: `TELEGRAM_CHAT_ID` must be the numeric
+  id, not the bot username ("chat not found"); an empty/absent secrets file makes the script record a state change as handled
+  without sending. Open: a second watcher host (AR-12) — pi0 is the only out-of-cluster alert path.
+- [x] ✅ **Node-local stats logging** — deployed 2026-10-10 on pi0/pi1/pi2/pi3/TX2 (ADR 0011); the cron entries were missing everywhere and
+  were added 2026-10-11, header bug fixed (see AR-12 below and the ADR amendment). Puller: `ops-tools/collect-node-stats.sh`.
+- [x] ✅ 2026-10-11 **pi0 → tailnet** (tailscale from the Raspbian apt repo, `--accept-dns=false --accept-routes=false`; node key expires
+  2027-04-09; Pi-hole admin reachable over the tailnet). Remaining in §2.
+
 - [x] ✅ 2026-10-11 **Node jobs/responsibilities documented** in `node-roles.md` (all Pis + TX2; pinned vs unpinned
   CronJobs, host cron jobs, blast radius). Live check that day: pi1 **Ready** (telegram-bot Running there), pi2 Ready but
   **cordoned** (undocumented — find out when/why), all 23 CronJobs still suspended.
@@ -24,6 +72,19 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   out cleanly and is listening; `/stock MSFT` renders the full card in the new pod (no message sent — called inside the pod). 96-test suite passes.
   Observed in the old pod's log: a chat that is not on the allow-list messaged the bot (`/status`) and was ignored — the allow-list is working;
   worth knowing who that was.
+- [x] ✅ **2026-10-12 Telegram multi-user — every user has their own setup (ADR 0012, `telegram-digest:v8`).** Owner = the Secret's chat id; members =
+  `bot_users` rows, managed from the owner's chat with `/adduser <id> Name`, `/rmuser <id>`, `/users` (no Secret edit, no restart). `watchlist` is now keyed
+  `(chat_id, symbol)` — each person's holdings, `/watch`, digest watchlist section and watchlist alerts are private to their chat; digest and alert Jobs fan
+  out one message per user (a member who blocked the bot only logs a WARN). An unknown chat is still never answered, but the owner gets one access notice
+  per chat per day with a ready `/adduser` line. Schema `09-multiuser.sql` applied (watchlist was empty; idempotent; refuses to guess an owner if it has
+  rows; tested against a throwaway Postgres in 4 cases). Verified live in the new pod against the real DB with a throwaway member (cleaned up): stranger
+  silent + owner notified once + stranger `/adduser` blocked; member `/watch` private; member cannot `/adduser`; removed member gets 0 replies; digest and
+  alerts `main()` give each user only their own content. `tests/test_multiuser.py` 38 tests (allow-list and watchlist-scoping mutation-checked); added to CI.
+  **The Secret's `chat-id` is the owner's PRIVATE chat again** (restored from `telegram-bot-prev-chat-id`; it had been pointed at a group, which made the whole
+  group the owner). 🔶 Still to do by the owner: have each person message `@Marketfredbot`, then `/adduser` them from the access notice and ask them to
+  `/start`. Open extension: per-user digest time and alert threshold. Side notes: the schema Job could not be re-run under its own name (delete guard on
+  `timescaledb…`) — ran as `schema-multiuser-09`; `timescaledb-schema-09` (broken first attempt, suspended) and `telegram-bot-prev-chat-id` (rollback copy of the
+  old owner id) remain in the namespace.
 - [x] ✅ **2026-10-12 Screener v9 rolled out (DQ-2 + DQ-3 fixes).** Image content verified byte-identical to the repo scripts (sha256 per
   file), tarball (checksummed at each hop) imported on pi1 (v9 was already on pi3; 3 undervolt events during the import, node stayed
   Ready), all six screener CronJobs bumped v8 → v9 (live diff = exactly 6 image lines), canaries run **on pi1 itself**:
@@ -32,8 +93,10 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   full-year yfinance rows → no change); **S&P 500 only 25/50 overlap** (top-10 moved from MU/SNDK/APA/PTC/NEM/HPQ/WDC/EOG/DVN/TRV to
   INCY/ALL/SNDK/NEM/TRV/MU/APA/PTC/PGR/PM; mean growth_score −0.06 on the overlap) — the intended effect of no longer comparing year-to-date
   figures with full years. `stock_fundamentals` DQ-3 (NameError) is unit-tested only; **its first real validation is the Sat 2026-10-17
-  06:00 PDT full pass** (watch for `FUNDAMENTALS-OK` with a `failed=` count and a Completed Job). US price data currently ends 10-08 (the
-  10-10 `stock-prices` run failed during the outage; its 5-day window recovers tonight). Previously: History of the 2026-10-10 second wedge:** Sequence: v9 built on
+  06:00 PDT full pass** (watch for `FUNDAMENTALS-OK` with a `failed=` count and a Completed Job). US price data ended 10-08 after the outage; **recovered — verified 2026-10-12 08:25 UTC:
+  S&P 500 through Fri 10-09 (506 symbols), Nifty 500 through 10-12 (494)** (Monday's US close lands in tonight's run).
+  `stock_fundamentals` is still stale (last 10-04) until the Sat 10-17 pass; the heartbeat rows read at 03:14 UTC showed
+  `stock_prices`/`stock_scores` not fresh at that moment — `pipeline-health` re-runs 08:45 UTC. Previously: History of the 2026-10-10 second wedge:** Sequence: v9 built on
   TX2 and imported on pi3 (63 s), then pi1's tarball push/import → API `ServiceUnavailable`, pi1 `ctr` EOF; pi1/pi2 SSH
   banner resets with ping alive, pi3 off the network; pi2 + pi3 later came back (~17:41 UTC, "up 0 min"); **pi1 still
   NotReady with no ping at 17:50 UTC — needs a physical power check.** Cause unproven (a 116 MB push + import on
@@ -72,19 +135,6 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 - [x] ✅ 2026-10-12 **News feeds repaired** — diagnosed: Moneycontrol (both feeds) 302-redirect to a login-consent wall for every user-agent, Reuters
   (`feeds.reuters.com`) no longer resolves. Fixed with a `FEEDS` env override in `manifests/ingestion/news/cronjob.yaml` (no image rebuild): kept
   ET + Business Standard, added LiveMint, Hindu BusinessLine (India) and CNBC, MarketWatch (global). Canary: 6/6 feeds parse, 160 headlines, 127 new
-- [x] ✅ **2026-10-12 Telegram multi-user — every user has their own setup (ADR 0012, `telegram-digest:v8`).** Owner = the Secret's chat id; members =
-  `bot_users` rows, managed from the owner's chat with `/adduser <id> Name`, `/rmuser <id>`, `/users` (no Secret edit, no restart). `watchlist` is now keyed
-  `(chat_id, symbol)` — each person's holdings, `/watch`, digest watchlist section and watchlist alerts are private to their chat; digest and alert Jobs fan
-  out one message per user (a member who blocked the bot only logs a WARN). An unknown chat is still never answered, but the owner gets one access notice
-  per chat per day with a ready `/adduser` line. Schema `09-multiuser.sql` applied (watchlist was empty; idempotent; refuses to guess an owner if it has
-  rows; tested against a throwaway Postgres in 4 cases). Verified live in the new pod against the real DB with a throwaway member (cleaned up): stranger
-  silent + owner notified once + stranger `/adduser` blocked; member `/watch` private; member cannot `/adduser`; removed member gets 0 replies; digest and
-  alerts `main()` give each user only their own content. `tests/test_multiuser.py` 38 tests (allow-list and watchlist-scoping mutation-checked); added to CI.
-  **The Secret's `chat-id` is the owner's PRIVATE chat again** (restored from `telegram-bot-prev-chat-id`; it had been pointed at a group, which made the whole
-  group the owner). 🔶 Still to do by the owner: have each person message `@Marketfredbot`, then `/adduser` them from the access notice and ask them to
-  `/start`. Open extension: per-user digest time and alert threshold. Side notes: the schema Job could not be re-run under its own name (delete guard on
-  `timescaledb…`) — ran as `schema-multiuser-09`; `timescaledb-schema-09` (broken first attempt, suspended) and `telegram-bot-prev-chat-id` (rollback copy of the
-  old owner id) remain in the namespace.
   rows. Note the source mix changed (affects sentiment comparability across the 10-12 boundary). The script's `DEFAULT_FEEDS` still lists the dead feeds
   — update it at the next natural rebuild.
 - [x] ✅ 2026-10-12 **Import the new fetcher images on pi1** — `yfinance-fetcher-v5` and `nse-fetcher-v4` imported, canaried on pi1, CronJobs
@@ -184,6 +234,10 @@ Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §
   Live values verified (`concurrencyPolicy Forbid`, `startingDeadlineSeconds`, `activeDeadlineSeconds`, TTL 604800); values +
   rationale in ops manual §3. Effect on resume: only runs due inside each job's start window fire — no 23-job catch-up storm.
   Remaining: canary the estimated deadlines (`headline-ner`, `stock-screener`, `stock-report`, Telegram) on their first live runs.
+  **Checked 2026-10-12 08:25 UTC:** live values are in place (`Forbid`, start 3600 s; active deadlines headline-ner 1800, stock-screener 3600,
+  stock-report 1200, telegram-alerts 600). `headline-ner` ran on schedule at 07:45 UTC and Completed inside its window; the others have
+  only run as canaries — their scheduled slots are 09:15 / 09:30 / 09:45 UTC (telegram-alerts has **never** been scheduled yet).
+  Verify those three after 09:50 UTC today: `kubectl -n market-data get jobs` and the OK markers.
 - [ ] 🔶 **AR-2/AR-3 (Phase 1)** shared job module (DB connect+retry, `write_window()`,
   logging, `main()` wrapper) and a durable `job_runs` table (start/end/rows/status/error).
 - [ ] 🔶 **AR-5 (Phase 1→2)** ✅ step 1 done 2026-10-12: a `requirements.lock` for every Python image (13 new frozen from the running images + the 3
@@ -322,6 +376,25 @@ practice · ⚪ unproven here · ⚠️ citation not verified.
   fit for large caps, expect small/null; a documented "no" is an acceptable outcome. **ML-8 🔵** TX2 stays CPU; DB move (AR-10) frees it for ML.
 - [ ] 🤔 **Provide the LLM provider choice and place the key yourself** (`LLM_API_KEY` in the local credentials
   file; cluster Secret created out-of-band — never paste it into chat or a file in git).
+
+## 2. Security & hygiene (this week) — restored 2026-10-12
+
+- [x] ✅ **Secrets kept out of git** — done 2026-10-10: single gitignored local store `.secrets.env` (template
+  `.secrets.env.example`); docs/tools carry no values (`@@PW@@` token + `ops-tools/_creds.py`); secret manifests +
+  `validation/grafana/` gitignored; agents denied read/edit of `.secrets.env` in `opencode.jsonc`. Credential rotation is
+  explicitly NOT a priority (owner decision 2026-10-10). Detail: ops manual §10.
+- [ ] 🔶 **Verify the CGNAT claim** — 2026-10-10 measurement: the public IP this LAN egresses with EQUALS the router's WAN IP
+  (docs concluded CGNAT from the opposite). One check from one workstation; confirm on the router's WAN page or from the phone off
+  Wi-Fi. If not CGNAT: "no inbound ports by construction" is false and the stale UDP 51820 forward may be reachable — remove it
+  first. Detail: ops manual §12.9. **Gates the pi0 DNS item below.**
+- [ ] 🔶 **pi0 DNS over the tailnet (ad-block on the move)** — pi0 is on the tailnet and the admin page works, but a DNS query from
+  pi1 over the tailnet timed out: Pi-hole `dns.listeningMode` is `LOCAL`. Needs a decision on the listening mode (after the CGNAT
+  check) and the tailnet nameserver set in the admin console. Detail: ops manual §12.6.
+- [ ] 🔶 Remove the dead router UDP 51820 port-forward (WireGuard leftover) — owner, router-side. Detail: roadmap §11.
+- [ ] 🔶 **Find out who messaged the bot** — the old `telegram-bot` pod's log showed a chat NOT on the allow-list sending `/status`
+  (ignored; the allow-list works). Worth knowing who it was.
+- [x] ✅ 2026-10-12 pi2 cordon dated: taint `node.kubernetes.io/unschedulable` `timeAdded` = 2026-10-10 06:11:25 UTC (during the outage
+  recovery). Reason inferred from timing, not recorded — owner may confirm; **keep it cordoned** (1 GB control plane).
 
 ## 4. v2+ (target architecture — build on v1's tables)
 
