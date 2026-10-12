@@ -273,7 +273,7 @@ whole DB via `pg_dump`.*
 | Global indices/FX/yields/futures | `yfinance` batch (28 tickers) | ✅ live | `FTSE.MI` died → `FTSEMIB.MI`; `^CNXAUTO`/`^CNXFMCG` stale-dropped |
 | NSE indices (8) | validated Yahoo symbols | ✅ 8/8 live | Nifty 500 has NO Yahoo symbol; `jugaad-data` not needed yet |
 | FRED (DFF, DGS2/10/30) | `fredapi` + key in Secret | ✅ live | Key verified (DFF 3.88 on check day) |
-| News RSS (ET, BS) | `feedparser` staging | ✅ partial | Moneycontrol ×2 + Reuters dead (WARN-tolerant fetcher) |
+| News RSS (ET, BS, LiveMint, BusinessLine, CNBC, MarketWatch) | `feedparser` staging | ✅ live 2026-10-12 | Moneycontrol ×2 (login-consent wall) + Reuters (host gone) dead; replaced via CronJob `FEEDS` env, no rebuild |
 | NSE FII/DII flows | fiidiiTradeReact JSON + session | ✅ live | API returns bare list, not `{data:…}` envelope |
 | RBI G-Secs / repo rate | — | ❌ no stable feed | Documented gap; `interest_rates` holds DFF only |
 | FDI monthly | watch + manual INSERT | 🔶 reporter only | DPIIT PDFs; ~5-min monthly task (template in job log) |
@@ -552,17 +552,17 @@ layer (JOINs on ticker/symbol), not in DDL.*
 | ta-compute | 30 0 * * * | local/ta-compute:v1 | technical_indicators |
 | headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (ADR 0010) |
 | rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (IN_* policy rates) + bond_yields (IN_GS_*) |
-| telegram-digest | 0 8 * * * (Asia/Kolkata) | local/telegram-digest:v6 (pinned pi1) | Telegram digest (read-only) |
-| telegram-alerts | 45 2 * * * (node-local) | local/telegram-digest:v6, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only; silent when nothing changed) |
+| telegram-digest | 0 8 * * * (Asia/Kolkata) | local/telegram-digest:v7 (pinned pi1) | Telegram digest (read-only) |
+| telegram-alerts | 45 2 * * * (node-local) | local/telegram-digest:v7, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only; silent when nothing changed) |
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | pi3 SSD dumps |
 | pipeline-health | 45 1 * * * | local/pipeline-health:v4 | pipeline_heartbeat (13 feeds) |
 | intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
-| universe-refresh | 0 9 * * 0 | local/screener:v8 | universe_constituents + ticker_names (998) |
-| stock-prices | 30 23 * * * | local/screener:v8 | stock_prices (5d window) |
-| stock-fundamentals | 0 6 * * 6 | local/screener:v8 | stock_fundamentals (EDGAR US + yfinance NSE) |
-| stock-metrics | 0 2 * * * | local/screener:v8 | stock_metrics_daily |
-| stock-screener | 15 2 * * * | local/screener:v8 | stock_scores + screening_runs |
-| stock-report | 30 2 * * * | local/screener:v8 | stock_reports (top-25/universe + digest) |
+| universe-refresh | 0 9 * * 0 | local/screener:v9 | universe_constituents + ticker_names (998) |
+| stock-prices | 30 23 * * * | local/screener:v9 | stock_prices (5d window) |
+| stock-fundamentals | 0 6 * * 6 | local/screener:v9 | stock_fundamentals (EDGAR US + yfinance NSE) |
+| stock-metrics | 0 2 * * * | local/screener:v9 | stock_metrics_daily |
+| stock-screener | 15 2 * * * | local/screener:v9 | stock_scores + screening_runs |
+| stock-report | 30 2 * * * | local/screener:v9 | stock_reports (top-25/universe + digest) |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only → manual INSERT |
 
 **Schedules are node-local PDT, not UTC** (verified 2026-10-04 — the "02:00-02:30"

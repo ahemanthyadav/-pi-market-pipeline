@@ -60,12 +60,14 @@ re-runs and late corrections overwrite cleanly, never duplicate.
 
 | Node | Hardware | LAN IP | Tailscale IP | Role |
 |---|---|---|---|---|
-| pi0 | Pi 1 B+, 512 MB | <pi0-ip> | — (not on tailnet) | Pi-hole v6.4.3 + unbound (DNS) |
+| pi0 | Pi 1 B+, 512 MB | <pi0-ip> | <pi0-tailnet-ip> (joined 2026-10-11) | Pi-hole v6.4.3 + unbound (DNS) |
 | pi1 | Pi 3 B, 1 GB, 233 GB SSD | <pi1-ip> | <pi1-tailnet-ip> | k3s worker (ingestion pool) |
 | pi2 | Pi 3 B+, 1 GB | <pi2-ip> | <pi2-tailnet-ip> | k3s control-plane — FRAGILE, see §8 |
 | pi3 | Pi 3 B, 1 GB | <pi3-ip> | <pi3-tailnet-ip> | k3s worker; Grafana + pg-backup pinned here |
 | ahytx2-desktop | Jetson TX2, 7.7 GB | <tx2-ip> (router DHCP reservation, confirmed 2026-10-03) | <tx2-tailnet-ip> | GPU/tainted worker; DB host |
 
+- Per-node jobs, pinned workloads and blast radius: see `node-roles.md` (2026-10-11). Live check 2026-10-11: pi2 is
+  **cordoned** (`SchedulingDisabled`) — reason/date not recorded; verify before un-cordoning.
 - k3s: server v1.36.4+k3s1 (pi2); agents v1.36.4 on Pis, **pinned v1.35.3+k3s1 on TX2**.
 - Admin machine in these examples: `<admin-host>` (<admin-tailnet-ip>), kubectl v1.36.5
   at `~/.local/bin`, kubeconfig `~/.kube/pi-cluster.yaml`.
@@ -127,6 +129,9 @@ re-runs and late corrections overwrite cleanly, never duplicate.
 
 ## 3. Workloads (namespace `market-data`)
 
+> **Which node runs which job** (pinned vs floating CronJobs, host-level cron per node, last-run times):
+> `node-roles.md` §3 (verified live 2026-10-11).
+
 ### Scheduled jobs — **schedules are NODE-LOCAL PDT, not UTC** (verified 2026-10-04:
 the "02:00-02:30" screener chain fired at 09:00-09:30 UTC = 02:00 PDT). k3s's cron
 controller uses server-local time when no CronJob timezone is set. Every "UTC"
@@ -134,11 +139,6 @@ time written in these docs has actually been firing at PDT — functionally fine
 (each fetch still lands after its market close; the staggering order holds), so
 schedules are left as-is; do not "fix" them without re-validating everything.
 
-| CronJob | Schedule | Image (node-local, Never pull) | Writes to |
-|---|---|---|---|
-| nse-fetcher | 15 11 * * * | local/nse-fetcher:v4 (commits per calendar year) | index_prices (9 Indian indices incl. ^CRSLDX Nifty 500, restored 2026-10-09; history from each index's Yahoo start — Sensex 1997, Nifty 50 2007) |
-| fiidii-fetcher | 0 14 * * * | local/fiidii-fetcher:v2 | capital_flows (FII/DII net) |
-| yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v5 (commits per calendar year) | index_prices (29 tickers — `^RUI` Russell 1000 added 2026-10-10; **history from 1985** backfilled 2026-10-10 for all 38 index tickers: 292,387 rows, 299 chunks — 262 weekly for 2021-10 → 2026-10 plus one-year chunks for everything created since `set_chunk_time_interval('index_prices', '365 days')`; see `yfinance/backfill-job.yaml`) |
 **Safeguards (review AR-1) — in the repo manifests since 2026-10-11, APPLIED to the cluster 2026-10-12 (all 23 CronJobs, still suspended at the time).** Every CronJob now carries
 `concurrencyPolicy: Forbid`, `startingDeadlineSeconds` (1 h for jobs whose next run recovers the data — their pulls cover 2–5
 days; 10 min for hourly `intraday-fetcher`; 6 h for latest-snapshot feeds `fiidii`/`news`/`rbi` and the weekly jobs, where late
@@ -164,17 +164,17 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | /var/lib/market-data/backups on pi3 |
 | pipeline-health | 45 1 * * * | local/pipeline-health:v4 | pipeline_heartbeat (feed freshness, 13 feeds) |
 | intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
-| universe-refresh | 0 9 * * 0 | local/screener:v8 | universe_constituents + ticker_names (998 symbols) |
-| stock-prices | 30 23 * * * | local/screener:v8 | stock_prices (998 symbols, 5d window) |
-| stock-fundamentals | 0 6 * * 6 | local/screener:v8 | stock_fundamentals (EDGAR US + yfinance NSE, resumable) |
-| stock-metrics | 0 2 * * * | local/screener:v8 | stock_metrics_daily |
-| stock-screener | 15 2 * * * | local/screener:v8 | stock_scores + screening_runs (v8: house conn pattern, both universes — see §8) |
-| stock-report | 30 2 * * * | local/screener:v8 | stock_reports (top-25/universe + __digest__; v8: today's shortlist only) |
+| universe-refresh | 0 9 * * 0 | local/screener:v9 | universe_constituents + ticker_names (998 symbols) |
+| stock-prices | 30 23 * * * | local/screener:v9 | stock_prices (998 symbols, 5d window) |
+| stock-fundamentals | 0 6 * * 6 | local/screener:v9 | stock_fundamentals (EDGAR US + yfinance NSE, resumable) |
+| stock-metrics | 0 2 * * * | local/screener:v9 | stock_metrics_daily |
+| stock-screener | 15 2 * * * | local/screener:v9 | stock_scores + screening_runs (v8: house conn pattern, both universes — see §8) |
+| stock-report | 30 2 * * * | local/screener:v9 | stock_reports (top-25/universe + __digest__; v8: today's shortlist only) |
 | rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (7 IN_* policy rates) + bond_yields (5 G-Sec tenors + 3 T-bills) + pipeline_heartbeat self-row 'rbi' |
 | headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (gazetteer extraction over raw_headlines, ADR 0010) |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only (manual INSERT follows) |
-| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v6 (pinned pi1) | Telegram digest (read-only; no DB write) |
-| telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v6, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
+| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v7 (pinned pi1) | Telegram digest (read-only; no DB write) |
+| telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v7, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
 
 ### Always-on / one-shot resources
 
@@ -199,7 +199,7 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
   alerting-provisioning error and the section is all-or-nothing per file —
   a bad alerting.yaml crash-loops the pod (finds F29–F32).
 - Telegram two-way listener (2026-10-09, Tier 2): Deployment `telegram-bot`
-  (1×, pi1), `local/telegram-digest:v6` (since 2026-10-10: stock/watchlist/
+  (1×, pi1), `local/telegram-digest:v7` (since 2026-10-10: stock/watchlist/
   screener/world commands, telegram-bot doc §1a) with `args: bot.py` — the ONLY
   getUpdates consumer (Telegram 409s a second poller; the digest CronJob and
   Grafana only sendMessage). Single-user: answers only the allow-listed chat,
@@ -221,7 +221,7 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | Yahoo indices/FX/yields/futures | yfinance batch | ✅ live | `FTSE.MI` died → `FTSEMIB.MI`; `^CNXAUTO`/`^CNXFMCG` dead (ghost quote only); `^CRSLDX` (Nifty 500) RESTORED 2026-10-09 after live probe |
 | NSE indices | yfinance validated symbols | ✅ 8/8 live | gaps above; jugaad-data not needed yet |
 | FRED (DFF, DGS2/10/30) | fredapi + key in Secret | ✅ live | key verified 2026-10-03 (DFF 3.88) |
-| News RSS | feedparser (ET, BS live) | ✅ partial | Moneycontrol ×2 + Reuters dead (WARN-tolerant) |
+| News RSS | feedparser (6 feeds: ET, BS, LiveMint, BusinessLine, CNBC, MarketWatch) | ✅ live 2026-10-12 | Moneycontrol ×2 dead (302 to a login-consent wall for every user-agent) and Reuters dead (`feeds.reuters.com` no longer resolves) — replaced via the CronJob's `FEEDS` env override, no image rebuild; the script's `DEFAULT_FEEDS` is stale until the next rebuild |
 | NSE FII/DII | fiidiiTradeReact JSON + session | ✅ live | API returns bare list, not `{data:…}` envelope |
 | Stock prices/fundamentals (screener layer) | yfinance per-universe + EDGAR + yfinance stmts | ✅ live (2026-10-09) | Yahoo pre-open "today" bars (partial OHLC, ~0 volume) land for a handful of tickers each run; self-healing — the next run DELETE+INSERTs the final bar, but same-day metrics/scores can key to the partial bar. `DUMMYHEG.NS` dead (WARN-tolerant). |
 | RBI/G-Secs | official RBI mobile "Current Rates" widget (lxml scrape) | ✅ live (2026-10-09, `rbi-fetcher`) | benchmark SECURITY names rotate — matched by maturity-year→tenor bucket; page hides a stale date in an HTML comment (lxml text_content drops it); values carry '#'/'*' markers |
@@ -671,7 +671,12 @@ restores the newest dump into a throwaway `drill_restore` DB, compares row count
 kubectl apply -f manifests/timescaledb/restore-drill-job.yaml
 kubectl logs -n market-data job/restore-drill --tail=5
 # Measured 2026-10-03: RESTORE-DRILL-OK, pg_restore 2s @ 388K dump, live=drill=9076 rows.
-# STALE since 2026-10-10: dumps are ~165 MB (≈ 400× larger, screener backfills) — re-run the drill for a real figure.
+# Re-measured 2026-10-12 on the real 171 MB dump (off-cluster, local timescale/timescaledb:2.30.1-pg16 container):
+#   pg_restore 30 s, 0 errors, 12 hypertables / 3,703 chunks; 12/13 tables identical to live (6.34 M stock_prices rows);
+#   the 13th differs by exactly the 3 rows universe-refresh added after the dump. Procedure: create DB → CREATE EXTENSION
+#   timescaledb → SELECT timescaledb_pre_restore() → pg_restore (SERIAL — `-j` fails on the catalog foreign keys) →
+#   SELECT timescaledb_post_restore(). The in-cluster restore-drill-job.yaml is unchanged and still the quarterly check.
+# Second copy: python3 ops-tools/pull-backups.py   (checksummed pull to out/backups; exit 2 if the newest verified dump is > 36 h old)
 # Re-run quarterly, or after any schema/backup change.
 ```
 
@@ -700,7 +705,7 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
   171 MB with sidecar, checksum OK; CronJob still suspended). Test: `bash tests/test-pg-backup.sh` (21 checks, docker + a real dump in `out/backups/`).
 - Writes to `/var/lib/market-data/backups/` on pi3's USB SSD (hostPath, survives pod restarts)
 
-**Known flaws (verified on pi3, 2026-10-10 — review AR-11):**
+**Known flaws of the LIVE script (verified on pi3, 2026-10-10 — review AR-11; first four fixed in the repo manifest 2026-10-11, pending apply):**
 - The newest file, `marketdata-2026-10-10.dump`, is **0 bytes** — a failed run during the outage. `pg_dump -f`
   leaves the empty file; `set -e` then skips pruning, so one failure is harmless.
 - Pruning counts files by mtime and does not care if they are empty: after a run of failed days followed by a
@@ -752,7 +757,10 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
   Before a push: `python3 ops-tools/workloads.py --check` (docs vs manifests), `bash tests/test-precommit-hook.sh`,
   `bash tests/test-nodewatch.sh`, `python3 tests/test_creds.py`.
 - **Out-of-cluster watcher:** `ops-tools/nodewatch.sh` (ping every node + TCP-probe the API; Telegram message
-  only on state change, 6 h reminders). Built + tested 2026-10-10, **not yet deployed** — install on pi0 (outside
+  only on state change, 6 h reminders). Built + tested 2026-10-10. **Deployed on pi0 2026-10-11** (script in `/usr/local/bin`, `/etc/nodewatch.hosts` +
+  `/etc/nodewatch.secrets` mode 600, root cron `*/5`, delivery test HTTP 200). Order matters: an empty/absent credentials
+  file makes the script record a state change as handled without sending it, so enable cron only after the secrets file
+  exists and a delivery test succeeds; `TELEGRAM_CHAT_ID` must be numeric. Install on pi0 (outside
   k3s): copy the script, create `/etc/nodewatch.hosts` (PI0_IP…TX2_IP) and `/etc/nodewatch.secrets` (mode 600:
   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID), cron `*/5 * * * *`. Dry-run anywhere: `bash ops-tools/nodewatch.sh --dry-run`.
 - **Never without care:** TX2 k3s upgrade past v1.35 (cgroup v1 ceiling →
@@ -779,7 +787,13 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
    (user-confirmed); host stays DHCP client by design.
 5. news_sentiment / raw_headlines have NO unique constraints yet (INSERT-only
    writers; add with ON CONFLICT at the next scorer/fetcher image rebuild).
-6. pi0 not on tailnet; router UDP 51820 forward leftover from WireGuard era.
+6. ~~pi0 not on tailnet~~ ✅ joined 2026-10-11 (tailscale 1.104.1 from the Raspbian apt repo;
+   `tailscale up --accept-dns=false --accept-routes=false --hostname=pi0` so resolv.conf on the LAN's DNS host is untouched;
+   node key expires 2027-04-09). Verified from pi1 over the tailnet: ping 31 ms, Pi-hole admin HTTP 200. **Not done:**
+   DNS over the tailnet — Pi-hole `dns.listeningMode` is `LOCAL`, a query from pi1 over the tailnet timed out; ad-block DNS
+   on the move also needs the tailnet nameserver set in the admin console. Left unchanged on purpose (changing the
+   listening mode on a host behind a router with a stale port-forward needs the CGNAT check, §12.9, first).
+   Router UDP 51820 forward leftover from WireGuard era is still open.
 7. Longhorn/OpenEBS + Loki: deliberately declined (pi2 RAM ceiling).
 8. ~~`rbi-fetcher:v1` image NOT yet imported on pi2~~ ✅ resolved 2026-10-09
    (same session): the "SSH Authentication failed" on pi2 was NEVER a wrong

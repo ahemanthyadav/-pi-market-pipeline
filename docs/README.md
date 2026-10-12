@@ -10,7 +10,7 @@
 > 2026-10-09: all 4 nodes Ready · **23 CronJobs** (per `manifests/`; telegram-digest 08:00 IST) · Telegram alert channel
 > live (contact point + 3 rules) · **Telegram two-way listener live**
 > (Deployment telegram-bot: /status /vix /nifty /sensex /gold /fii /scores
-> /digest) · screener toolkit `local/screener:v8` ·
+> /digest) · screener toolkit `local/screener:v9` ·
 > health monitor `local/pipeline-health:v4`.
 
 ## Reading order (new session? start here)
@@ -26,6 +26,7 @@
 |---|---|---|---|
 | **`pending-tasks.md`** | **The single tracker of everything not yet done** — immediate, security, features, v2, recurring, icebox; each item links to its owning doc | Start of any session / before planning work; after completing anything | Mark ✅ + date on completion; owning doc updated in the same session |
 | **`market-data-architecture.md`** | Canonical system reference: nodes, tech stack, feed catalog, DB schema + live volumes, all workloads, security, limitations register, file/repo structure | You need to understand what exists and why | Any cluster/schema/workload change; capacity facts; limitations |
+| **`node-roles.md`** | Per-node jobs and responsibilities for pi0–pi3 + tx2: what each runs (pinned workloads, host cron jobs), CronJob placement, blast radius, current scheduling state | You need to know what a node is for, or what breaks if it dies | A pin, cordon, host job, image placement or hardware change |
 | **`market-data-pipeline-operations-manual.md`** | The runbook: image build/redistribute cycle (§6), daily health checklist (§7), failure recovery copy-paste commands (§8), backup/restore + drill (§9), DB query reference (§5) | Something breaks, or before/after any mutation | New failure modes, new jobs, new runbook lessons; feed quirks (§4) |
 | **`market-data-pipeline-plan.md`** | The original design/build log — Phase 0→8 with per-phase build notes, decisions, and the incident history of building it (pi2 wedges, TX2 bring-up) | You want the "why did we do it this way" history | Phase-completion ticks; major scope changes |
 | **`market-data-pipeline-architecture-roadmap.md`** | Hardening roadmap with live status: what's DONE (constraints, heartbeat, restore drill), what's next (alerts, feed gaps), what is deliberately NOT changing | Planning the next hardening step | Whenever a roadmap item completes or a new "do not change" decision lands |
