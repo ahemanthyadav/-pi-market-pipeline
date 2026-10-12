@@ -7,7 +7,8 @@
 #
 # Security: bot.py answers ONLY the allow-listed chat id from the Secret —
 # other senders are logged and ignored (bots are publicly discoverable).
-# All queries are read-only SELECTs.
+# All queries are read-only SELECTs, except /watch add|rm, which writes the
+# bot-owned `watchlist` table (2026-10-10).
 #
 # Pinned pi1: the image is imported there only (roadmap §5 import-burden
 # rule). Resources sized for a poll loop that sleeps server-side ~25 s.
@@ -30,7 +31,7 @@ spec:
         kubernetes.io/hostname: pi1
       containers:
         - name: listener
-          image: local/telegram-digest:v2
+          image: local/telegram-digest:v8
           imagePullPolicy: Never
           args: ["python", "bot.py"]
           env:

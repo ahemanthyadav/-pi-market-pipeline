@@ -9,11 +9,15 @@ metadata:
   namespace: market-data
 spec:
   schedule: "45 23 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 21600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 2
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure
@@ -33,6 +37,11 @@ spec:
                       key: password
                 - name: PGDATABASE
                   value: postgres
+                # 2026-10-12: overrides the script's DEFAULT_FEEDS (no image rebuild). Dropped two dead feeds:
+                # Moneycontrol (302 to a login-consent wall for every user-agent) and Reuters (feeds.reuters.com no
+                # longer resolves). Added LiveMint + BusinessLine (India) and CNBC + MarketWatch (global).
+                - name: FEEDS
+                  value: "EconomicTimes-Markets|https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms,BusinessStandard-Markets|https://www.business-standard.com/rss/markets-106.rss,LiveMint-Markets|https://www.livemint.com/rss/markets,BusinessLine-Markets|https://www.thehindubusinessline.com/markets/feeder/default.rss,CNBC-Top|https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10001147,MarketWatch-Top|https://feeds.content.dowjones.io/public/rss/mw_topstories"
               resources:
                 requests:
                   memory: 128Mi

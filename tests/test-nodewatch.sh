@@ -5,6 +5,12 @@ set -u
 cd "$(git rev-parse --show-toplevel)"
 export NODEWATCH_STATE_DIR="$(mktemp -d)"
 export NODEWATCH_SECRETS_FILE=/dev/null          # force "no Telegram credentials" -> print only
+# Hermetic: no real hosts file, no network probes — only NODEWATCH_TEST_DOWN decides what is "down".
+# (Before 2026-10-12 this test pinged the live nodes, so it passed only while the cluster was up and
+# failed outright in CI, where there is no .hosts.env.)
+export NODEWATCH_HOSTS_FILE="$NODEWATCH_STATE_DIR/hosts.fake"
+printf '%s=node-%s\n' PI0_IP a PI1_IP b PI2_IP c PI3_IP d TX2_IP e > "$NODEWATCH_HOSTS_FILE"
+export NODEWATCH_TEST_ONLY=1
 trap 'rm -rf "$NODEWATCH_STATE_DIR"' EXIT
 pass=0; fail=0
 check() { if [ "$2" = "$3" ]; then echo "  ok    $1"; pass=$((pass+1)); else echo "  FAIL  $1 (got '$2', want '$3')"; fail=$((fail+1)); fi; }

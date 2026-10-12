@@ -57,12 +57,18 @@ INFO_RATIOS = {
 def upsert(cur, symbol, ts, metric, value, source, published):
     if value is None:
         return 0
+    # Keep the earliest filing_published_at ever seen: a weekly re-fetch must not
+    # push a fact's "first knowable" date forward (EV-2). LEAST ignores NULL.
+    cur.execute("SELECT filing_published_at FROM stock_fundamentals WHERE symbol=%s "
+                "AND ts=%s AND metric=%s AND source=%s", (symbol, ts, metric, source))
+    prior = cur.fetchone()
+    first_seen = prior[0] if prior else None
     cur.execute("DELETE FROM stock_fundamentals WHERE symbol=%s AND ts=%s "
                 "AND metric=%s AND source=%s", (symbol, ts, metric, source))
     cur.execute("INSERT INTO stock_fundamentals "
                 "(symbol, ts, metric, value, source, filing_published_at) "
-                "VALUES (%s,%s,%s,%s,%s,%s)",
-                (symbol, ts, metric, float(value), source, published))
+                "VALUES (%s,%s,%s,%s,%s,LEAST(%s::timestamptz, %s::timestamptz))",
+                (symbol, ts, metric, float(value), source, published, first_seen))
     return 1
 
 
@@ -186,7 +192,7 @@ def main() -> int:
             print("nothing to do", flush=True)
         return 0
     print(f"symbols={len(universe)} (resumable)", flush=True)
-    done, rows = 0, 0
+    done, failed, rows = 0, 0, 0
     for symbol, cik in universe:
         fetch_date = f"{time.strftime('%Y-%m-%d')}T00:00:00Z"
         wrote = 0
@@ -202,6 +208,7 @@ def main() -> int:
                     wrote += yf_ratios(symbol, cur, fetch_date)
         except psycopg.OperationalError as exc:
             print(f"WARN {symbol} conn dropped ({exc}); reconnecting", flush=True)
+            failed += 1
             try:
                 conn.close()
             except Exception:  # noqa: BLE001
@@ -215,6 +222,7 @@ def main() -> int:
             conn.autocommit = True
         except Exception as exc:  # noqa: BLE001
             print(f"WARN {symbol} failed: {exc}", flush=True)
+            failed += 1
         else:
             done += 1
             rows += wrote
@@ -230,7 +238,8 @@ def main() -> int:
             cur.execute("UPDATE job_state SET last_key=NULL WHERE job_name=%s", (job,))
         print("cursor cleared (full pass complete)", flush=True)
     conn.close()
-    print(f"FUNDAMENTALS-OK done={done}/{len(universe)} rows={rows}", flush=True)
+    print(f"FUNDAMENTALS-OK done={done}/{len(universe)} failed={failed} rows={rows}",
+          flush=True)
     return 0 if done else 1
 
 

@@ -60,12 +60,15 @@ re-runs and late corrections overwrite cleanly, never duplicate.
 
 | Node | Hardware | LAN IP | Tailscale IP | Role |
 |---|---|---|---|---|
-| pi0 | Pi 1 B+, 512 MB | <pi0-ip> | — (not on tailnet) | Pi-hole v6.4.3 + unbound (DNS) |
+| pi0 | Pi 1 B+, 512 MB | <pi0-ip> | <pi0-tailnet-ip> (joined 2026-10-11) | Pi-hole v6.4.3 + unbound (DNS) |
 | pi1 | Pi 3 B, 1 GB, 233 GB SSD | <pi1-ip> | <pi1-tailnet-ip> | k3s worker (ingestion pool) |
 | pi2 | Pi 3 B+, 1 GB | <pi2-ip> | <pi2-tailnet-ip> | k3s control-plane — FRAGILE, see §8 |
 | pi3 | Pi 3 B, 1 GB | <pi3-ip> | <pi3-tailnet-ip> | k3s worker; Grafana + pg-backup pinned here |
 | ahytx2-desktop | Jetson TX2, 7.7 GB | <tx2-ip> (router DHCP reservation, confirmed 2026-10-03) | <tx2-tailnet-ip> | GPU/tainted worker; DB host |
 
+- Per-node jobs, pinned workloads and blast radius: see `node-roles.md` (2026-10-11). Live check 2026-10-11: pi2 is
+  **cordoned** (`SchedulingDisabled`) since 2026-10-10 06:11 UTC (taint `timeAdded`; set during the outage recovery — reason
+  inferred, not recorded). Keep it cordoned.
 - k3s: server v1.36.4+k3s1 (pi2); agents v1.36.4 on Pis, **pinned v1.35.3+k3s1 on TX2**.
 - Admin machine in these examples: `<admin-host>` (<admin-tailnet-ip>), kubectl v1.36.5
   at `~/.local/bin`, kubeconfig `~/.kube/pi-cluster.yaml`.
@@ -91,6 +94,17 @@ re-runs and late corrections overwrite cleanly, never duplicate.
   `/etc/fstab.bak-20260929`). **Docker data-root moved to `/mnt/tx2-ssd/docker`
   (2026-10-03, `/etc/docker/daemon.json`)** — image builds no longer touch eMMC
   at all; golden sentiment image migrated intact, build smoke-tested.
+- **Docker must start AFTER the SSD mount** (found 2026-10-10): `docker.service`
+  had no ordering on `/mnt/tx2-ssd`, and at the 2026-10-09 boot it started 2.5 s
+  before the mount — it ran on the empty directory underneath, every build died
+  at the first `RUN` with `failed to update store for object type
+  *libnetwork.endpointCnt: Key not found in store`, and its tag index
+  overwrote the real one (older `local/*` images on the SSD are now untagged
+  `<none>`; layers intact, sentiment tarball still at
+  `/mnt/tx2-ssd/sentiment-fetcher-v1.tar.gz`). Fix: drop-in
+  `/etc/systemd/system/docker.service.d/10-ssd-data-root.conf`
+  (`RequiresMountsFor=/mnt/tx2-ssd`) + `systemctl restart docker`. Image
+  tarballs now go to `/mnt/tx2-ssd/image-tarballs/`, not the eMMC home dir.
 - **k3s containerd store bind-mounted from the SSD (2026-10-10; verified same day —
   agent Ready, timescaledb Running, sentiment-scorer Completed on GPU,
   `kubectl exec` + psql OK):** `/var/lib/rancher/k3s/agent/containerd` ←
@@ -107,8 +121,17 @@ re-runs and late corrections overwrite cleanly, never duplicate.
 
 - pi1/pi3 units also carry `--disable-apiserver-lb` (direct to pi2:6443, no
   flaky local-LB hop). Patched in place; stock k3s reinstalls would revert it.
+- **Power (2026-10-10):** Pi 3 / 3B+ need a 5.1 V / ≥ 2.5 A supply and a short, thick cable. The USB-SATA
+  SSD draws from the **same 5 V rail** as the board (micro-USB → polyfuse → rail → board + USB ports), so
+  its bursts sag the Pi's input (firmware flags undervolt ≈ 4.65 V). The SSD is also the **boot** drive:
+  to take it off the rail keep its data path direct (powered SSD enclosure, or separate-power Y-cable /
+  data-only adapter); a hub in the boot path is unverified on Pi 3 / 3B+ — test on pi3 or a spare, never
+  first on pi2. Triage ladder: skill `node-power-health`; plan: pending-tasks §1.
 
 ## 3. Workloads (namespace `market-data`)
+
+> **Which node runs which job** (pinned vs floating CronJobs, host-level cron per node, last-run times):
+> `node-roles.md` §3 (verified live 2026-10-11).
 
 ### Scheduled jobs — **schedules are NODE-LOCAL PDT, not UTC** (verified 2026-10-04:
 the "02:00-02:30" screener chain fired at 09:00-09:30 UTC = 02:00 PDT). k3s's cron
@@ -117,11 +140,22 @@ time written in these docs has actually been firing at PDT — functionally fine
 (each fetch still lands after its market close; the staggering order holds), so
 schedules are left as-is; do not "fix" them without re-validating everything.
 
+**Safeguards (review AR-1) — in the repo manifests since 2026-10-11, APPLIED to the cluster 2026-10-12 (all 23 CronJobs, still suspended at the time).** Every CronJob now carries
+`concurrencyPolicy: Forbid`, `startingDeadlineSeconds` (1 h for jobs whose next run recovers the data — their pulls cover 2–5
+days; 10 min for hourly `intraday-fetcher`; 6 h for latest-snapshot feeds `fiidii`/`news`/`rbi` and the weekly jobs, where late
+beats skipped; 24 h for monthly `fdi-watch`), `activeDeadlineSeconds` (3–10× measured runtime: 300 s intraday, 600 s fast
+fetchers, 900 `rates`/`sentiment`/`universe-refresh`, 1200 `stock-metrics`/`stock-report`, 1800 `pg-backup`/`headline-ner`,
+3600 `stock-screener`, 7200 `stock-prices`, 14400 `stock-fundamentals`) and `ttlSecondsAfterFinished: 604800` (7 days — long
+enough to read a failed Job's logs). Evidence: on 2026-10-10 `intraday-fetcher` and `rbi-fetcher` ran 91,368 s (25 h) and
+`sentiment-scorer` 9,128 s because nothing capped them. `headline-ner` (1800), `stock-screener` (3600), `stock-report` and
+the two Telegram jobs have no clean measured runtime — their values are estimates: if one trips, raise it, no data is lost.
+Applied with `kubectl apply` after a `kubectl diff` review; it did not change `suspend`. With a start deadline set, un-suspending fires only runs due inside the window (no catch-up storm).
+
 | CronJob | Schedule | Image (node-local, Never pull) | Writes to |
 |---|---|---|---|
-| nse-fetcher | 15 11 * * * | local/nse-fetcher:v3 | index_prices (9 Indian indices incl. ^CRSLDX Nifty 500, restored 2026-10-09) |
+| nse-fetcher | 15 11 * * * | local/nse-fetcher:v4 (commits per calendar year) | index_prices (9 Indian indices incl. ^CRSLDX Nifty 500, restored 2026-10-09; history from each index's Yahoo start — Sensex 1997, Nifty 50 2007) |
 | fiidii-fetcher | 0 14 * * * | local/fiidii-fetcher:v2 | capital_flows (FII/DII net) |
-| yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v3 | index_prices (28 tickers) |
+| yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v5 (commits per calendar year) | index_prices (29 tickers — `^RUI` Russell 1000 added 2026-10-10; **history from 1985** backfilled 2026-10-10 for all 38 index tickers: 292,387 rows, 299 chunks — 262 weekly for 2021-10 → 2026-10 plus one-year chunks for everything created since `set_chunk_time_interval('index_prices', '365 days')`; see `yfinance/backfill-job.yaml`) |
 | fx-fetcher | 0 23 * * * | local/fx-fetcher:v1 | fx_rates (10 pairs) |
 | yields-fetcher | 15 23 * * * | local/yields-fetcher:v1 | bond_yields (^TNX/^FVX/^TYX/^IRX) |
 | rates-fetcher | 20 23 * * * | local/rates-fetcher:v1 | interest_rates DFF + bond_yields DGS2/10/30 |
@@ -131,16 +165,17 @@ schedules are left as-is; do not "fix" them without re-validating everything.
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | /var/lib/market-data/backups on pi3 |
 | pipeline-health | 45 1 * * * | local/pipeline-health:v4 | pipeline_heartbeat (feed freshness, 13 feeds) |
 | intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
-| universe-refresh | 0 9 * * 0 | local/screener:v8 | universe_constituents + ticker_names (998 symbols) |
-| stock-prices | 30 23 * * * | local/screener:v8 | stock_prices (998 symbols, 5d window) |
-| stock-fundamentals | 0 6 * * 6 | local/screener:v8 | stock_fundamentals (EDGAR US + yfinance NSE, resumable) |
-| stock-metrics | 0 2 * * * | local/screener:v8 | stock_metrics_daily |
-| stock-screener | 15 2 * * * | local/screener:v8 | stock_scores + screening_runs (v8: house conn pattern, both universes — see §8) |
-| stock-report | 30 2 * * * | local/screener:v8 | stock_reports (top-25/universe + __digest__; v8: today's shortlist only) |
+| universe-refresh | 0 9 * * 0 | local/screener:v9 | universe_constituents + ticker_names (998 symbols) |
+| stock-prices | 30 23 * * * | local/screener:v9 | stock_prices (998 symbols, 5d window) |
+| stock-fundamentals | 0 6 * * 6 | local/screener:v9 | stock_fundamentals (EDGAR US + yfinance NSE, resumable) |
+| stock-metrics | 0 2 * * * | local/screener:v9 | stock_metrics_daily |
+| stock-screener | 15 2 * * * | local/screener:v9 | stock_scores + screening_runs (v8: house conn pattern, both universes — see §8) |
+| stock-report | 30 2 * * * | local/screener:v9 | stock_reports (top-25/universe + __digest__; v8: today's shortlist only) |
 | rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (7 IN_* policy rates) + bond_yields (5 G-Sec tenors + 3 T-bills) + pipeline_heartbeat self-row 'rbi' |
 | headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (gazetteer extraction over raw_headlines, ADR 0010) |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only (manual INSERT follows) |
-| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v2 (pinned pi1) | Telegram digest (read-only; no DB write) |
+| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v8 (pinned pi1) | Telegram digest (read-only; no DB write) |
+| telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v8, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
 
 ### Always-on / one-shot resources
 
@@ -165,15 +200,23 @@ schedules are left as-is; do not "fix" them without re-validating everything.
   alerting-provisioning error and the section is all-or-nothing per file —
   a bad alerting.yaml crash-loops the pod (finds F29–F32).
 - Telegram two-way listener (2026-10-09, Tier 2): Deployment `telegram-bot`
-  (1×, pi1), `local/telegram-digest:v2` with `args: bot.py` — the ONLY
+  (1×, pi1), `local/telegram-digest:v8` (since 2026-10-10: stock/watchlist/
+  screener/world commands, telegram-bot doc §1a) with `args: bot.py` — the ONLY
   getUpdates consumer (Telegram 409s a second poller; the digest CronJob and
-  Grafana only sendMessage). Single-user: answers only the allow-listed chat,
-  logs+ignores everyone else. Commands: /status /vix /nifty /sensex /gold /fii
+  Grafana only sendMessage). Multi-user (ADR 0012, v8): answers the owner + `bot_users`
+  members, each with their own watchlist/digest/alerts; logs+ignores everyone else (owner gets one access notice per
+  unknown chat per day; `/adduser`, `/rmuser`, `/users` are owner-only — telegram-bot doc "Managing users"). Commands: /status /vix /nifty /sensex /gold /fii
   /scores /digest /help — all read-only SELECTs, connection per query (F26).
   Backlog drained on start; offset in-memory (commands are idempotent).
 - One-shot Jobs (kept as manifests, run on demand): `backfill-*-1y` (history
   seeding), `timescaledb-schema`, `timescaledb-write-test`, `restore-drill`.
 - Intraday (2026-10-03): `intraday-fetcher` hourly at :10 — yfinance 1h×2d
+  **Re-running the schema Job:** after editing `schema-configmap.yaml`, `kubectl apply` it, then run the Job under a NEW name
+  (e.g. `sed '8s/name: timescaledb-schema$/name: schema-<tag>/' manifests/timescaledb/schema-job.yaml | kubectl apply -f -`;
+  replace only line 8 — the ConfigMap reference further down must keep its name). The permission config denies deleting
+  anything named `timescaledb…` (rule 5), so the old Job cannot be deleted and re-created. Schema 09 (multi-user bot) was applied
+  this way on 2026-10-12 as `schema-multiuser-09`; a first attempt (`timescaledb-schema-09`, ConfigMap name rewritten by a too-broad
+  sed) never started and was suspended, not deleted.
   candles; FX → `fx_rates` (hourly rows, coexists with daily), gold/silver/
   oil/DXY → `intraday_prices` (separate hypertable — `index_prices` stays
   pure-daily because ta-compute iterates every ticker over all rows).
@@ -186,7 +229,7 @@ schedules are left as-is; do not "fix" them without re-validating everything.
 | Yahoo indices/FX/yields/futures | yfinance batch | ✅ live | `FTSE.MI` died → `FTSEMIB.MI`; `^CNXAUTO`/`^CNXFMCG` dead (ghost quote only); `^CRSLDX` (Nifty 500) RESTORED 2026-10-09 after live probe |
 | NSE indices | yfinance validated symbols | ✅ 8/8 live | gaps above; jugaad-data not needed yet |
 | FRED (DFF, DGS2/10/30) | fredapi + key in Secret | ✅ live | key verified 2026-10-03 (DFF 3.88) |
-| News RSS | feedparser (ET, BS live) | ✅ partial | Moneycontrol ×2 + Reuters dead (WARN-tolerant) |
+| News RSS | feedparser (6 feeds: ET, BS, LiveMint, BusinessLine, CNBC, MarketWatch) | ✅ live 2026-10-12 | Moneycontrol ×2 dead (302 to a login-consent wall for every user-agent) and Reuters dead (`feeds.reuters.com` no longer resolves) — replaced via the CronJob's `FEEDS` env override, no image rebuild; the script's `DEFAULT_FEEDS` is stale until the next rebuild |
 | NSE FII/DII | fiidiiTradeReact JSON + session | ✅ live | API returns bare list, not `{data:…}` envelope |
 | Stock prices/fundamentals (screener layer) | yfinance per-universe + EDGAR + yfinance stmts | ✅ live (2026-10-09) | Yahoo pre-open "today" bars (partial OHLC, ~0 volume) land for a handful of tickers each run; self-healing — the next run DELETE+INSERTs the final bar, but same-day metrics/scores can key to the partial bar. `DUMMYHEG.NS` dead (WARN-tolerant). |
 | RBI/G-Secs | official RBI mobile "Current Rates" widget (lxml scrape) | ✅ live (2026-10-09, `rbi-fetcher`) | benchmark SECURITY names rotate — matched by maturity-year→tenor bucket; page hides a stale date in an HTML comment (lxml text_content drops it); values carry '#'/'*' markers |
@@ -286,7 +329,7 @@ round-trips; a hostile value cannot inject a command).
 # 1. Edit code + bump version in CronJob
 #    Edit: manifests/ingestion/yfinance/yfinance-fetcher.py
 #    Bump tag in manifests/ingestion/yfinance/cronjob.yaml:
-#      image: local/yfinance-fetcher:v4
+#      image: local/yfinance-fetcher:v5
 
 # 2. Build on TX2 (native ARM64, no QEMU):
 python3 ops-tools/putfile.py tx2 ahytx2 \
@@ -294,9 +337,9 @@ python3 ops-tools/putfile.py tx2 ahytx2 \
 python3 ops-tools/putfile.py tx2 ahytx2 \
   manifests/ingestion/yfinance/Dockerfile /home/ahytx2/yf-build/Dockerfile
 python3 ops-tools/runcmd.py tx2 ahytx2 \
-  'echo @@PW@@ | sudo -S docker build -t local/yfinance-fetcher:v4 /home/ahytx2/yf-build 2>&1 | tail -2'
+  'echo @@PW@@ | sudo -S docker build -t local/yfinance-fetcher:v5 /home/ahytx2/yf-build 2>&1 | tail -2'
 python3 ops-tools/runcmd.py tx2 ahytx2 \
-  'echo @@PW@@ | sudo -S sh -c "docker save local/yfinance-fetcher:v4 | gzip > /home/ahytx2/yfinance-fetcher-v4.tar.gz" && echo @@PW@@ | sudo -S chown ahytx2:ahytx2 /home/ahytx2/yfinance-fetcher-v4.tar.gz'
+  'echo @@PW@@ | sudo -S sh -c "docker save local/yfinance-fetcher:v5 | gzip > /home/ahytx2/yfinance-fetcher-v5.tar.gz" && echo @@PW@@ | sudo -S chown ahytx2:ahytx2 /home/ahytx2/yfinance-fetcher-v4.tar.gz'
 
 # 3. Pull tarball to admin machine:
 python3 ops-tools/getfile.py tx2 ahytx2 \
@@ -318,7 +361,7 @@ kubectl create job -n market-data yf-validate --from=cronjob/yfinance-fetcher
 # Wait ~60s, then verify:
 kubectl get job -n market-data yf-validate
 kubectl logs -n market-data job/yf-validate --tail=10
-# Expect: "fetched 28/28 tickers" + "wrote 28 rows into index_prices"
+# Expect: "fetched 29/29 tickers" + "wrote 29 rows into index_prices"
 
 # 6. Verify in DB:
 export KUBECONFIG=~/.kube/pi-cluster.yaml
@@ -330,7 +373,7 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
 **Dependency locking:** After any build, dump the versions:
 ```bash
 python3 ops-tools/runcmd.py tx2 ahytx2 \
-  'echo @@PW@@ | sudo -S docker run --rm local/yfinance-fetcher:v4 pip freeze 2>/dev/null | grep -Ei "^(yfinance|pandas|psycopg|numpy|requests)"'
+  'echo @@PW@@ | sudo -S docker run --rm local/yfinance-fetcher:v5 pip freeze 2>/dev/null | grep -Ei "^(yfinance|pandas|psycopg|numpy|requests)"'
 ```
 Paste output into `manifests/ingestion/yfinance/requirements.lock` for reproducible rebuilds.
 
@@ -345,11 +388,12 @@ kubectl get nodes
 
 # 2. CronJob schedules present?
 kubectl get cronjobs -n market-data
-# Should show 22 CronJobs: nse-fetcher, fiidii-fetcher, yfinance-fetcher,
+# Should show 23 CronJobs: nse-fetcher, fiidii-fetcher, yfinance-fetcher,
 # fx-fetcher, yields-fetcher, rates-fetcher, news-fetcher, sentiment-scorer,
 # ta-compute, pg-backup, pipeline-health, intraday-fetcher, fdi-watch,
 # universe-refresh, stock-prices, stock-fundamentals, stock-metrics,
-# stock-screener, stock-report, rbi-fetcher, headline-ner, telegram-digest
+# stock-screener, stock-report, rbi-fetcher, headline-ner, telegram-digest,
+# telegram-alerts
 # (SUSPEND=False on all — a True left over from §8 recovery means someone
 # forgot to unsuspend)
 
@@ -367,7 +411,7 @@ python3 ops-tools/runcmd.py pi2 pi2 'uptime; free -m | head -2'
 
 # 6. Backup freshness (should show today's dump):
 python3 ops-tools/runcmd.py pi3 pi3 'ls -lh /var/lib/market-data/backups/ | tail -3'
-# Expect: marketdata-2026-10-03.dump ~300-500K
+# Expect: today's dump, ~165 MB since 2026-10-10 (was ~300-500K on 2026-10-03); a 0-byte file = a failed run
 
 # 7. TX2 disk (alert if eMMC > 85%):
 python3 ops-tools/runcmd.py tx2 ahytx2 'df -h / /mnt/tx2-ssd | tail -2'
@@ -375,6 +419,8 @@ python3 ops-tools/runcmd.py tx2 ahytx2 'df -h / /mnt/tx2-ssd | tail -2'
 
 # 8. Node stats (ADR 0011) — pull every node's CSV, eyeball the flags:
 bash ops-tools/collect-node-stats.sh && tail -1 out/node-stats/*.csv
+# Power acceptance verdict over a window (exit 0 = PASS; default window starts 2026-10-12T02:59Z):
+bash ops-tools/power-review.sh --since 2026-10-12T02:59:00Z
 # Red flags: throttle_hex != 0x0 on a Pi (power/thermal — bit0/1/2 = uv/
 # cap/throttle NOW, bits 16-19 = since boot), k3s_state != active,
 # temp_c > 70, swap_used_mb climbing, db_procs=0 on tx2 (DB down)
@@ -385,7 +431,8 @@ bash ops-tools/collect-node-stats.sh && tail -1 out/node-stats/*.csv
 kubectl -n market-data port-forward svc/grafana 3000:3000
 # Open http://localhost:3000
 # User: admin | Password: GRAFANA_ADMIN_PASSWORD in .secrets.env
-# 5 dashboards: Overview, Indices (named ticker variable — "Nifty 50 (^NSEI)"
+# 7 dashboards (Derived Metrics added 2026-10-10 — provisioned, not yet eyeballed in the UI;
+# Screener): Overview, Indices (named ticker variable — "Nifty 50 (^NSEI)"
 # style labels via ticker_names), Markets, Sentiment, Flows
 ```
 **⚠️ GRAFANA UI "NO DATA" FIX (required on first load):**
@@ -611,7 +658,7 @@ python3 ops-tools/runcmd.py pi2 pi2 'echo @@PW@@ | sudo -S systemctl restart k3s
 
 ### Verify backup ran (daily 01:30 UTC)
 ```bash
-# Check pi3's backup directory (should show today's dump ~300-500K):
+# Check pi3's backup directory (should show today's dump, ~165 MB; a 0-byte file = a failed run):
 python3 ops-tools/runcmd.py pi3 pi3 'ls -lh /var/lib/market-data/backups/ | tail -5'
 # Output should show marketdata-2026-10-03.dump with recent timestamp
 ```
@@ -634,6 +681,12 @@ restores the newest dump into a throwaway `drill_restore` DB, compares row count
 kubectl apply -f manifests/timescaledb/restore-drill-job.yaml
 kubectl logs -n market-data job/restore-drill --tail=5
 # Measured 2026-10-03: RESTORE-DRILL-OK, pg_restore 2s @ 388K dump, live=drill=9076 rows.
+# Re-measured 2026-10-12 on the real 171 MB dump (off-cluster, local timescale/timescaledb:2.30.1-pg16 container):
+#   pg_restore 30 s, 0 errors, 12 hypertables / 3,703 chunks; 12/13 tables identical to live (6.34 M stock_prices rows);
+#   the 13th differs by exactly the 3 rows universe-refresh added after the dump. Procedure: create DB → CREATE EXTENSION
+#   timescaledb → SELECT timescaledb_pre_restore() → pg_restore (SERIAL — `-j` fails on the catalog foreign keys) →
+#   SELECT timescaledb_post_restore(). The in-cluster restore-drill-job.yaml is unchanged and still the quarterly check.
+# Second copy: python3 ops-tools/pull-backups.py   (checksummed pull to out/backups; exit 2 if the newest verified dump is > 36 h old)
 # Re-run quarterly, or after any schema/backup change.
 ```
 
@@ -653,9 +706,28 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
 - Schedule: `30 1 * * *` (01:30 UTC)
 - Runs on pi3 (`nodeSelector: kubernetes.io/hostname=pi3`)
 - Image: `timescale/timescaledb:2.30.1-pg16` (cached, no pull)
-- Runs `pg_dump -h timescaledb -U postgres -d postgres -Fc -f /backups/marketdata-$(date -u +%F).dump`
-- Keeps 7 daily dumps (`ls -t ... | tail -n +8 | xargs -r rm -f`)
+- Runs `pg_dump -Fc` to a temp name, verifies it (size ≥ half the previous dump and ≥ 100 KB, `pg_restore -l` readable
+  with ≥ 100 TOC entries, `index_prices` data present), then atomically `mv`s it to
+  `/backups/marketdata-$(date -u +%F).dump` and writes a `.sha256` sidecar. `concurrencyPolicy: Forbid`.
+- Prunes only readable dumps beyond the newest 7; empty files are always removed; unreadable non-empty files are kept
+  and logged (`WARN: unreadable`). A failed run leaves every existing dump untouched (`BACKUP-FAIL: <reason>`).
+- **Manifest rewritten 2026-10-11 (AR-11); APPLIED + canaried ~23:40 UTC 10-11** (live script verified 2026-10-12; first dump
+  171 MB with sidecar, checksum OK; CronJob still suspended). Test: `bash tests/test-pg-backup.sh` (21 checks, docker + a real dump in `out/backups/`).
 - Writes to `/var/lib/market-data/backups/` on pi3's USB SSD (hostPath, survives pod restarts)
+
+**Known flaws of the LIVE script (verified on pi3, 2026-10-10 — review AR-11; first four fixed in the repo manifest 2026-10-11, pending apply):**
+- The newest file, `marketdata-2026-10-10.dump`, is **0 bytes** — a failed run during the outage. `pg_dump -f`
+  leaves the empty file; `set -e` then skips pruning, so one failure is harmless.
+- Pruning counts files by mtime and does not care if they are empty: after a run of failed days followed by a
+  success, empty files crowd good dumps out of the 7-file window (after 7 consecutive failures no good dump
+  survives).
+- Nothing verifies a dump (no size floor, no `pg_restore -l`), and the write is not atomic.
+- Dumps are now ~165 MB each (8 files = 792 MB; pi3's SSD has ~208 GB free), so the 388 KB / 2 s drill
+  figures are stale.
+- **Fix (manifest-only, no image change — apply when the cluster is calm):** dump to a temp name → require a size
+  floor and a readable `pg_restore -l` → atomic `mv` → prune only verified dumps, keep ≥ 7 verified; copy each
+  verified dump to a second node (pull-based, checksummed) and off-site; alert if the newest verified copy is
+  > 36 h old; re-run the restore drill on a real dump.
 
 ### Retain safety
 - The PV `timescaledb-tx2-ssd` has `persistentVolumeReclaimPolicy: Retain`.
@@ -668,7 +740,7 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
 - **One local secrets file: `.secrets.env`** (repo root; gitignored, mode 600; the
   committed `.secrets.env.example` lists the keys). It holds `PI_PASS`, `TX2_PASS`,
   `PGPASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `FRED_API_KEY`, plus the out-of-band
-  `PIHOLE_ADMIN_PASSWORD` / `TELEGRAM_*`. `ops-tools/*.py` read it automatically
+  `PIHOLE_ADMIN_PASSWORD` / `TELEGRAM_*` / `LLM_*` (planned, ML-7). `ops-tools/*.py` read it automatically
   (host-aware); for your own shell: `set -a; source .secrets.env; set +a`.
   **Docs never carry values** — commands use the `@@PW@@` token (see §6), any
   `@@KEY@@` from `.secrets.env` (e.g. `@@TELEGRAM_BOT_TOKEN@@` for a direct
@@ -695,7 +767,10 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
   Before a push: `python3 ops-tools/workloads.py --check` (docs vs manifests), `bash tests/test-precommit-hook.sh`,
   `bash tests/test-nodewatch.sh`, `python3 tests/test_creds.py`.
 - **Out-of-cluster watcher:** `ops-tools/nodewatch.sh` (ping every node + TCP-probe the API; Telegram message
-  only on state change, 6 h reminders). Built + tested 2026-10-10, **not yet deployed** — install on pi0 (outside
+  only on state change, 6 h reminders). Built + tested 2026-10-10. **Deployed on pi0 2026-10-11** (script in `/usr/local/bin`, `/etc/nodewatch.hosts` +
+  `/etc/nodewatch.secrets` mode 600, root cron `*/5`, delivery test HTTP 200). Order matters: an empty/absent credentials
+  file makes the script record a state change as handled without sending it, so enable cron only after the secrets file
+  exists and a delivery test succeeds; `TELEGRAM_CHAT_ID` must be numeric. Install on pi0 (outside
   k3s): copy the script, create `/etc/nodewatch.hosts` (PI0_IP…TX2_IP) and `/etc/nodewatch.secrets` (mode 600:
   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID), cron `*/5 * * * *`. Dry-run anywhere: `bash ops-tools/nodewatch.sh --dry-run`.
 - **Never without care:** TX2 k3s upgrade past v1.35 (cgroup v1 ceiling →
@@ -722,7 +797,13 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
    (user-confirmed); host stays DHCP client by design.
 5. news_sentiment / raw_headlines have NO unique constraints yet (INSERT-only
    writers; add with ON CONFLICT at the next scorer/fetcher image rebuild).
-6. pi0 not on tailnet; router UDP 51820 forward leftover from WireGuard era.
+6. ~~pi0 not on tailnet~~ ✅ joined 2026-10-11 (tailscale 1.104.1 from the Raspbian apt repo;
+   `tailscale up --accept-dns=false --accept-routes=false --hostname=pi0` so resolv.conf on the LAN's DNS host is untouched;
+   node key expires 2027-04-09). Verified from pi1 over the tailnet: ping 31 ms, Pi-hole admin HTTP 200. **Not done:**
+   DNS over the tailnet — Pi-hole `dns.listeningMode` is `LOCAL`, a query from pi1 over the tailnet timed out; ad-block DNS
+   on the move also needs the tailnet nameserver set in the admin console. Left unchanged on purpose (changing the
+   listening mode on a host behind a router with a stale port-forward needs the CGNAT check, §12.9, first).
+   Router UDP 51820 forward leftover from WireGuard era is still open.
 7. Longhorn/OpenEBS + Loki: deliberately declined (pi2 RAM ceiling).
 8. ~~`rbi-fetcher:v1` image NOT yet imported on pi2~~ ✅ resolved 2026-10-09
    (same session): the "SSH Authentication failed" on pi2 was NEVER a wrong

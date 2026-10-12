@@ -2,11 +2,15 @@
 
 Reads ONLY existing tables — no new ingestion, no DB writes (house rule: read-only
 by default). Composes the 08:00 IST digest and posts it to the Telegram chat.
+Index closes are a close/day/YTD table and the watchlist section a table plus
+holdings totals (2026-10-10, stocks.py); the watchlist section is skipped
+silently while the table is empty or not yet created.
 The same Secret also backs the Grafana Telegram contact point
 (manifests/grafana/alerting.yaml), so the bot is both the digest and the alert
 channel; the token/chat ID stay deployment config, never code.
 
-Env: PGHOST, PGUSER, PGPASSWORD, PGDATABASE, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
+Env: PGHOST, PGUSER, PGPASSWORD, PGDATABASE, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (the owner;
+other users come from the bot_users table — ADR 0012). One personalised message per user.
 Exit 0 only when the Bot API accepts the message (CronJob failure signal).
 """
 
@@ -18,19 +22,12 @@ from datetime import datetime, timedelta, timezone
 import psycopg
 import requests
 
+import stocks
+import users
+
 IST = timezone(timedelta(hours=5, minutes=30))
 TELEGRAM_LIMIT = 4096
 
-# index_prices tickers already ingested by the daily batch (no new feed added).
-CLOSES = [
-    ("^NSEI", "Nifty 50"),
-    ("^BSESN", "Sensex"),
-    ("^GSPC", "S&P 500"),
-    ("^VIX", "VIX"),
-    ("^INDIAVIX", "India VIX"),
-    ("DX-Y.NYB", "DXY"),
-    ("GC=F", "Gold fut"),
-]
 FX_PAIRS = [("USDINR=X", "USD/INR")]
 TOP_HEADLINES = 3
 
@@ -44,24 +41,6 @@ def connect():
     )
     conn.autocommit = True  # read-only path: house pattern for SELECTs
     return conn
-
-
-def closes(cur):
-    """[(label, ts, close, prev_close)] — last two daily rows per ticker."""
-    rows = []
-    for ticker, label in CLOSES:
-        cur.execute(
-            "SELECT ts, close FROM index_prices WHERE ticker = %s ORDER BY ts DESC LIMIT 2",
-            (ticker,),
-        )
-        fetched = cur.fetchall()
-        if not fetched:
-            print(f"WARN no data for {label} ({ticker})", flush=True)
-            continue
-        ts, close = fetched[0]
-        prev = fetched[1][1] if len(fetched) > 1 else None
-        rows.append((label, ts, close, prev))
-    return rows
 
 
 def fx(cur):
@@ -114,42 +93,59 @@ def headlines(cur):
     return cur.fetchall()
 
 
-def build_message():
+def watchlist(cur, chat_id=None):
+    """One user's compact watchlist lines; [] when empty or the table/column is missing."""
+    def q(sql, args=()):
+        cur.execute(sql, args)
+        return cur.fetchall()
+    try:
+        rows = q(stocks.WATCH_SQL, (chat_id,))
+        if not rows:
+            return []
+        return stocks.watch_block(rows, stocks.ytd_map(q, [r[0] for r in rows]),
+                                  notes=False)
+    except psycopg.Error as exc:
+        if not stocks.table_missing(exc):
+            raise
+        print("WARN watchlist table missing — section skipped", flush=True)
+        return []
+
+
+def build_message(chat_id=None):
+    """The digest for one user (their own watchlist); chat_id None = the owner."""
+    chat_id = str(chat_id or os.environ.get("TELEGRAM_CHAT_ID", ""))
     conn = connect()
     with conn.cursor() as cur:
-        lines = [f"<b>Market digest — {datetime.now(IST):%Y-%m-%d %H:%M IST}</b>", ""]
+        def q(sql, args=()):
+            cur.execute(sql, args)
+            return cur.fetchall()
 
-        for label, ts, close, prev in closes(cur):
-            pct = ""
-            if prev:
-                change = (close - prev) / prev * 100
-                pct = f" ({change:+.2f}%)"
-            lines.append(f"{label}: <b>{close:,.2f}</b>{pct}  <i>{ts:%d %b}</i>")
+        lines = [f"<b>Market digest</b>  <i>{datetime.now(IST):%d %b %Y, %H:%M IST}</i>",
+                 stocks.quote_table(q, stocks.DIGEST_QUOTES)]
 
-        for label, ts, rate in fx(cur):
-            lines.append(f"{label}: <b>{rate:,.4f}</b>")
-
+        facts = [(label, f"{rate:,.4f}") for label, _ts, rate in fx(cur)]
         gauge = sentiment(cur)
         if gauge is not None:
-            lines.append(f"\nSentiment (7d avg): <b>{gauge:+.3f}</b>")
-
-        flow_rows = flows(cur)
-        if flow_rows:
-            lines.append("FII/DII net: " + " · ".join(
-                f"{flow} <b>{amount:,.0f}</b> Rs cr" for flow, amount in flow_rows
-            ))
+            facts.append(("Sentiment, 7-day avg", f"{gauge:+.3f}"))
+        facts += [(f"{flow} net, Rs cr", f"{amount:+,.0f}") for flow, amount in flows(cur)]
+        if facts:
+            lines.append(stocks.kv(facts))
 
         stale = stale_feeds(cur)
         lines.append(
-            "\nStale feeds: <b>none</b>" if not stale
-            else "\n<b>Stale feeds:</b> " + ", ".join(
-                f"{feed} (last data {last:%d %b})" for feed, last, _ in stale
+            "Stale feeds: <b>none</b>" if not stale
+            else "<b>Stale feeds</b>\n" + "\n".join(
+                f"• {html.escape(feed)} — last data {last:%d %b}" for feed, last, _ in stale
             )
         )
 
+        watched = watchlist(cur, chat_id)
+        if watched:
+            lines.append("\n<b>Watchlist</b>\n" + "\n".join(watched))
+
         tops = headlines(cur)
         if tops:
-            lines.append("\n" + "\n".join(
+            lines.append("\n<b>Latest headlines</b>\n" + "\n".join(
                 f"• {html.escape(headline)} <i>{html.escape(source or '')}</i>"
                 for _, headline, source in tops
             ))
@@ -161,9 +157,9 @@ def build_message():
     return text
 
 
-def send(text: str) -> bool:
+def send(text: str, chat=None) -> bool:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
-    chat = os.environ["TELEGRAM_CHAT_ID"]
+    chat = str(chat or os.environ["TELEGRAM_CHAT_ID"])
     try:
         r = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
@@ -177,16 +173,24 @@ def send(text: str) -> bool:
     if r.status_code != 200 or not r.json().get("ok"):
         print(f"ERROR telegram {r.status_code}: {r.text[:200]}", flush=True)
         return False
-    print(f"digest sent to chat {chat} ({len(text)} chars)", flush=True)
+    print(f"digest sent to chat {chat[:3]}*** ({len(text)} chars)", flush=True)
     return True
 
 
 def main() -> int:
-    message = build_message()
-    if not message:
-        print("ERROR: empty digest", flush=True)
-        return 1
-    return 0 if send(message) else 1
+    owner = os.environ["TELEGRAM_CHAT_ID"]
+    conn = connect()
+    try:
+        with conn.cursor() as cur:
+            def q(sql, args=()):
+                cur.execute(sql, args)
+                return cur.fetchall()
+            recipients = users.recipients_for_jobs(q, owner)
+    finally:
+        conn.close()
+    rc = users.deliver(recipients, owner, build_message, send)
+    print(f"DIGEST-DONE recipients={len(recipients)} rc={rc}", flush=True)
+    return rc
 
 
 if __name__ == "__main__":

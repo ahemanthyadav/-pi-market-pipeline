@@ -1,7 +1,8 @@
 """Daily NSE/India indices fetcher via yfinance (validated Yahoo symbols).
 
 Writes into index_prices (same schema as the global batch). Idempotent
-DELETE+INSERT per (ticker, ts). Runs 11:15 UTC, after NSE close (10:00 UTC).
+DELETE+INSERT per (ticker, ts), one commit per calendar year. Runs 11:15 UTC,
+after NSE close (10:00 UTC).
 
 Symbol notes (verified 2026-09-29 on the TX2 stack; re-probed 2026-10-09):
 - Live: ^NSEI ^NSEBANK ^CNXIT ^CNXPHARMA ^BSESN ^INDIAVIX
@@ -37,11 +38,14 @@ TICKERS = [
 
 def fetch_latest() -> dict:
     """Return {ticker: (ts, open, high, low, close, volume)} for the latest valid row."""
-    period = os.environ.get("FETCH_PERIOD", "5d")  # backfills use 1y
+    # Backfills set BACKFILL=1 plus FETCH_PERIOD (5y, max, ...) or FETCH_START
+    # (YYYY-MM-DD, wins over the period) to bound how far back they reach.
+    start = os.environ.get("FETCH_START")
+    span = {"start": start} if start else {"period": os.environ.get("FETCH_PERIOD", "5d")}
     backfill = os.environ.get("BACKFILL", "0") == "1"
     data = yf.download(
         " ".join(TICKERS),
-        period=period,
+        **span,
         interval="1d",
         group_by="ticker",
         auto_adjust=False,
@@ -79,6 +83,21 @@ def fetch_latest() -> dict:
     return rows
 
 
+def year_batches(rows: dict) -> list:
+    """[(year, [(ticker, ts, o, h, l, c, v), ...])] oldest year first.
+
+    A deep backfill must not sit in one transaction: every chunk it touches
+    holds locks until commit, and the 5y single-transaction run of 2026-10-10
+    used ~2,900 of the database's ~6,400 lock slots. One commit per calendar
+    year keeps any history depth to a year's worth of chunks at a time.
+    """
+    years = {}
+    for ticker, bars in rows.items():
+        for (ts, o, h, low, c, v) in bars:
+            years.setdefault(ts.year, []).append((ticker, ts, o, h, low, c, v))
+    return sorted(years.items())
+
+
 def write_rows(rows: dict) -> int:
     conn = psycopg.connect(
         host=os.environ.get("PGHOST", "timescaledb.market-data.svc.cluster.local"),
@@ -87,21 +106,28 @@ def write_rows(rows: dict) -> int:
         dbname=os.environ.get("PGDATABASE", "postgres"),
     )
     written = 0
-    with conn:
-        with conn.cursor() as cur:
-            for ticker, bars in rows.items():
-                for (ts, o, h, low, c, v) in bars:
-                    cur.execute(
-                        "DELETE FROM index_prices WHERE ticker = %s AND ts = %s",
-                        (ticker, ts),
-                    )
-                    cur.execute(
-                        "INSERT INTO index_prices "
-                        "(ticker, ts, open, high, low, close, volume) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                        (ticker, ts, o, h, low, c, v),
-                    )
-                    written += 1
+    for year, batch in year_batches(rows):
+        stamps = [bar[1] for bar in batch]
+        # Still only our own (ticker, ts) rows; the ts bounds are there so the
+        # planner prunes to this year's chunks instead of locking all of them.
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM index_prices p "
+                    "USING unnest(%s::text[], %s::timestamptz[]) AS k(ticker, ts) "
+                    "WHERE p.ticker = k.ticker AND p.ts = k.ts "
+                    "AND p.ts >= %s AND p.ts <= %s",
+                    ([bar[0] for bar in batch], stamps, min(stamps), max(stamps)),
+                )
+                cur.executemany(
+                    "INSERT INTO index_prices "
+                    "(ticker, ts, open, high, low, close, volume) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    batch,
+                )
+        written += len(batch)
+        if os.environ.get("BACKFILL", "0") == "1":
+            print(f"committed {year}: {len(batch)} rows", flush=True)
     conn.close()
     return written
 

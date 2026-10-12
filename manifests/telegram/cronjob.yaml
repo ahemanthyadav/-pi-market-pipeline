@@ -21,12 +21,16 @@ metadata:
   namespace: market-data
 spec:
   schedule: "0 8 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
   timeZone: Asia/Kolkata
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 2
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure
@@ -34,8 +38,73 @@ spec:
             kubernetes.io/hostname: pi1
           containers:
             - name: digest
-              image: local/telegram-digest:v2
+              image: local/telegram-digest:v8
               imagePullPolicy: Never
+              env:
+                - name: PGHOST
+                  value: timescaledb.market-data.svc.cluster.local
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+                - name: PGDATABASE
+                  value: postgres
+                - name: TELEGRAM_BOT_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: telegram-bot
+                      key: bot-token
+                - name: TELEGRAM_CHAT_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: telegram-bot
+                      key: chat-id
+              resources:
+                requests:
+                  memory: 64Mi
+                  cpu: 50m
+                limits:
+                  memory: 128Mi
+                  cpu: 500m
+---
+# Daily change alerts (2026-10-10): screener top-20 entries/exits, watchlist
+# moves / moving-average crossings / tagged news events. Silent when nothing
+# changed. Same image and Secret as the digest, different entrypoint.
+#
+# Schedule is node-local like the screener chain it follows (find F20):
+# stock-metrics 02:00 → stock-screener 02:15 → stock-report 02:30 → this 02:45.
+# Validate with:
+#   kubectl create job -n market-data telegram-alerts-validate --from=cronjob/telegram-alerts
+#   (OK-marker in the log: ALERTS-OK)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: telegram-alerts
+  namespace: market-data
+spec:
+  schedule: "45 2 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 604800
+      template:
+        spec:
+          restartPolicy: OnFailure
+          nodeSelector:
+            kubernetes.io/hostname: pi1
+          containers:
+            - name: alerts
+              image: local/telegram-digest:v8
+              imagePullPolicy: Never
+              args: ["python", "alerts.py"]
               env:
                 - name: PGHOST
                   value: timescaledb.market-data.svc.cluster.local

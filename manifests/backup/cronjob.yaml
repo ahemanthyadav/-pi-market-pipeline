@@ -4,6 +4,10 @@
 # created on first run). Keeps 7 daily dumps, prunes older. Custom format
 # (-Fc) + restore with pg_restore. DB itself lives on the TX2's sda4, so this
 # is a true second copy on independent hardware.
+# 2026-10-11 (review AR-11): dump to a temp name, verify (size floor = half the
+# previous dump, readable TOC, index_prices data present), atomic mv + .sha256
+# sidecar, prune only readable dumps beyond the newest 7 (empty files always
+# removed). Tested by tests/test-pg-backup.sh. Applied + canaried 2026-10-11.
 # Restore drill (from any pod with the image + Secret):
 #   pg_restore -h timescaledb -U postgres -d postgres -c /backups/<file>.dump
 apiVersion: batch/v1
@@ -13,11 +17,15 @@ metadata:
   namespace: market-data
 spec:
   schedule: "30 1 * * *"
+  startingDeadlineSeconds: 3600
+  concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure
@@ -37,13 +45,45 @@ spec:
                 - sh
                 - -c
                 - |
-                  set -e
+                  set -eu
                   mkdir -p /backups
-                  FILE=/backups/marketdata-$(date -u +%F).dump
-                  pg_dump -h timescaledb -U postgres -d postgres -Fc -f "$FILE"
-                  ls -t /backups/marketdata-*.dump | tail -n +8 | xargs -r rm -f
-                  ls -lh /backups/ | tail -8
-                  echo BACKUP-OK
+                  cd /backups
+                  FILE=marketdata-$(date -u +%F).dump
+                  TMP=.$FILE.tmp
+                  trap 'rm -f "$TMP" /tmp/toc' EXIT
+                  fail() { echo "BACKUP-FAIL: $*"; exit 1; }
+
+                  pg_dump -h timescaledb -U postgres -d postgres -Fc -f "$TMP"
+
+                  # verify BEFORE the dump takes its final name
+                  SIZE=$(wc -c < "$TMP")
+                  PREV=0
+                  for f in $(ls -t marketdata-*.dump 2>/dev/null); do
+                    if [ -s "$f" ]; then PREV=$(wc -c < "$f"); break; fi
+                  done
+                  FLOOR=$((PREV / 2))
+                  [ "$FLOOR" -ge 102400 ] || FLOOR=102400
+                  [ "$SIZE" -ge "$FLOOR" ] || fail "size $SIZE below floor $FLOOR"
+                  pg_restore -l "$TMP" > /tmp/toc || fail "pg_restore -l cannot read the dump"
+                  ENTRIES=$(grep -vc '^;' /tmp/toc || true)
+                  [ "$ENTRIES" -ge 100 ] || fail "only $ENTRIES TOC entries"
+                  grep -q 'TABLE DATA public index_prices ' /tmp/toc || fail "index_prices data missing"
+
+                  HASH=$(sha256sum "$TMP" | cut -d' ' -f1)
+                  mv "$TMP" "$FILE"
+                  echo "$HASH  $FILE" > "$FILE.sha256"
+
+                  # prune: empty files always go; readable dumps beyond the newest 7 go;
+                  # unreadable non-empty files are kept and reported, never counted
+                  N=0
+                  for f in $(ls -t marketdata-*.dump); do
+                    if [ ! -s "$f" ]; then rm -f "$f" "$f.sha256"; continue; fi
+                    if ! pg_restore -l "$f" > /dev/null 2>&1; then echo "WARN: unreadable $f kept"; continue; fi
+                    N=$((N + 1))
+                    if [ "$N" -gt 7 ]; then rm -f "$f" "$f.sha256"; fi
+                  done
+                  ls -lh /backups/
+                  echo "BACKUP-OK $FILE size=$SIZE entries=$ENTRIES sha256=$HASH"
               volumeMounts:
                 - name: backups
                   mountPath: /backups

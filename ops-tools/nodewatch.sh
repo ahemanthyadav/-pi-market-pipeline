@@ -17,7 +17,8 @@
 #             — without them it only prints (same as --dry-run).
 #
 # Usage:  bash ops-tools/nodewatch.sh [--dry-run]       cron (pi0): */5 * * * * /path/nodewatch.sh
-# Test hooks: NODEWATCH_TEST_DOWN="pi3 api"  simulates failures; NODEWATCH_STATE_DIR overrides state.
+# Test hooks: NODEWATCH_TEST_DOWN="pi3 api"  simulates failures; NODEWATCH_STATE_DIR overrides state;
+#             NODEWATCH_TEST_ONLY=1  never probes the network — only NODEWATCH_TEST_DOWN counts (hermetic tests).
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"; REPO="$(cd "$HERE/.." && pwd)"
 HOSTS="${NODEWATCH_HOSTS_FILE:-}"; [ -z "$HOSTS" ] && { [ -f "$REPO/.hosts.env" ] && HOSTS="$REPO/.hosts.env" || HOSTS=/etc/nodewatch.hosts; }
@@ -33,9 +34,9 @@ for n in pi0 pi1 pi2 pi3 tx2; do [ -n "${IP[$n]}" ] || { echo "nodewatch: no add
 is_down_test() { [[ " ${NODEWATCH_TEST_DOWN:-} " == *" $1 "* ]]; }
 down=()
 for n in pi0 pi1 pi2 pi3 tx2; do
-  if is_down_test "$n" || ! ping -c2 -W2 "${IP[$n]}" >/dev/null 2>&1; then down+=("$n"); fi
+  if is_down_test "$n" || { [ "${NODEWATCH_TEST_ONLY:-0}" != 1 ] && ! ping -c2 -W2 "${IP[$n]}" >/dev/null 2>&1; }; then down+=("$n"); fi
 done
-if is_down_test api || ! timeout 4 bash -c "</dev/tcp/${IP[pi2]}/6443" 2>/dev/null; then down+=("k3s-api"); fi
+if is_down_test api || { [ "${NODEWATCH_TEST_ONLY:-0}" != 1 ] && ! timeout 4 bash -c "</dev/tcp/${IP[pi2]}/6443" 2>/dev/null; }; then down+=("k3s-api"); fi
 
 now="$(date +%s)"; cur="${down[*]:-}"; prev="$(cat "$STATE/last" 2>/dev/null || true)"; lastsent="$(cat "$STATE/sent" 2>/dev/null || echo 0)"
 msg=""

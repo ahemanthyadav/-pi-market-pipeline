@@ -20,6 +20,12 @@ data:
       volume BIGINT
     );
     SELECT create_hypertable('index_prices', 'ts', if_not_exists => TRUE);
+    -- 2026-10-10: one-year chunks for everything created from now on (the table is
+    -- ~10k rows a year). Needed for the 40-year index backfill: at the default
+    -- 7 days it would have added ~1,900 chunks, and the unbounded scans in
+    -- ta-compute / pipeline-health lock every chunk. Chunks that already exist
+    -- (2021-10 → 2026-10, weekly) are not rewritten. Idempotent.
+    SELECT set_chunk_time_interval('index_prices', INTERVAL '365 days');
 
     CREATE TABLE IF NOT EXISTS fx_rates (
       pair TEXT NOT NULL,
@@ -146,7 +152,7 @@ data:
     );
     INSERT INTO ticker_names (ticker, name) VALUES
       ('^GSPC','S&P 500'), ('^IXIC','Nasdaq Composite'), ('^DJI','Dow Jones'),
-      ('^RUT','Russell 2000'), ('^VIX','VIX (US)'),
+      ('^RUT','Russell 2000'), ('^RUI','Russell 1000'), ('^VIX','VIX (US)'),
       ('^FTSE','FTSE 100'), ('^GDAXI','DAX 40'), ('^FCHI','CAC 40'),
       ('^STOXX50E','Euro Stoxx 50'), ('^IBEX','IBEX 35'), ('FTSEMIB.MI','FTSE MIB'),
       ('^SSMI','Swiss Market Index'), ('^AEX','AEX'),
@@ -306,3 +312,39 @@ data:
     );
     CREATE INDEX IF NOT EXISTS idx_headline_events_type_ts
       ON headline_events (event_type, ts DESC);
+  08-watchlist.sql: |
+    -- Watchlist / holdings (2026-10-10). Plain table, single user. The ONLY
+    -- writer is the Telegram listener's /watch command (manifests/telegram/
+    -- bot.py); digest.py and alerts.py read it. qty + avg_cost NULL = watch
+    -- only; avg_cost is per share in the stock's own currency.
+    CREATE TABLE IF NOT EXISTS watchlist (
+      symbol TEXT PRIMARY KEY,          -- universe_constituents.symbol form (TCS.NS, AAPL)
+      qty DOUBLE PRECISION,
+      avg_cost DOUBLE PRECISION,
+      note TEXT,
+      added_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  09-multiuser.sql: |
+    -- Multi-user Telegram bot (2026-10-12, ADR 0012). Every user owns a private watchlist;
+    -- access is a table, not a Secret edit. The OWNER is the Secret's chat id and is NOT a row
+    -- here (always allowed). Idempotent; refuses to guess an owner if the watchlist has data.
+    CREATE TABLE IF NOT EXISTS bot_users (
+      chat_id TEXT PRIMARY KEY,         -- Telegram chat id (negative for groups)
+      name TEXT NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT true,
+      added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      added_by TEXT
+    );
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                     WHERE table_schema = 'public' AND table_name = 'watchlist'
+                       AND column_name = 'chat_id') THEN
+        IF EXISTS (SELECT 1 FROM watchlist) THEN
+          RAISE EXCEPTION 'watchlist has rows but no chat_id: assign them to the owner first (ADR 0012)';
+        END IF;
+        ALTER TABLE watchlist DROP CONSTRAINT IF EXISTS watchlist_pkey;
+        ALTER TABLE watchlist ADD COLUMN chat_id TEXT NOT NULL;
+        ALTER TABLE watchlist ADD PRIMARY KEY (chat_id, symbol);
+      END IF;
+    END $$;

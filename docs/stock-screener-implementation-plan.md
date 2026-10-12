@@ -1,7 +1,8 @@
 # Stock Screener & Daily Analysis — Implementation Plan
 ### Universe: Nifty 500 + S&P 500 · maximum-history fundamentals · balanced screening · mixed sources · AI reports for the shortlist
 
-> **Status:** proposed / not started (2026-10-03). Everything below is designed against the
+> **Status:** v1 **built and running** (rollout phases in §13; screener image v8). §16 added 2026-10-10: prioritised
+> analysis-capability gaps (value × effort). Original design note (2026-10-03): everything below is designed against the
 > live architecture in `market-data-architecture.md` — no existing table, CronJob or
 > pattern is replaced; all changes are additive and staged with canaries.
 > Companion docs: ops manual (runbooks + image build cycle), roadmap (hardening),
@@ -252,12 +253,12 @@ zero new compute.
 
 | CronJob | Schedule (UTC) | Runs on | Image | Writes | Est. runtime |
 |---|---|---|---|---|---|
-| `universe-refresh` | `0 9 * * 0` (Sun) | Pi worker | `local/screener:v8` | `universe_constituents`, `ticker_names` | ~2 min |
-| `stock-prices` | `30 23 * * *` | Pi worker | `local/screener:v8` | `stock_prices` | ~15-30 min (1000 syms, chunks of 100, 3 s sleep) |
-| `stock-fundamentals` | `0 6 * * 6` (Sat) | Pi worker | `local/screener:v8` | `stock_fundamentals`, `job_state` | ~45-90 min, resumable via `job_state` cursor |
-| `stock-metrics` | `0 2 * * *` | Pi worker | `local/screener:v8` | `stock_metrics_daily` | ~5-10 min |
-| `stock-screener` | `15 2 * * *` | Pi worker | `local/screener:v8` | `stock_scores`, `screening_runs` | ~2-5 min |
-| `stock-report` | `30 2 * * *` | Pi worker | `local/screener:v8` | `stock_reports` | ~2-5 min |
+| `universe-refresh` | `0 9 * * 0` (Sun) | Pi worker | `local/screener:v9` | `universe_constituents`, `ticker_names` | ~2 min |
+| `stock-prices` | `30 23 * * *` | Pi worker | `local/screener:v9` | `stock_prices` | ~15-30 min (1000 syms, chunks of 100, 3 s sleep) |
+| `stock-fundamentals` | `0 6 * * 6` (Sat) | Pi worker | `local/screener:v9` | `stock_fundamentals`, `job_state` | ~45-90 min, resumable via `job_state` cursor |
+| `stock-metrics` | `0 2 * * *` | Pi worker | `local/screener:v9` | `stock_metrics_daily` | ~5-10 min |
+| `stock-screener` | `15 2 * * *` | Pi worker | `local/screener:v9` | `stock_scores`, `screening_runs` | ~2-5 min |
+| `stock-report` | `30 2 * * *` | Pi worker | `local/screener:v9` | `stock_reports` | ~2-5 min |
 | `backfill-stock-prices-max` | one-shot Job (manual) | Pi worker | same as `stock-prices` (env `BACKFILL=max`) | `stock_prices` | ~30-60 min, resumable |
 | `backfill-stock-fundamentals` | one-shot Job (manual) | Pi worker | same as fundamentals (env `BACKFILL=1`) | `stock_fundamentals` | hours; resumable across runs |
 
@@ -367,5 +368,84 @@ following week (lets F build on real fundamentals); F→G next evening; H last.
 1. Shortlist size: **25 per universe** (50 total) — tunable via env.
 2. Liquidity floor: universe 10th percentile of 20d dollar volume.
 3. FMP free tier for US fundamentals depth: **deferred** (schema ready via `source`).
-4. LLM narration hook: **off** until the 3090 layer or an API decision (roadmap Tier 3).
+4. LLM narration hook: **decided 2026-10-10 — hosted LLM API with an API key** (ML-7 in `ml-roadmap-2026-10-10.md`); no
+   3090/GPU needed. Stays off until the LLM secret, `llm_*` tables and an ADR exist.
 5. Optional Timescale columnstore compression on `stock_prices` after backfill lands.
+
+## 16. Analysis-capability gaps — prioritised by value and effort (added 2026-10-10)
+
+Sources: the 2026-10-10 review of what the setup does and does not provide, `evidence-based-signals-roadmap.md` (EV-n),
+`ml-roadmap-2026-10-10.md` (ML-n) and `architecture-review-2026-10-10.md` (AR-n). **Those documents own the detail;
+this section only orders the work.** Research labels: 🟢 research-backed · 🟡 conditional · 🔵 engineering practice ·
+⚪ unproven here · ⚠️ citation not verified (legend in the ML roadmap).
+
+### 16.1 How priority is assigned
+
+**Value** — High: prevents wrong results, unlocks trust/validation, or affects a large share of the universe ·
+Medium: adds a plausible signal or useful context · Low: descriptive or nice-to-have. An idea labelled ⚪ is capped at
+Medium (Low if its only benefit is descriptive) unless it is a blocker for something else.
+**Effort** — S ≤ 1 day · M a few days · L a week or more. Efforts for EV-n come from the EV roadmap, for ML-n from the ML
+roadmap (an "S–M" is treated as M); the rest are my estimates.
+
+| Value ↓ / Effort → | S | M | L |
+|---|---|---|---|
+| **High** | **P0** | **P0** | **P1** |
+| **Medium** | **P1** | **P2** | **P3** |
+| **Low** | **P2** | **P3** | **P3** |
+
+Two adjustments: (a) **a blocker inherits the priority of what it blocks**; (b) **time-sensitive items** — data that cannot
+be recovered later — move up one level. P0 = do first · P1 = next · P2 = when P0/P1 land · P3 = later or only if results justify.
+**Ratings are priors, not results:** the value of every *signal* is unknown until EV-0 measures it — re-rate after the first
+harness run.
+
+### 16.2 The prioritised list
+
+| Pri | ID | Item | Value | Effort | Label | Depends on / notes |
+|---|---|---|---|---|---|---|
+| **P0** | **G-1** (tracker: DQ-1) | **Corporate actions and adjusted prices**: add `adj_close` + a `corporate_actions` table, re-backfill a symbol when a split/spin-off/dividend is detected, flag > 40 % one-day moves; include dividends in total return | High | M | 🔵 | Blocks EV-0 and every ML backtest; found 2026-10-10 (stored `close` is split- but not dividend-adjusted; 3 symbols with > 40 % one-day moves in 60 days) |
+| **P0** | **G-2a** | **Weekly membership snapshots, append-only, starting now** (the universe refresh already sets `first_seen`/`last_seen`) | High | S | 🔵 | Builds history that cannot be recovered later; feeds EV-1 |
+| **P0** | **EV-2** | Keep every weekly fundamentals snapshot instead of overwriting | Medium → lifted | S | 🔵 | Time-sensitive: builds India point-in-time history. Lifted P1 → P0 by rule (b) |
+| **P0** | **G-3 = PV-0** | **Prediction ledger + outcome resolver** (generalises the forward-test ledger): write-once log of every daily prediction — composite and factor scores first — resolved at 1/3/6/12 months on adjusted prices against a benchmark. Design: `prediction-validation-and-training-2026-10-10.md` | High | M | 🔵 (method 🟢) | Needs G-1. Honest live out-of-sample record; start logging the day after G-1 lands — history cannot be recovered |
+| **P0** | **EV-0 + ML-0** | Signal test harness (IC, t-stat, quintile spread, costs) + experiment log and trial budget | High | M | 🟢 | Needs G-1; blocks EV-3…EV-18 and ML-6 |
+| **P0** | **EV-1** | Historical index membership (S&P 500 changes, NSE reconstitution circulars) | High | M | 🔵 | Removes survivorship bias from EV-0 results; NSE circulars are the long pole |
+| **P1** | **G-6** | **India fundamentals source** (quarterly results filings, or a paid API — decision needed) | High | L (M if paid API) | 🔵 | About half the universe cannot be tested on fundamentals today (4 annual points, no filing dates) |
+| **P1** | **EV-3, EV-4, EV-5, EV-7** | Price-only signals: 12-1 momentum, 52-week-high nearness, volatility/beta, index trend flag | Medium | S each | per EV roadmap ⚠️ | Run through EV-0; keep only what passes §5 |
+| **P1** | **EV-9 → EV-10…EV-13** | More statement lines, then gross profitability, asset growth, accruals, share issuance | Medium | M, then S each | per EV roadmap ⚠️ | EV-9 inherits P1 from the signals it unlocks |
+| **P1** | **ML-2 (storage only)** | Store headline embeddings from now | Low (benefit ⚪) | S | ⚪ / 🔵 | Time-sensitive: history only accrues. Lifted P2 → P1 |
+| **P1** | **PV-1** | Model-health metrics (rolling IC, hit rate, calibration) + Grafana dashboard + threshold alerts | Medium | S | 🔵 | Needs PV-0; low statistical power for the first months |
+| **P2** | **EV-17, EV-18** | Composite v2 and measured confidence | Medium | M | per EV roadmap | Sequenced after the EV-0 results |
+| **P2** | **EV-14, EV-15 (US), EV-6, EV-8** | F-score, post-earnings drift (US first; India is L), risk-scaled and residual momentum | Medium | M | per EV roadmap ⚠️ | After EV-3/EV-5 and EV-0 |
+| **P2** | **G-9** | US insider transactions (Form 4) + FINRA short interest | Medium | M | ⚠️ research exists, unverified | Free sources; test through EV-0 |
+| **P2** | **G-10** | India promoter holding and pledging (quarterly) as a risk screen | Medium | M | ⚪ | Practitioner-driven; thin evidence |
+| **P2** | **EV-16** | Portfolio rules, sector caps, risk dashboard for the watchlist | Medium | M | per EV roadmap | Needs costs in EV-0 |
+| **P2** | **ML-1, ML-3, ML-5, ML-7a** | Anomaly detection (v1 rules), volatility forecasts (add leverage-effect models), peer clusters, daily LLM narrative | Medium | M each | 🔵 / 🟢 / 🟡 / 🔵 | ML-7a rated Medium because you chose to build it; no research shows it improves decisions |
+| **P2** | **G-12** | Breadth and sector-rotation dashboards, computed from existing prices | Low | S | ⚪ | Descriptive context only |
+| **P2** | **G-13** | More macro series: credit spreads, yield-curve slope, India CPI/IIP | Low | S | ⚪ | Context for the regime view |
+| **P2** | **G-18** | Independent second price source for cross-checks (paid API as validator) | Medium | S–M | 🔵 | Guards against Yahoo breakage; see the pricing comparison |
+| **P2** | **PV-2, PV-3** | Extend the ledger to sentiment, alert/classification precision and report confidence; drift monitor (PSI/KS) | Medium | M each | 🔵 | Needs PV-0 and a hand-labelled sample |
+| **P2** | **TP-0, TP-1** | Training infrastructure (dataset snapshot, splitter, model registry/pointer, shadow mode, promotion/rollback) and scheduled refits for ML-3/ML-4/thresholds | Medium | M; S each | 🔵 | Needs ML-0 and the first learned model |
+| **P3** | **ML-4, ML-6** | Regime model; GBM ranker | Low; Medium | M; L | ⚪; 🟡 | ML-6 is hard-gated by EV §5 and expected to give a small or null result on large caps |
+| **P3** | **TP-2** | GBM quarterly retrain with gate and shadow period | Medium | L | 🟡 | Needs ML-6, EV-0, EV-1, composite v2 |
+| **P3** | **ML-2 clustering, ML-7b–d** | News clustering, per-symbol narration, story summaries, `/ask` | Low | M–L | ⚪ / 🔵 | After ML-2 history exists; `/ask` needs its own ADR |
+| **P3** | **G-11** | India delivery percentage, bulk/block deals, F&O open interest | Low | M | ⚪ | Practitioner evidence only |
+| **P3** | **G-16** | Filing-text analytics (10-K/10-Q changes) with the LLM layer | Low | L | ⚠️ research exists, unverified | After ML-7 is stable |
+| **P3** | **G-17** | Universe expansion to mid/small caps | Medium | L | 🟡 | More effects but costs and data-quality risks; only after G-1 and EV-1 |
+| **P3** | **G-19** | US 13F holdings | Low | M | ⚠️ | 45-day reporting lag |
+
+### 16.3 Recommended sequence
+
+0. **Prerequisites (not new work here):** the power fix and the backup-job fix (tracker §1, AR-11) — nothing below should run on a
+   cluster that is still undervolting.
+1. **P0, in this order:** G-1 → (G-2a, EV-2, G-3 can run in parallel) → EV-0 + ML-0 → EV-1.
+2. **P1:** make the India-fundamentals decision (G-6); run EV-3/4/5/7 through the harness; add EV-9 and test EV-10…13; start storing embeddings.
+3. **P2:** only the signals that passed EV §5 flow into composite v2 (EV-17) with measured confidence (EV-18); add the cheap context items
+   (G-12, G-13) and the ML items in the order above.
+4. **P3:** only if the earlier results justify it.
+
+**Re-rating rule:** after EV-0's first run, re-rate each signal's *value* from measured IC and cost-adjusted spread, and update the
+tracker and this table in the same session.
+
+### 16.4 What this section does not do
+It does not change any signal's acceptance test (EV roadmap §5), the ML gates, or any schema. It adds no code. Items move from
+this table into the tracker (`pending-tasks.md`) as they are scheduled.
+

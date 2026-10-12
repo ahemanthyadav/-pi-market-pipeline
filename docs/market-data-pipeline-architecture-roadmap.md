@@ -72,7 +72,7 @@ state). The earlier "stateless by design" phrasing overstated it.
 ### 2.6 Backup RTO — ✅ RESOLVED (measured, 2026-10-03)
 
 No longer a target: the timed restore drill measured `pg_restore` at **2 seconds**
-for the current 388 KB dump, with row counts verified against live. End-to-end
+for the current 388 KB dump, with row counts verified against live (**stale as of 2026-10-10: dumps are ~165 MB — re-run the drill**). End-to-end
 recovery remains bounded by human steps (<15 min). Re-run the drill quarterly or
 after schema/backup changes (`manifests/timescaledb/restore-drill-job.yaml`).
 

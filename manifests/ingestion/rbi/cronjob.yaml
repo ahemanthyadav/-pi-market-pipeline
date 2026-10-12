@@ -21,11 +21,15 @@ metadata:
   namespace: market-data
 spec:
   schedule: "0 7 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 21600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 2
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure

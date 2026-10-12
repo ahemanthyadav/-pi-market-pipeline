@@ -1,12 +1,18 @@
-# One-shot 1y backfill for the global batch (seeds history for TA/dashboards).
-# Image must be >= v3 (FETCH_PERIOD/BACKFILL support). Run once:
-#   kubectl apply -f backfill-yfinance.yaml
+# One-shot deep backfill for the global batch: everything Yahoo has from
+# FETCH_START onward (29 tickers, ~250k rows from 1985). Image must be >= v5,
+# which commits one calendar year per transaction.
+#   kubectl apply -f backfill-job.yaml
 # Idempotent (same DELETE+INSERT as daily runs) — safe to re-run. Delete the
 # Job object afterwards to keep history tidy.
+# History: 1y at rollout; 5y on 2026-10-10 in ONE transaction (held ~2,900 of the
+# database's ~6,400 lock slots for 26 min — the reason the fetcher now commits
+# per year); 1985 → today on 2026-10-10 after index_prices moved to one-year
+# chunks (schema 01). The Telegram /index card reads 40 years, so an earlier
+# FETCH_START adds rows nothing uses.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: backfill-yfinance-1y
+  name: backfill-yfinance-deep
   namespace: market-data
 spec:
   backoffLimit: 2
@@ -15,7 +21,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: backfill
-          image: local/yfinance-fetcher:v3
+          image: local/yfinance-fetcher:v5
           imagePullPolicy: Never
           env:
             - name: PGHOST
@@ -29,8 +35,8 @@ spec:
                   key: password
             - name: PGDATABASE
               value: postgres
-            - name: FETCH_PERIOD
-              value: 1y
+            - name: FETCH_START
+              value: "1985-01-01"
             - name: BACKFILL
               value: "1"
           resources:

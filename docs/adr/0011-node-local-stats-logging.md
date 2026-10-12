@@ -47,3 +47,12 @@ too, so the Pis' power delivery deserves a physical check.
 - Reimaged host = logger gone; redeploy per ops-manual §7 step 8 pointers.
 - The 2026-10-10 first samples also flagged: pi2's desktop session idling
   RAM on the control-plane node, and root-disk 84% on TX2 (watch, not act).
+
+## Amendment 2026-10-11
+- **The "deployed on all 5 hosts" claim was wrong for cron:** every host had an empty root crontab, so only the first
+  manual sample existed and `stats.csv` was empty after the first logrotate. Cron entry
+  `*/5 * * * * /usr/local/bin/node-stats-log.sh` installed on pi0/pi1/pi2/pi3/TX2 and a 23:10 UTC sample verified on each
+  (`ops-tools/collect-node-stats.sh`). Lesson: "first-sample-verified" is not "scheduled" — verify the second sample.
+- **Header bug:** the script wrote the header only when the file was missing; logrotate leaves an empty file, so every
+  rotated file would lack a header. Test changed from `-f` to `-s` (non-empty), header restored on the four Pi files, rotation
+  case tested. The script now also lives in the repo: `ops-tools/node-stats-log.sh` (the hosts' copy is the same file).

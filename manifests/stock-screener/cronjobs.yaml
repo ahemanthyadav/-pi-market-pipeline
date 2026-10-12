@@ -1,5 +1,5 @@
 # Stock-screener CronJobs (Phases B-G). All use the single toolkit image
-# local/screener:v8 (imagePullPolicy: Never — import on pi1/pi2/pi3 first).
+# local/screener:v9 (imagePullPolicy: Never — import on pi1/pi2/pi3 first).
 # Schedules slot into the existing UTC chain without disturbing it:
 #   Sun 09:00 universe · daily 23:30 prices · Sat 06:00 fundamentals ·
 #   daily 02:00 metrics → 02:15 screener → 02:30 report
@@ -12,17 +12,21 @@ metadata:
   namespace: market-data
 spec:
   schedule: "0 9 * * 0"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 21600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 2
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure
           containers:
             - name: universe
-              image: local/screener:v8
+              image: local/screener:v9
               imagePullPolicy: Never
               command: ["python", "universe_refresh.py"]
               env:
@@ -48,17 +52,21 @@ metadata:
   namespace: market-data
 spec:
   schedule: "30 23 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 2
+      activeDeadlineSeconds: 7200
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure
           containers:
             - name: prices
-              image: local/screener:v8
+              image: local/screener:v9
               imagePullPolicy: Never
               command: ["python", "stock_prices.py"]
               env:
@@ -84,17 +92,21 @@ metadata:
   namespace: market-data
 spec:
   schedule: "0 6 * * 6"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 21600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 1
+      activeDeadlineSeconds: 14400
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure
           containers:
             - name: fundamentals
-              image: local/screener:v8
+              image: local/screener:v9
               imagePullPolicy: Never
               command: ["python", "stock_fundamentals.py"]
               env:
@@ -122,17 +134,21 @@ metadata:
   namespace: market-data
 spec:
   schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 1
+      activeDeadlineSeconds: 1200
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure
           containers:
             - name: metrics
-              image: local/screener:v8
+              image: local/screener:v9
               imagePullPolicy: Never
               command: ["python", "stock_metrics.py"]
               env:
@@ -158,17 +174,21 @@ metadata:
   namespace: market-data
 spec:
   schedule: "15 2 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure
           containers:
             - name: screener
-              image: local/screener:v8
+              image: local/screener:v9
               imagePullPolicy: Never
               command: ["python", "stock_screener.py"]
               env:
@@ -194,17 +214,21 @@ metadata:
   namespace: market-data
 spec:
   schedule: "30 2 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 1
+      activeDeadlineSeconds: 1200
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure
           containers:
             - name: report
-              image: local/screener:v8
+              image: local/screener:v9
               imagePullPolicy: Never
               command: ["python", "stock_report.py"]
               env:

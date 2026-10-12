@@ -33,7 +33,7 @@
 |---|---|---|
 | F11 | Yahoo symbol deaths: `FTSE.MI` → `FTSEMIB.MI` (fixed); `^CNXAUTO`/`^CNXFMCG` stale-dropped; **Nifty 500 has no Yahoo symbol at all** | Documented; 8/8 NSE symbols live via validated set |
 | F12 | NSE FII/DII API returns a **bare list**, not a `{data:…}` envelope | Fixed in `fiidii-fetcher` v2 |
-| F13 | RSS: Economic Times + Business Standard live; **Moneycontrol ×2 + Reuters dead** | WARN-tolerant fetcher; partial by design |
+| F13 | RSS: Moneycontrol ×2 (login-consent wall) + Reuters (host gone) dead — **fixed 2026-10-12** with 4 replacement feeds (LiveMint, BusinessLine, CNBC, MarketWatch) via the CronJob `FEEDS` env override | WARN-tolerant fetcher; source mix changed 10-12 |
 | F14 | **RBI G-Secs/repo rate: no stable machine-readable feed**; DPIIT FDI factsheets are PDFs | RBI = open gap; FDI = watchdog + quarterly manual INSERT (by design) |
 | F15 | Commodities wanted no separate pipeline: GC=F/SI=F/CL=F ride in the yfinance batch | `commodity_prices` stays empty by design |
 | F16 | **ta-compute iterates every `index_prices` ticker over all rows** → intraday data must never enter that table | Hourly candles live in `intraday_prices`; FX hourly in `fx_rates` (nothing computes over it) |

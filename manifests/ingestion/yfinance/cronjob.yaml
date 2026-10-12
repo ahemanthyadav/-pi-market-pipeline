@@ -10,17 +10,21 @@ metadata:
   namespace: market-data
 spec:
   schedule: "30 22 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 2
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 604800
       template:
         spec:
           restartPolicy: OnFailure
           containers:
             - name: fetcher
-              image: local/yfinance-fetcher:v3
+              image: local/yfinance-fetcher:v5
               imagePullPolicy: Never
               env:
                 - name: PGHOST
