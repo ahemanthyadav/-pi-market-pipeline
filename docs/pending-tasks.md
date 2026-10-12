@@ -15,7 +15,10 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 
 ## 1. Immediate (next checkpoint: tomorrow's `/health`)
 
-- [ ] 🔶 **2026-10-10 second wedge during the screener v9 rollout (IN PROGRESS, opened ~13:30 UTC).** Sequence: v9 built on
+- [x] ✅ 2026-10-11 **Node jobs/responsibilities documented** in `node-roles.md` (all Pis + TX2; pinned vs unpinned
+  CronJobs, host cron jobs, blast radius). Live check that day: pi1 **Ready** (telegram-bot Running there), pi2 Ready but
+  **cordoned** (undocumented — find out when/why), all 23 CronJobs still suspended.
+- [ ] 🔶 **Screener v9 rollout (DQ-2/DQ-3 fixes) still NOT done. Status 2026-10-12: all 4 nodes Ready, all CronJobs active, pi1/pi3 back; remaining = import `screener:v9` on pi1 (v9 is on pi3 only), bump the tag, apply, canary `stock-screener`, diff top-50 — gated on pi1's power (imports caused undervolt events). History of the 2026-10-10 second wedge:** Sequence: v9 built on
   TX2 and imported on pi3 (63 s), then pi1's tarball push/import → API `ServiceUnavailable`, pi1 `ctr` EOF; pi1/pi2 SSH
   banner resets with ping alive, pi3 off the network; pi2 + pi3 later came back (~17:41 UTC, "up 0 min"); **pi1 still
   NotReady with no ping at 17:50 UTC — needs a physical power check.** Cause unproven (a 116 MB push + import on
@@ -25,105 +28,34 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   pi1 is back. Live CronJobs still reference `screener:v8`; `screener:v9` exists only in TX2 docker, pi3's containerd and
   tarballs (TX2 `/home/ahytx2/screener-v9.tar.gz`, workstation `/tmp/opencode/`, and a leftover copy in `/home/pi1/`).
   Resume the v9 rollout (DQ-2/DQ-3 fixes) only after: 4 nodes Ready, pi2 calm, power fix accepted.
+  **Update 2026-10-11 ~23:45 UTC (autonomous work session):**
+  - ✅ **`pg-backup` fix (AR-11) applied and canary-proven** — `tests/test-pg-backup.sh` 21/21; live canary
+    `BACKUP-OK marketdata-2026-10-11.dump size=171611578 entries=14935`, atomic rename + `.sha256`, the 0-byte
+    10-10 dump and the 393 KB 10-03 dump pruned. Fresh dump copied to `out/backups/` (sha256 matches). CronJob stays
+    **suspended** (applied manifest kept `suspend=true`).
+  - ✅ 15 stale failed Jobs from the first outage deleted.
+  - 🔴 **pi3 dropped off the network again (~23:42 UTC, no ping, NotReady)** minutes after the backup canary (pg_dump
+    writing ~164 MB to its SSD) plus a 165 MB read — same trigger pattern as the pi1-push wedge. **Power is NOT
+    fixed**; pi1/pi2/pi3 are still on the shared 105 W block. pi1, pi2, TX2, pi0 are up; DB, Telegram bot (pi1) up;
+    Grafana (pinned pi3) and pg-backup (pinned pi3) unavailable until pi3 returns. Needs a physical check/power cycle.
+  - Staged un-suspend **started and rolled back**: `yfinance-fetcher` un-suspended once, its catch-up pod hit
+    `ErrImageNeverPull` on pi1 (see next), then re-suspended. **All 23 CronJobs are suspended again.**
+  - 🔶 **Image gap on pi1:** `yfinance-fetcher:v5` and `nse-fetcher:v4` exist on pi3 but NOT on pi1 (unpinned jobs that
+    schedule on pi1 fail with `ErrImageNeverPull`). Fix = import both on pi1 (or pin to pi3) **before un-suspending**;
+    avoid bulk pushes until the power fix. `screener:v9` is on pi3 only.
+  - ✅ (repo only, **not deployed**) Telegram `stocks.py` `series()` now uses full-year yfinance rows for flow metrics
+    (same DQ-2 flaw as the screener); new test, 96/96 pass. Ships with the next `telegram-digest` image (v7).
+  - Order when pi3 is back and power is fixed: import missing images (pi1) → un-suspend in stages (fetchers → ner/
+    sentiment → ta → screener chain) with `dmesg`/load checks → `screener:v9` import on pi1 + apply + canary + top-50 diff.
 
-- [ ] 🔶 **2026-10-09→10 outage recovery (IN PROGRESS)** — pi2 wedged ~16 h;
-  root cause found by the new stats logger: LIVE undervoltage+throttle on
-  pi2 (0xd0005, 62 °C) — physical PSU/cable check pending. All CronJobs
-  SUSPENDED (etcd-persisted) to stop catchup storms on the single-node
-  control plane; agents failed on pi1/pi3/TX2; DB pod down (data safe, PV
-  Retain). Remaining: power-supply fix (next item — gates everything below) → agents pi3→pi1→TX2 (§8 order) → verify
-  timescaledb Running → unsuspend in dependency order (fetchers →
-  sentiment/ner → ta → screener chain → health) → delete stale Jobs (nse,
-  digest) → refire missed runs (nse, fiidii, ~15× intraday, yfinance,
-  digest). Detail: ops manual §8 (newest subsection); ADR 0011.
-- [ ] 🔶 **Fix the Pi power supplies (PLANNED — owner is replacing them; gates the recovery above)**
-  - **Evidence (2026-10-10):** pi2 live undervolt+throttle (`0xd0005`, 62 °C). Phone-style chargers do
-    not hold: a 5 V 2 A adapter still gave 9 `Undervoltage detected` events in 5.5 min at near-idle
-    load (no thermal cap, load calm, k3s up). pi3 — identical SSD, own supply — stays `0x0`. pi0 shows a
-    chronic `0x50000`; pi1 accumulates events (skill `node-power-health`). pi1 was also unreachable at
-    ~11:54Z (cause unverified — power suspected, not proven). Supplies fail as a class.
-  - **Buy/do:** 5.1 V / 3 A supplies (known-good class) + short (≤ 0.5 m), thick (≥ 20 AWG) micro-USB
-    cables for **pi2 first, then pi1, then pi0**; pi3 keeps its clean supply; keep **one spare**
-    supply+cable set for swap tests. For pi2 power the SSD **separately from the Pi's 5 V rail** (the SSD is the BOOT
-    drive, so keep its data path direct): a powered SSD enclosure, or a separate-power Y-cable /
-    data-only adapter. A hub in the boot path is **unverified on Pi 3 / 3B+** — test on pi3 or a spare
-    first, never first on pi2; bring SSD and Pi up together (rootdelay already covers slow drives). Optional: an inline USB power meter (~$10).
-  - **Method:** the identity-free swap-test ladder (skill `node-power-health` §4): PSU+cable first,
-    then USB-SATA adapter, board last. **Never swap boot SSDs between nodes** (hostname, static IP, k3s
-    certs and cluster state travel with the disk).
-  - **Acceptance:** no live `0x1` and no new `Undervoltage detected` in `dmesg` while load is real (k3s
-    settled, jobs running), **24 h of clean `throttle_hex` in `stats.csv`** — an idle reading proves
-    nothing. Record the verdict per node here and in the ops manual §8.
-  - **Gate:** do not start more agents, unsuspend CronJobs, or refire missed runs while pi2 shows live
-    undervolt; the bursts are the wedge trigger.
-  - **Later (decision, not part of this fix):** one shared regulated 5 V rail with fused branches —
-    architecture review AR-10; needs an enclosed supply and careful mains-side wiring.
-  - Detail: `architecture-review-2026-10-10.md` AR-10; skill `node-power-health`; ADR 0011.
-- [ ] 🔶 **Protect the existing DB backups while the cluster is down** — the newest dump on pi3
-  (`marketdata-2026-10-10.dump`) is **0 bytes** (a failed run); copy the last 2–3 good dumps (~165 MB each) off pi3
-  to the workstation (read-only). pi1, the planned second copy, was unreachable ~11:54Z. Detail: review AR-11;
-  ops manual §9 (known flaws).
-- [x] ✅ **Node-local stats logging** — deployed + first-sample-verified
-  2026-10-10 on pi0/pi1/pi2/pi3/TX2 (ADR 0011): root-cron CSV every 5 min
-  at /var/log/node-stats/stats.csv (load/cpu/mem/swap/temp/throttle-hex/
-  k3s-state/db-procs/disk), logrotate weekly×8, keeps recording while k3s
-  is dead. Puller: `ops-tools/collect-node-stats.sh` (passwords + host aliases
-  resolve from the gitignored local files — no env needed). First catches: pi2 live uv+throttle,
-  pi0 past flags 0x50000, TX2 root disk 84%.
-- [x] ✅ **Verify first full-quality scoring run** — done 2026-10-09, one day late:
-  the run had been failing silently every night since 10-05 — the screener's SP500
-  leg died at the NIFTY→SP500 boundary (pod→DB connection drop; the one script
-  still on the pre-2026-10-04 connection layout). Fixed in image v8 (house pattern
-  + leg-level reconnect-retry) together with the report job's missing-ts-filter
-  bug (it reported the union of all historical top-25s). Canary-validated:
-  **997 scored / 888 eligible / 50 shortlisted; 25+25 reports + digest**.
-  Evidence: screener plan §13 F/G rows; ops manual §8 recurrence note.
-- [x] ✅ **Grafana screener dashboard** — done 2026-10-09, ConfigMap-only per plan:
-  "Stock Screener" (uid `screener`) — per-universe variable, top-25 table,
-  median-composite trend, top-10-by-factor panels; all SQL pre-flighted against
-  live data. Evidence: screener plan §13 Phase H.
-
-## 2. Security & hygiene (this week)
-
-- [x] ✅ **Secrets kept out of git** — done 2026-10-10: single gitignored local
-  store `.secrets.env` (template `.secrets.env.example`); docs/tools carry no
-  values (`@@PW@@` token + `ops-tools/_creds.py`); secret manifests + 
-  `validation/grafana/` gitignored; `.example` secret manifests added; agents denied
-  read of `.secrets.env` in `opencode.jsonc`. Credential rotation is explicitly
-  NOT a priority (owner decision 2026-10-10). Detail: ops manual §10.
-- [ ] 🔶 **Verify the CGNAT claim** — 2026-10-10 measurement: the public IP this
-  LAN egresses with EQUALS the router's WAN IP (docs concluded CGNAT from the
-  opposite). One check from one workstation; confirm on the router's WAN page or
-  from the phone off Wi-Fi. If not CGNAT: "no inbound ports by construction" is
-  false and the stale UDP 51820 forward may be reachable — remove it first. Detail:
-  ops manual §12.9.
-- [ ] 🔶 pi0 → tailnet (remote Pi-hole admin + ad-block DNS on the move).
-  Detail: ops manual §12.6.
-- [ ] 🔶 Remove dead router UDP 51820 port-forward (WireGuard leftover).
-  Detail: roadmap §11.
-
-## 3. Next features (roadmap order)
-
-- [ ] 🔶 **Deploy `nodewatch` on pi0** — out-of-cluster dead-man's switch (would have caught the
-  2026-10-09 outage in ≤5 min). Script + tests done 2026-10-10 (`tests/test-nodewatch.sh`, 9/9); install steps
-  in ops manual §11. Needs the Telegram credentials placed on pi0 (a new secret location — your call).
-
-- [x] ✅ 2026-10-10 **Telegram v3 live** — `telegram-digest`, new
-  `telegram-alerts` (23 CronJobs) and the listener all on
-  `local/telegram-digest:v3` (live tags verified); canary
-  `telegram-alerts-validate` → `ALERTS-OK 3 line(s) sent`. Detail:
-  telegram-bot doc §1a.
-- [ ] 🔶 **Telegram v6 applied, not yet running — pi1 is down** (2026-10-10).
-  Deployment and both CronJobs carry `local/telegram-digest:v6` (live tags
-  verified); the bot pod is Pending because it is pinned to pi1, which has not
-  come back since the ~10:40 power cycle. When pi1 is Ready: confirm the pod
-  starts, then
-  `kubectl -n market-data exec deploy/telegram-bot -- python -c "import bot; print(bot.COMMANDS['nifty']('/nifty'))"`.
-- [ ] 🔶 **Import the new fetcher images on pi1** when it is back:
-  `yfinance-fetcher-v5.tar.gz` and `nse-fetcher-v4.tar.gz` are in
-  `/mnt/tx2-ssd/image-tarballs/` on tx2 and imported on pi3 only. Neither
-  CronJob is pinned, so a run scheduled onto pi1 before the import fails with
-  ErrImageNeverPull.
+- [x] ✅ 2026-10-12 **2026-10-09→10 outage recovery — complete except power acceptance:** all 4 nodes Ready, DB Running, all 23 CronJobs
+  un-suspended (staggered), missed runs refired (fiidii, rbi, news, sentiment, ner, universe-refresh, health) — details in the 10-12 entry
+  below. The root cause (undervoltage) is only *claimed* fixed until the 24 h acceptance in the power item passes.
+- [x] ✅ 2026-10-12 **Telegram v6 running** — bot pod Running on pi1 (`local/telegram-digest:v6`), `COMMANDS['nifty']('/nifty')` returns the
+  card (22,531.65, "12 Oct close"), `telegram-digest` ran in-window and sent. 🔶 The "12 Oct close" is likely a live intraday bar from the
+  04:00 UTC yfinance canary; the `nse-fetcher` run at 11:15 PDT overwrites it (DELETE+INSERT) — spot-check tomorrow.
+- [x] ✅ 2026-10-12 **Import the new fetcher images on pi1** — `yfinance-fetcher-v5` and `nse-fetcher-v4` imported, canaried on pi1, CronJobs
+  active. Side effect: pi1 logged undervolt events during both transfers (power item in §1).
 - [x] ✅ 2026-10-10 **Index long-term reference** (v5): 1/3/5-year averages +
   low/normal/high reading on `/index` `/nifty` `/sensex` `/gold`; index history
   backfilled to 5 years (47,408 rows, no duplicates). Detail: telegram-bot doc
@@ -212,9 +144,11 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 ### Architecture review follow-ups (2026-10-10 — recommendations, none applied)
 
 Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §5 phases.
-- [ ] 🔶 **AR-1 (Phase 0)** CronJob safeguards — `concurrencyPolicy: Forbid`, per-job
-  `startingDeadlineSeconds`, `activeDeadlineSeconds`, `ttlSecondsAfterFinished` (0 of the
-  committed jobs set any today). Edit manifests now; apply only when the cluster is calm.
+- [ ] 🔶 **AR-1 (Phase 0)** CronJob safeguards — **applied 2026-10-12 02:5x UTC to all 23 CronJobs (since un-suspended — live and protecting them)** (22 applied by
+  this session after a `kubectl diff` review showing only the 4 safeguard fields; `pg-backup` was already on the new spec).
+  Live values verified (`concurrencyPolicy Forbid`, `startingDeadlineSeconds`, `activeDeadlineSeconds`, TTL 604800); values +
+  rationale in ops manual §3. Effect on resume: only runs due inside each job's start window fire — no 23-job catch-up storm.
+  Remaining: canary the estimated deadlines (`headline-ner`, `stock-screener`, `stock-report`, Telegram) on their first live runs.
 - [ ] 🔶 **AR-2/AR-3 (Phase 1)** shared job module (DB connect+retry, `write_window()`,
   logging, `main()` wrapper) and a durable `job_runs` table (start/end/rows/status/error).
 - [ ] 🔶 **AR-5 (Phase 1→2)** lockfile for every image, then consolidate ~16 images to ~3 by
@@ -230,11 +164,17 @@ Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §
 - [ ] 🤔 **AR-10 (Phase 3, decisions/hardware)** control-plane `state.db` backup, stronger
   control-plane host, DB-host/GPU-host separation, off-site backups, schedule timezone
   (decide before 2026-11-01, ADR 0002 revisit).
-- [ ] 🔶 **AR-11 (Phase 0)** fix `pg-backup` — dump to temp name, verify (size floor + `pg_restore -l`), atomic
-  `mv`, prune only verified, keep ≥ 7 verified; second-node + off-site copy; > 36 h staleness alert; re-run the
-  restore drill on a ~165 MB dump (docs' 388 KB / 2 s figures are stale). Manifest-only; apply when calm.
-- [ ] 🔶 **AR-12 (Phase 1)** repair/verify the 5-min stats logger (one sample on pi0/pi1/pi3; no cron entry seen
-  on pi0) — the power fix's 24 h acceptance depends on it; install `nodewatch` on pi0; decide the watcher /
+- [ ] 🔶 **AR-11 (Phase 0)** fix `pg-backup` — **applied + canary-validated 2026-10-11 ~23:40 UTC (not by this session — applied
+  by the owner or another session; I only found it)**: live spec carries the new script; pi3 holds `marketdata-2026-10-11.dump`
+  (171 MB) + `.sha256` (`sha256sum -c` OK 2026-10-12), the 0-byte 10-10 file and the 10-03 dump are gone. The CronJob is still
+  suspended. Remaining: un-suspend (§1), second-node + off-site copy (the `.sha256` sidecar is for a checksummed pull), > 36 h
+  staleness alert, restore drill on a real ~170 MB dump (docs' 388 KB / 2 s figures are stale). `tests/test-pg-backup.sh` 21/21.
+- [ ] 🔶 **AR-12 (Phase 1)** repair/verify the 5-min stats logger (one sample on pi0/pi1/pi3; **all five hosts fixed 2026-10-11**: each
+  root crontab was empty — entry `*/5 * * * *` added on pi0/pi1/pi2/pi3/TX2 (all logged at 23:10 UTC), so the 24 h
+  acceptance record runs from ~23:10 UTC 10-11. Second bug found and fixed the same day: the script wrote its CSV header
+  only if the file did not exist, so after each weekly logrotate (empty file left behind) the header was skipped —
+  now `-s` (non-empty); header prepended to the four Pi files; rotation case tested on pi0; the script is now in the
+  repo as `ops-tools/node-stats-log.sh`. pi2 note: 133 MB available + 77 MB swap in use at 23:07 UTC (watch)) — the power fix's 24 h acceptance depends on it; `nodewatch` on pi0 deployed 2026-10-11 (see §3); decide the watcher /
   power-controller host (pi0 vs MCU vs smart plugs; relays normally-closed; external dead-man's switch).
 
 ### Prioritised implementation order (value × effort — `stock-screener-implementation-plan.md` §16)
