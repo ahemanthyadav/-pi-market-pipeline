@@ -150,6 +150,11 @@ enough to read a failed Job's logs). Evidence: on 2026-10-10 `intraday-fetcher` 
 the two Telegram jobs have no clean measured runtime — their values are estimates: if one trips, raise it, no data is lost.
 Applied with `kubectl apply` after a `kubectl diff` review; it did not change `suspend`. With a start deadline set, un-suspending fires only runs due inside the window (no catch-up storm).
 
+| CronJob | Schedule | Image (node-local, Never pull) | Writes to |
+|---|---|---|---|
+| nse-fetcher | 15 11 * * * | local/nse-fetcher:v4 (commits per calendar year) | index_prices (9 Indian indices incl. ^CRSLDX Nifty 500, restored 2026-10-09; history from each index's Yahoo start — Sensex 1997, Nifty 50 2007) |
+| fiidii-fetcher | 0 14 * * * | local/fiidii-fetcher:v2 | capital_flows (FII/DII net) |
+| yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v5 (commits per calendar year) | index_prices (29 tickers — `^RUI` Russell 1000 added 2026-10-10; **history from 1985** backfilled 2026-10-10 for all 38 index tickers: 292,387 rows, 299 chunks — 262 weekly for 2021-10 → 2026-10 plus one-year chunks for everything created since `set_chunk_time_interval('index_prices', '365 days')`; see `yfinance/backfill-job.yaml`) |
 | fx-fetcher | 0 23 * * * | local/fx-fetcher:v1 | fx_rates (10 pairs) |
 | yields-fetcher | 15 23 * * * | local/yields-fetcher:v1 | bond_yields (^TNX/^FVX/^TYX/^IRX) |
 | rates-fetcher | 20 23 * * * | local/rates-fetcher:v1 | interest_rates DFF + bond_yields DGS2/10/30 |
@@ -686,8 +691,13 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
 - Schedule: `30 1 * * *` (01:30 UTC)
 - Runs on pi3 (`nodeSelector: kubernetes.io/hostname=pi3`)
 - Image: `timescale/timescaledb:2.30.1-pg16` (cached, no pull)
-- Runs `pg_dump -h timescaledb -U postgres -d postgres -Fc -f /backups/marketdata-$(date -u +%F).dump`
-- Keeps 7 daily dumps (`ls -t ... | tail -n +8 | xargs -r rm -f`)
+- Runs `pg_dump -Fc` to a temp name, verifies it (size ≥ half the previous dump and ≥ 100 KB, `pg_restore -l` readable
+  with ≥ 100 TOC entries, `index_prices` data present), then atomically `mv`s it to
+  `/backups/marketdata-$(date -u +%F).dump` and writes a `.sha256` sidecar. `concurrencyPolicy: Forbid`.
+- Prunes only readable dumps beyond the newest 7; empty files are always removed; unreadable non-empty files are kept
+  and logged (`WARN: unreadable`). A failed run leaves every existing dump untouched (`BACKUP-FAIL: <reason>`).
+- **Manifest rewritten 2026-10-11 (AR-11); APPLIED + canaried ~23:40 UTC 10-11** (live script verified 2026-10-12; first dump
+  171 MB with sidecar, checksum OK; CronJob still suspended). Test: `bash tests/test-pg-backup.sh` (21 checks, docker + a real dump in `out/backups/`).
 - Writes to `/var/lib/market-data/backups/` on pi3's USB SSD (hostPath, survives pod restarts)
 
 **Known flaws (verified on pi3, 2026-10-10 — review AR-11):**
