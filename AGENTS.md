@@ -65,7 +65,7 @@ Tables: `index_prices`, `fx_rates`, `bond_yields`, `interest_rates`,
 `raw_headlines`, `pipeline_heartbeat`, `ticker_names`, plus the stock-screener
 layer (2026-10-04): `universe_constituents`, `stock_prices`, `stock_fundamentals`,
 `stock_metrics_daily`, `stock_scores`, `stock_reports`, `screening_runs`,
-`job_state`.
+`job_state`; plus the Telegram bot layer (2026-10-12, ADR 0012): `watchlist` (per `chat_id`) and `bot_users`.
 Non-SELECT SQL: propose it first and get approval before running.
 
 ## Analysis work

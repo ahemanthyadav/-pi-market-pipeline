@@ -9,7 +9,8 @@ The same Secret also backs the Grafana Telegram contact point
 (manifests/grafana/alerting.yaml), so the bot is both the digest and the alert
 channel; the token/chat ID stay deployment config, never code.
 
-Env: PGHOST, PGUSER, PGPASSWORD, PGDATABASE, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
+Env: PGHOST, PGUSER, PGPASSWORD, PGDATABASE, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (the owner;
+other users come from the bot_users table — ADR 0012). One personalised message per user.
 Exit 0 only when the Bot API accepts the message (CronJob failure signal).
 """
 
@@ -22,6 +23,7 @@ import psycopg
 import requests
 
 import stocks
+import users
 
 IST = timezone(timedelta(hours=5, minutes=30))
 TELEGRAM_LIMIT = 4096
@@ -91,13 +93,13 @@ def headlines(cur):
     return cur.fetchall()
 
 
-def watchlist(cur):
-    """Compact watchlist lines; [] when the table is empty or missing."""
+def watchlist(cur, chat_id=None):
+    """One user's compact watchlist lines; [] when empty or the table/column is missing."""
     def q(sql, args=()):
         cur.execute(sql, args)
         return cur.fetchall()
     try:
-        rows = q(stocks.WATCH_SQL)
+        rows = q(stocks.WATCH_SQL, (chat_id,))
         if not rows:
             return []
         return stocks.watch_block(rows, stocks.ytd_map(q, [r[0] for r in rows]),
@@ -109,7 +111,9 @@ def watchlist(cur):
         return []
 
 
-def build_message():
+def build_message(chat_id=None):
+    """The digest for one user (their own watchlist); chat_id None = the owner."""
+    chat_id = str(chat_id or os.environ.get("TELEGRAM_CHAT_ID", ""))
     conn = connect()
     with conn.cursor() as cur:
         def q(sql, args=()):
@@ -135,7 +139,7 @@ def build_message():
             )
         )
 
-        watched = watchlist(cur)
+        watched = watchlist(cur, chat_id)
         if watched:
             lines.append("\n<b>Watchlist</b>\n" + "\n".join(watched))
 
@@ -153,9 +157,9 @@ def build_message():
     return text
 
 
-def send(text: str) -> bool:
+def send(text: str, chat=None) -> bool:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
-    chat = os.environ["TELEGRAM_CHAT_ID"]
+    chat = str(chat or os.environ["TELEGRAM_CHAT_ID"])
     try:
         r = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
@@ -169,16 +173,24 @@ def send(text: str) -> bool:
     if r.status_code != 200 or not r.json().get("ok"):
         print(f"ERROR telegram {r.status_code}: {r.text[:200]}", flush=True)
         return False
-    print(f"digest sent to chat {chat} ({len(text)} chars)", flush=True)
+    print(f"digest sent to chat {chat[:3]}*** ({len(text)} chars)", flush=True)
     return True
 
 
 def main() -> int:
-    message = build_message()
-    if not message:
-        print("ERROR: empty digest", flush=True)
-        return 1
-    return 0 if send(message) else 1
+    owner = os.environ["TELEGRAM_CHAT_ID"]
+    conn = connect()
+    try:
+        with conn.cursor() as cur:
+            def q(sql, args=()):
+                cur.execute(sql, args)
+                return cur.fetchall()
+            recipients = users.recipients_for_jobs(q, owner)
+    finally:
+        conn.close()
+    rc = users.deliver(recipients, owner, build_message, send)
+    print(f"DIGEST-DONE recipients={len(recipients)} rc={rc}", flush=True)
+    return rc
 
 
 if __name__ == "__main__":

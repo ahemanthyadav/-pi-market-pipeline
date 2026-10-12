@@ -4,12 +4,15 @@ Long-polling getUpdates loop: CGNAT (F10) makes webhooks impossible, so the
 bot pulls. This is the ONLY getUpdates consumer — Telegram 409s a second
 poller; the digest CronJob and Grafana's contact point only sendMessage.
 
-Single-user security model: only TELEGRAM_CHAT_ID is ever answered. Telegram
-bots are public — anyone who finds @Marketfredbot can message it — so the
-allow-list IS the door. Others are logged and silently ignored.
+Security model (ADR 0012, multi-user since 2026-10-12): the owner (the Secret's
+TELEGRAM_CHAT_ID) plus the active rows of `bot_users` are answered; everyone has their
+OWN watchlist, digest and alerts. Telegram bots are public — anyone who finds
+@Marketfredbot can message it — so the allow-list IS the door. Unknown chats are logged and
+never answered; the owner gets one "access request" notice per chat per day with a
+ready-made /adduser line. Only the owner can /adduser /rmuser /users.
 
-DB access: read-only SELECTs (house rule) with ONE exception — /watch add|rm
-writes the `watchlist` table, which this bot owns (no fetcher touches it).
+DB access: read-only SELECTs (house rule) with TWO exceptions the bot owns — /watch add|rm
+writes `watchlist` (keyed by chat), and the owner's /adduser|/rmuser write `bot_users`.
 Connections open per command and close after — long-idle pod→DB connections
 get dropped (F26), so nothing is held across the sleep between polls. One
 retry per query.
@@ -25,7 +28,7 @@ without replying (a restart must not replay old commands); commands are
 idempotent reads, so at worst a crash re-answers one message.
 
 Env: PGHOST, PGUSER, PGPASSWORD, PGDATABASE, TELEGRAM_BOT_TOKEN,
-TELEGRAM_CHAT_ID. Missing env exits 1 (k3s restarts); Telegram/DB blips are
+TELEGRAM_CHAT_ID (the owner). Missing env exits 1 (k3s restarts); Telegram/DB blips are
 retried with capped backoff and never fatal.
 
 Validate manually:
@@ -42,10 +45,12 @@ import psycopg
 import requests
 
 import stocks
+import users
 from digest import IST, TELEGRAM_LIMIT, build_message
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-ALLOWED = os.environ["TELEGRAM_CHAT_ID"]
+OWNER = os.environ["TELEGRAM_CHAT_ID"]
+ALLOWED = OWNER   # back-compat alias for the single-user name
 API = f"https://api.telegram.org/bot{TOKEN}"
 
 
@@ -92,9 +97,20 @@ def execute(sql: str, args: tuple = ()) -> int:
         conn.close()
 
 
+REGISTRY = users.Registry(OWNER, query)
+REQUESTS = users.AccessRequests()
+
+
 # ---------------------------------------------------------------- commands
 
-def cmd_help(_text: str) -> str:
+def cmd_help(_text: str, chat: str = None) -> str:
+    text = _help_text()
+    if chat is None or REGISTRY.is_owner(chat):
+        text += ("\n/users · /adduser · /rmuser — manage who has access (owner)")
+    return text
+
+
+def _help_text() -> str:
     return (
         "<b>Marketfredbot</b> — read-only commands:\n"
         "/status — pipeline heartbeat freshness\n"
@@ -108,14 +124,14 @@ def cmd_help(_text: str) -> str:
         "/multibagger sp500 — small, fast-growing, high-return candidates\n"
         "/movers — who entered/left the screener top-20\n"
         "/track — how the screener's picks have done\n"
-        "/watch — watchlist + holdings P&amp;L (add/rm)\n"
+        "/watch — YOUR watchlist + holdings P&amp;L (add/rm); private to this chat\n"
         "/world — every index: close, day, 1m, YTD (/world asia)\n"
         "/index nikkei — one index in depth: 1w–1y, 52w range, trend, RSI\n"
         "/fx — USD/INR and the other pairs\n"
         "/macro — gold in INR, yield spreads, FII vs Nifty\n"
-        "/digest — full daily digest on demand\n"
-        "Daily digest: 08:00 IST · change alerts after the screener run · "
-        "Grafana alerts → this chat"
+        "/digest — your daily digest on demand\n"
+        "Daily digest: 08:00 IST · change alerts after the screener run (shared screener "
+        "changes + your own watchlist)"
     )
 
 
@@ -172,8 +188,8 @@ def cmd_scores(_text: str) -> str:
     return stocks.top_text(query, "composite", "NIFTY500", 5)
 
 
-def cmd_digest(_text: str) -> str:
-    return build_message()
+def cmd_digest(_text: str, chat: str = None) -> str:
+    return build_message(chat or OWNER)
 
 
 def _arg(text: str) -> str:
@@ -223,37 +239,74 @@ def cmd_fx(_text: str) -> str:
     return stocks.fx_text(query)
 
 
-def cmd_watch(text: str) -> str:
+def cmd_watch(text: str, chat: str = None) -> str:
+    chat = str(chat or OWNER)          # no chat (runbook one-liners) = the owner
     action, arg, qty, cost, note, problem = stocks.parse_watch(text)
     try:
         if problem:
             return problem
         if action == "list":
-            return stocks.watch_text(query)
+            return stocks.watch_text(query, chat)
         row, problem = stocks.pick_one(query, arg)
         if problem:
             return problem
         symbol = row[0]
         if action == "rm":
-            gone = execute("DELETE FROM watchlist WHERE symbol = %s", (symbol,))
+            gone = execute("DELETE FROM watchlist WHERE chat_id = %s AND symbol = %s",
+                           (chat, symbol))
             return f"Removed {html.escape(symbol)}." if gone else (
                 f"{html.escape(symbol)} was not on the watchlist.")
         # Re-adding keeps an existing position/note unless new values are given.
         execute(
-            "INSERT INTO watchlist (symbol, qty, avg_cost, note) VALUES (%s, %s, %s, %s) "
-            "ON CONFLICT (symbol) DO UPDATE SET "
+            "INSERT INTO watchlist (chat_id, symbol, qty, avg_cost, note) "
+            "VALUES (%s, %s, %s, %s, %s) "
+            "ON CONFLICT (chat_id, symbol) DO UPDATE SET "
             "qty = COALESCE(EXCLUDED.qty, watchlist.qty), "
             "avg_cost = COALESCE(EXCLUDED.avg_cost, watchlist.avg_cost), "
             "note = COALESCE(EXCLUDED.note, watchlist.note)",
-            (symbol, qty, cost, note),
+            (chat, symbol, qty, cost, note),
         )
         held = f" — {qty:g} @ {cost:,.2f}" if qty else ""
         return f"Watching <b>{html.escape(row[1])}</b> ({html.escape(symbol)}){held}."
     except psycopg.Error as exc:
         if stocks.table_missing(exc):
-            return "Watchlist table not created yet (schema-configmap.yaml → schema job)."
+            return ("Watchlist table not ready yet (schema 09 multi-user — "
+                    "schema-configmap.yaml → schema job).")
         raise
 
+
+def cmd_users(_text: str, chat: str = None) -> str:
+    return users.users_text(REGISTRY, query)
+
+
+def cmd_adduser(text: str, chat: str = None) -> str:
+    target, name, problem = users.parse_adduser(text)
+    if problem:
+        return problem
+    try:
+        return users.add_user(execute, REGISTRY, target, name, str(chat or OWNER))
+    except psycopg.Error as exc:
+        if stocks.table_missing(exc):
+            return "bot_users table not created yet (schema 09 — run the schema job)."
+        raise
+
+
+def cmd_rmuser(text: str, chat: str = None) -> str:
+    target, problem = users.parse_rmuser(text)
+    if problem:
+        return problem
+    try:
+        return users.remove_user(execute, REGISTRY, target)
+    except psycopg.Error as exc:
+        if stocks.table_missing(exc):
+            return "bot_users table not created yet (schema 09 — run the schema job)."
+        raise
+
+
+# Commands that need to know WHO is asking get (text, chat); the rest stay (text) so
+# one-liners like COMMANDS['nifty']('/nifty') keep working. ADMIN is owner-only.
+PERSONAL = {"start", "help", "digest", "watch", "users", "adduser", "rmuser"}
+ADMIN = {"users", "adduser", "rmuser"}
 
 COMMANDS = {
     "start": cmd_help,
@@ -279,16 +332,19 @@ COMMANDS = {
     "fx": cmd_fx,
     "usdinr": cmd_fx,
     "watch": cmd_watch,
+    "users": cmd_users,
+    "adduser": cmd_adduser,
+    "rmuser": cmd_rmuser,
 }
 
 
 # ---------------------------------------------------------------- transport
 
-def send(text: str) -> None:
+def send(text: str, chat: str = None) -> None:
     if len(text) > TELEGRAM_LIMIT:
         text = text[: TELEGRAM_LIMIT - 1] + "…"
     r = requests.post(f"{API}/sendMessage",
-                      json={"chat_id": ALLOWED, "text": text, "parse_mode": "HTML"},
+                      json={"chat_id": str(chat or OWNER), "text": text, "parse_mode": "HTML"},
                       timeout=30)
     if r.status_code != 200 or not r.json().get("ok"):
         print(f"ERROR sendMessage {r.status_code}: {r.text[:200]}", flush=True)
@@ -301,10 +357,13 @@ def handle(update: dict) -> None:
     chat = str(msg.get("chat", {}).get("id", ""))
     text = (msg.get("text") or "").strip()
 
-    if chat != ALLOWED:
+    if not REGISTRY.allowed(chat):
         who = (msg.get("from") or {})
-        print(f"IGNORED chat={chat} user={who.get('username') or who.get('id')} "
+        username = who.get("username")
+        print(f"IGNORED chat={chat} user={username or who.get('id')} "
               f"text={text[:40]!r}", flush=True)
+        if text and REQUESTS.should_notify(chat):   # tell the owner once; never answer them
+            send(users.request_notice(chat, username, text), OWNER)
         return
 
     if not text:
@@ -312,14 +371,17 @@ def handle(update: dict) -> None:
     cmd = text.split()[0].lstrip("/").split("@")[0].lower()
     handler = COMMANDS.get(cmd)
     if handler is None:
-        send(f"Unknown command. {chr(10)}" + cmd_help(""))
+        send(f"Unknown command. {chr(10)}" + cmd_help("", chat), chat)
+        return
+    if cmd in ADMIN and not REGISTRY.is_owner(chat):
+        send("That command is for the owner only.", chat)
         return
     try:
-        send(handler(text))
+        send(handler(text, chat) if cmd in PERSONAL else handler(text), chat)
         print(f"answered /{cmd}", flush=True)
     except Exception as exc:  # noqa: BLE001 - one bad query must not kill the loop
         print(f"ERROR /{cmd}: {exc}", flush=True)
-        send("Command failed — see logs (kubectl logs deploy/telegram-bot).")
+        send("Command failed — see logs (kubectl logs deploy/telegram-bot).", chat)
 
 
 def poll_forever() -> None:
@@ -356,7 +418,7 @@ def poll_forever() -> None:
 
 MENU = [
     ("stock", "Price, trend, score, valuation, news — /stock TCS"),
-    ("watch", "Watchlist + holdings P&L (add / rm)"),
+    ("watch", "Your watchlist + holdings P&L (add / rm)"),
     ("top", "Best by factor — /top growth sp500"),
     ("multibagger", "Small, fast-growing, high-return candidates"),
     ("movers", "Entered / left the screener top-20"),
@@ -392,7 +454,8 @@ def register_menu() -> None:
 def main() -> int:
     me = requests.get(f"{API}/getMe", timeout=15).json().get("result", {})
     register_menu()
-    print(f"listening as @{me.get('username')} for chat {ALLOWED[:2]}***", flush=True)
+    print(f"listening as @{me.get('username')} for owner chat {OWNER[:2]}*** "
+          f"+ {len(REGISTRY.members())} member(s)", flush=True)
     poll_forever()
     return 0
 

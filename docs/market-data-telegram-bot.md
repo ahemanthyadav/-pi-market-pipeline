@@ -230,7 +230,7 @@ kubectl logs -n market-data deploy/telegram-bot -f
 # "listening as @Marketfredbot …"   startup OK
 # "drained N backlog update(s)"     the pre-restart queue, skipped by design
 # "answered /status"                a command round-trip (→ phone)
-# "IGNORED chat=…"                  a stranger found the bot — expected; allow-list held
+# "IGNORED chat=…"                  an unknown chat messaged the bot — expected; the owner also gets one access notice
 ```
 - **Restart semantics:** the offset is in-memory; on start the backlog is
   drained without replying, so a restart never replays old commands. A
@@ -272,9 +272,11 @@ Outbound-only, survives CGNAT, no VPS.
 
 - New `bot.py` entrypoint alongside `digest.py`; same base image contents
   (requests + psycopg already in v1) → tag `v2`; still pi1-only.
-- **Security model: single-user.** Only the allow-listed chat id answers;
-  other senders are logged and ignored. Telegram bots are public — anyone
-  who guesses @Marketfredbot can message it; the allow-list is the door.
+- **Security model: owner + members (multi-user since 2026-10-12, ADR 0012; was single-user).** The owner
+  (the Secret's chat id) plus the active `bot_users` rows are answered, each with their OWN watchlist, digest and
+  alerts. Other senders are logged and never answered. Telegram bots are public — anyone who guesses
+  @Marketfredbot can message it; the allow-list is the door. The owner is told once per unknown chat per day, with a
+  ready `/adduser <id> Name` line. See "Managing users" below.
 - Command surface (all read-only SELECTs — house rule):
 
 | Command | Answers from | Notes |
@@ -312,7 +314,7 @@ low|medium|high`).
 ### Icebox (deliberately not now)
 
 - Inline keyboards / alert acks (callback state, heavier parsing).
-- Multi-user allow-list + per-user watchlists — until a second human asks.
+- ~~Multi-user allow-list + per-user watchlists~~ ✅ done 2026-10-12 (ADR 0012). Still open: per-user digest time / alert threshold.
 - Voice notes → whisper → command (fun, zero homelab value).
 
 ## 5. Gotcha index (don't re-pay these)
@@ -321,3 +323,23 @@ F29 digit-typing in env expansion · F30 nonzero relativeTimeRange ·
 F31 receiver-before-route + moved API paths · F32 ConfigMap cache lag — all
 in `market-data-finds-and-projects.md` §1.5; ADR 0009 for the decision
 record; cluster-mutation skill for any apply/restart/import discipline.
+
+### Managing users (2026-10-12, ADR 0012)
+All from the OWNER's own chat with the bot — no Secret edit, no restart:
+
+| Command | Effect |
+|---|---|
+| `/users` | who has access + how many symbols each watches (never their holdings) |
+| `/adduser 123456789 Alice` | give a chat access: own `/watch`, own daily digest, own change alerts |
+| `/rmuser 123456789` | remove access (their watchlist is kept; `/adduser` restores it) |
+
+**Adding a person:** ask them to message `@Marketfredbot` (anything). You get an *Access request* notice containing
+`/adduser <their id> Name` — reply with that line. Then ask them to send `/start` once (Telegram only lets a bot
+message people who have started it). Or get their id from `@userinfobot` and run `/adduser` directly.
+**Isolation:** each chat sees only its own `/watch`, holdings, digest watchlist section and watchlist alerts; market data,
+screener and FX are shared read-only. Members cannot run `/adduser|/rmuser|/users`. A *group* chat can be added but then
+shares one watchlist among its members — prefer private chats. The DB superuser can still read every watchlist (AR-8).
+**Failure behaviour:** a member who blocked the bot only logs a WARN in the digest/alert Jobs; the Jobs fail only when the
+owner's send fails or every send fails. If `bot_users` is missing the bot runs owner-only.
+**Owner id:** the Secret `telegram-bot` key `chat-id` is the owner and must be a *private* chat id (positive). A previous
+workaround pointed it at a group (negative id) — that makes the whole group the owner; don't.

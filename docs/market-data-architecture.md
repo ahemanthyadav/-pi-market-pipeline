@@ -552,8 +552,8 @@ layer (JOINs on ticker/symbol), not in DDL.*
 | ta-compute | 30 0 * * * | local/ta-compute:v1 | technical_indicators |
 | headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (ADR 0010) |
 | rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (IN_* policy rates) + bond_yields (IN_GS_*) |
-| telegram-digest | 0 8 * * * (Asia/Kolkata) | local/telegram-digest:v7 (pinned pi1) | Telegram digest (read-only) |
-| telegram-alerts | 45 2 * * * (node-local) | local/telegram-digest:v7, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only; silent when nothing changed) |
+| telegram-digest | 0 8 * * * (Asia/Kolkata) | local/telegram-digest:v8 (pinned pi1) | Telegram digest (read-only) |
+| telegram-alerts | 45 2 * * * (node-local) | local/telegram-digest:v8, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only; silent when nothing changed) |
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | pi3 SSD dumps |
 | pipeline-health | 45 1 * * * | local/pipeline-health:v4 | pipeline_heartbeat (13 feeds) |
 | intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
@@ -632,7 +632,7 @@ One-shot Jobs (kept as manifests, run on demand): `backfill-yfinance-1y`, `backf
   SELECTs (market snapshot + screener digest), `sendMessage` only.
 - **Two-way listener:** Deployment `telegram-bot` (1×, pinned pi1, same image,
   `args: bot.py`) — the ONLY `getUpdates` consumer (Telegram 409s a second
-  poller; webhooks impossible behind CGNAT). Single-user allow-list; backlog
+  poller; webhooks impossible behind CGNAT). Owner + `bot_users` allow-list (multi-user, ADR 0012); backlog
   drained on start; commands are read-only idempotent SELECTs with a connection
   per query. Commands: `/status /vix /nifty /sensex /gold /fii /scores /digest /help`.
 - **Alert channel:** Grafana alert rules → Telegram contact point (§7).

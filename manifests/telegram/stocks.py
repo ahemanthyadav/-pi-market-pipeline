@@ -185,8 +185,9 @@ def is_fresh(ts, now=None):
 
 
 def table_missing(exc):
-    """watchlist DDL not applied yet — callers degrade instead of crashing."""
-    return exc.__class__.__name__ == "UndefinedTable"
+    """watchlist DDL not applied yet (or the per-user column from schema 09) — callers
+    degrade instead of crashing."""
+    return exc.__class__.__name__ in ("UndefinedTable", "UndefinedColumn")
 
 
 # ---------------------------------------------------------------- indices, FX
@@ -752,6 +753,7 @@ WATCH_SQL = (
     "LEFT JOIN LATERAL (SELECT rank FROM stock_scores ss WHERE ss.symbol = w.symbol "
     "                     AND ss.ts >= now() - interval '15 days' AND ss.eligible "
     "                   ORDER BY ts DESC LIMIT 1) s ON true "
+    "WHERE w.chat_id = %s "      # per-user watchlist (ADR 0012): one parameter, the chat id
     "ORDER BY w.symbol"
 )
 
@@ -823,8 +825,8 @@ def watch_block(rows, ytd=None, notes=True):
     return lines + noted
 
 
-def watch_text(q):
-    rows = q(WATCH_SQL, ())
+def watch_text(q, chat_id=None):
+    rows = q(WATCH_SQL, (chat_id,))
     if not rows:
         return "Watchlist is empty.\n" + WATCH_USAGE
     return "\n".join(["<b>Watchlist</b>"]
@@ -1355,17 +1357,26 @@ def crosses(metric_rows, now=None):
     return out
 
 
-def alert_sections(q, now=None):
-    """Lines for the daily change alert; empty list = nothing worth sending."""
+def alert_common(q, now=None):
+    """Shared change-alert lines (screener entries/exits) — identical for every user."""
     lines = []
-
     for universe in ("NIFTY500", "SP500"):
         result = movers(q, universe)
         if result and is_fresh(result[0], now):
             lines += movers_lines(universe, result, ytd_map(q, [e[0] for e in result[2]]))
+    return lines
 
+
+def alert_sections(q, now=None, chat_id=None):
+    """Lines for one user's daily change alert; empty list = nothing worth sending."""
+    return alert_common(q, now) + alert_watch(q, chat_id, now)
+
+
+def alert_watch(q, chat_id, now=None):
+    """Personal lines: that user's watchlist moves, average crossings and tagged news."""
+    lines = []
     try:
-        watch = q(WATCH_SQL, ())
+        watch = q(WATCH_SQL, (chat_id,))
     except Exception as exc:  # noqa: BLE001 - only the missing-table case is expected
         if not table_missing(exc):
             raise

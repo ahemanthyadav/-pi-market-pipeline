@@ -324,3 +324,27 @@ data:
       note TEXT,
       added_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+  09-multiuser.sql: |
+    -- Multi-user Telegram bot (2026-10-12, ADR 0012). Every user owns a private watchlist;
+    -- access is a table, not a Secret edit. The OWNER is the Secret's chat id and is NOT a row
+    -- here (always allowed). Idempotent; refuses to guess an owner if the watchlist has data.
+    CREATE TABLE IF NOT EXISTS bot_users (
+      chat_id TEXT PRIMARY KEY,         -- Telegram chat id (negative for groups)
+      name TEXT NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT true,
+      added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      added_by TEXT
+    );
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                     WHERE table_schema = 'public' AND table_name = 'watchlist'
+                       AND column_name = 'chat_id') THEN
+        IF EXISTS (SELECT 1 FROM watchlist) THEN
+          RAISE EXCEPTION 'watchlist has rows but no chat_id: assign them to the owner first (ADR 0012)';
+        END IF;
+        ALTER TABLE watchlist DROP CONSTRAINT IF EXISTS watchlist_pkey;
+        ALTER TABLE watchlist ADD COLUMN chat_id TEXT NOT NULL;
+        ALTER TABLE watchlist ADD PRIMARY KEY (chat_id, symbol);
+      END IF;
+    END $$;

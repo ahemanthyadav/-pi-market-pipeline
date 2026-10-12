@@ -26,6 +26,7 @@ jobs:
           python3 tests/test_creds.py
           python3 tests/test_index_fetchers.py
           python3 tests/test_stocks.py
+          python3 tests/test_multiuser.py
           python3 tests/test_stock_fundamentals_fixes.py
       - name: Shell tests
         run: |

@@ -173,8 +173,8 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (7 IN_* policy rates) + bond_yields (5 G-Sec tenors + 3 T-bills) + pipeline_heartbeat self-row 'rbi' |
 | headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (gazetteer extraction over raw_headlines, ADR 0010) |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only (manual INSERT follows) |
-| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v7 (pinned pi1) | Telegram digest (read-only; no DB write) |
-| telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v7, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
+| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v8 (pinned pi1) | Telegram digest (read-only; no DB write) |
+| telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v8, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
 
 ### Always-on / one-shot resources
 
@@ -199,16 +199,23 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
   alerting-provisioning error and the section is all-or-nothing per file —
   a bad alerting.yaml crash-loops the pod (finds F29–F32).
 - Telegram two-way listener (2026-10-09, Tier 2): Deployment `telegram-bot`
-  (1×, pi1), `local/telegram-digest:v7` (since 2026-10-10: stock/watchlist/
+  (1×, pi1), `local/telegram-digest:v8` (since 2026-10-10: stock/watchlist/
   screener/world commands, telegram-bot doc §1a) with `args: bot.py` — the ONLY
   getUpdates consumer (Telegram 409s a second poller; the digest CronJob and
-  Grafana only sendMessage). Single-user: answers only the allow-listed chat,
-  logs+ignores everyone else. Commands: /status /vix /nifty /sensex /gold /fii
+  Grafana only sendMessage). Multi-user (ADR 0012, v8): answers the owner + `bot_users`
+  members, each with their own watchlist/digest/alerts; logs+ignores everyone else (owner gets one access notice per
+  unknown chat per day; `/adduser`, `/rmuser`, `/users` are owner-only — telegram-bot doc "Managing users"). Commands: /status /vix /nifty /sensex /gold /fii
   /scores /digest /help — all read-only SELECTs, connection per query (F26).
   Backlog drained on start; offset in-memory (commands are idempotent).
 - One-shot Jobs (kept as manifests, run on demand): `backfill-*-1y` (history
   seeding), `timescaledb-schema`, `timescaledb-write-test`, `restore-drill`.
 - Intraday (2026-10-03): `intraday-fetcher` hourly at :10 — yfinance 1h×2d
+  **Re-running the schema Job:** after editing `schema-configmap.yaml`, `kubectl apply` it, then run the Job under a NEW name
+  (e.g. `sed '8s/name: timescaledb-schema$/name: schema-<tag>/' manifests/timescaledb/schema-job.yaml | kubectl apply -f -`;
+  replace only line 8 — the ConfigMap reference further down must keep its name). The permission config denies deleting
+  anything named `timescaledb…` (rule 5), so the old Job cannot be deleted and re-created. Schema 09 (multi-user bot) was applied
+  this way on 2026-10-12 as `schema-multiuser-09`; a first attempt (`timescaledb-schema-09`, ConfigMap name rewritten by a too-broad
+  sed) never started and was suspended, not deleted.
   candles; FX → `fx_rates` (hourly rows, coexists with daily), gold/silver/
   oil/DXY → `intraday_prices` (separate hypertable — `index_prices` stays
   pure-daily because ta-compute iterates every ticker over all rows).

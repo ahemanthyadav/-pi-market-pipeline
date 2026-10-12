@@ -2,13 +2,14 @@
 #   CronJob telegram-digest → CMD below (digest.py)
 #   CronJob telegram-alerts → args: ["python", "alerts.py"] (daily change alerts)
 #   Deployment telegram-bot  → args: ["python", "bot.py"] (two-way listener)
-# stocks.py is the shared stock/watchlist/screener view layer (no entrypoint).
+# stocks.py is the shared stock/watchlist/screener view layer (no entrypoint); users.py is the
+# multi-user layer (owner + bot_users members, per-user fan-out — ADR 0012).
 # Same build/distribute pattern (native TX2 docker build, tarball import —
 # pinned node pi1 only, see cronjob.yaml/deployment.yaml):
-#   docker build -t local/telegram-digest:v7 .
-#   docker save local/telegram-digest:v7 | gzip > telegram-digest-v7.tar.gz
+#   docker build -t local/telegram-digest:v8 .
+#   docker save local/telegram-digest:v8 | gzip > telegram-digest-v8.tar.gz
 FROM python:3.12-slim
 WORKDIR /app
 RUN pip install --no-cache-dir "psycopg[binary]" requests
-COPY digest.py bot.py alerts.py stocks.py ./
+COPY digest.py bot.py alerts.py stocks.py users.py ./
 CMD ["python", "digest.py"]

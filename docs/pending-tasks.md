@@ -72,6 +72,19 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 - [x] ✅ 2026-10-12 **News feeds repaired** — diagnosed: Moneycontrol (both feeds) 302-redirect to a login-consent wall for every user-agent, Reuters
   (`feeds.reuters.com`) no longer resolves. Fixed with a `FEEDS` env override in `manifests/ingestion/news/cronjob.yaml` (no image rebuild): kept
   ET + Business Standard, added LiveMint, Hindu BusinessLine (India) and CNBC, MarketWatch (global). Canary: 6/6 feeds parse, 160 headlines, 127 new
+- [x] ✅ **2026-10-12 Telegram multi-user — every user has their own setup (ADR 0012, `telegram-digest:v8`).** Owner = the Secret's chat id; members =
+  `bot_users` rows, managed from the owner's chat with `/adduser <id> Name`, `/rmuser <id>`, `/users` (no Secret edit, no restart). `watchlist` is now keyed
+  `(chat_id, symbol)` — each person's holdings, `/watch`, digest watchlist section and watchlist alerts are private to their chat; digest and alert Jobs fan
+  out one message per user (a member who blocked the bot only logs a WARN). An unknown chat is still never answered, but the owner gets one access notice
+  per chat per day with a ready `/adduser` line. Schema `09-multiuser.sql` applied (watchlist was empty; idempotent; refuses to guess an owner if it has
+  rows; tested against a throwaway Postgres in 4 cases). Verified live in the new pod against the real DB with a throwaway member (cleaned up): stranger
+  silent + owner notified once + stranger `/adduser` blocked; member `/watch` private; member cannot `/adduser`; removed member gets 0 replies; digest and
+  alerts `main()` give each user only their own content. `tests/test_multiuser.py` 38 tests (allow-list and watchlist-scoping mutation-checked); added to CI.
+  **The Secret's `chat-id` is the owner's PRIVATE chat again** (restored from `telegram-bot-prev-chat-id`; it had been pointed at a group, which made the whole
+  group the owner). 🔶 Still to do by the owner: have each person message `@Marketfredbot`, then `/adduser` them from the access notice and ask them to
+  `/start`. Open extension: per-user digest time and alert threshold. Side notes: the schema Job could not be re-run under its own name (delete guard on
+  `timescaledb…`) — ran as `schema-multiuser-09`; `timescaledb-schema-09` (broken first attempt, suspended) and `telegram-bot-prev-chat-id` (rollback copy of the
+  old owner id) remain in the namespace.
   rows. Note the source mix changed (affects sentiment comparability across the 10-12 boundary). The script's `DEFAULT_FEEDS` still lists the dead feeds
   — update it at the next natural rebuild.
 - [x] ✅ 2026-10-12 **Import the new fetcher images on pi1** — `yfinance-fetcher-v5` and `nse-fetcher-v4` imported, canaried on pi1, CronJobs
