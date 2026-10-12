@@ -12,7 +12,7 @@
 # or stored here.
 #
 # Quick looks after pulling:
-#   tail -2 out/node-stats/*.csv                 # freshest sample per node
+#   for f in out/node-stats/*.csv; do tail -n 2 "$f"; done                # freshest sample per node
 #   grep -c ',0x0,' out/node-stats/pi2.csv       # clean-throttle sample count
 # throttle_hex decodes (Pi): bit0 uv-now, bit1 cap-now, bit2 throttle-now,
 #   bit16/17/18/19 = uv/cap/throttle/softtemp occurred since boot. 0x0 = clean.
@@ -32,4 +32,4 @@ python3 ops-tools/getfile.py tx2 ahytx2 \
   /var/log/node-stats/stats.csv "$OUT/tx2.csv"
 
 echo "--- freshest sample per node:"
-tail -1 "$OUT"/*.csv
+for f in "$OUT"/*.csv; do tail -n 1 "$f"; done
