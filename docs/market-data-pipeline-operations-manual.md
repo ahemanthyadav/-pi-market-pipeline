@@ -418,6 +418,8 @@ python3 ops-tools/runcmd.py tx2 ahytx2 'df -h / /mnt/tx2-ssd | tail -2'
 
 # 8. Node stats (ADR 0011) — pull every node's CSV, eyeball the flags:
 bash ops-tools/collect-node-stats.sh && tail -1 out/node-stats/*.csv
+# Power acceptance verdict over a window (exit 0 = PASS; default window starts 2026-10-12T02:59Z):
+bash ops-tools/power-review.sh --since 2026-10-12T02:59:00Z
 # Red flags: throttle_hex != 0x0 on a Pi (power/thermal — bit0/1/2 = uv/
 # cap/throttle NOW, bits 16-19 = since boot), k3s_state != active,
 # temp_c > 70, swap_used_mb climbing, db_procs=0 on tx2 (DB down)
