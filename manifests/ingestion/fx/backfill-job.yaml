@@ -1,0 +1,49 @@
+# One-shot FX history backfill (2025-12-15 → 2026-09-29, 10 pairs) so /fx has a YTD base. Runs on the
+# existing local/fx-fetcher:v1 image with the script mounted from a ConfigMap — no image rebuild:
+#   kubectl -n market-data create configmap fx-backfill --from-file=fx-backfill.py=manifests/ingestion/fx/fx-backfill.py
+#   kubectl apply -f manifests/ingestion/fx/backfill-job.yaml
+# Idempotent (DELETE+INSERT per pair+ts, only before BEFORE_TS) — safe to re-run. Delete the Job and the
+# ConfigMap afterwards. Run history: 2026-10-12.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backfill-fx
+  namespace: market-data
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 604800
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: backfill
+          image: local/fx-fetcher:v1
+          imagePullPolicy: Never
+          command: ["python", "/scripts/fx-backfill.py"]
+          env:
+            - name: PGHOST
+              value: timescaledb.market-data.svc.cluster.local
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: timescaledb-auth
+                  key: password
+            - name: PGDATABASE
+              value: postgres
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 512Mi
+              cpu: 500m
+      volumes:
+        - name: scripts
+          configMap:
+            name: fx-backfill
