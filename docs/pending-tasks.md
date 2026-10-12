@@ -72,7 +72,7 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
     and the **sentiment-drop rule — which was in the repo but had never been applied — is now live**. Evidence and re-tune plan: telegram-bot doc §3.3. Known noise: the
     stale-feed rule is firing (counts `stock_fundamentals` + `stock_scores`) until the data catches up (see the Grafana item below).
   - **Second backup copy refreshed:** `pull-backups.py` pulled `marketdata-2026-10-12.dump` (172 MB, sha256 ok) to `out/backups/`.
-  - **CI:** lint step (`py_compile` every tracked `.py`, `bash -n` every `.sh`, the Python-shebang pre-commit hook) and push triggers for `main`, `feat/**`, `fix/**`.
+  - **CI:** lint step (`py_compile` every tracked `.py`, `bash -n` every `.sh`, the Python-shebang pre-commit hook) and push triggers for `main`, `feat/**`, `fix/**`. First run on that push (#4): green.
   - **New data-quality finding DQ-4** (mixed `stock_prices` timestamp conventions + 4,434 duplicate rows) and evidence for DQ-1 and G-22 — see §1 "Data correctness".
 - [x] ✅ 2026-10-11 **`nodewatch` deployed on pi0** — out-of-cluster dead-man's switch. Script in `/usr/local/bin`,
   `/etc/nodewatch.hosts` + `/etc/nodewatch.secrets` (mode 600, root), root cron `*/5` (log overwritten each run at
@@ -276,7 +276,7 @@ Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §
 - [ ] 🔶 **AR-8 (Phase 1→2)** read-only DB roles for Grafana/bot, writer role for jobs;
   fixture tests for pure job logic (`tests/test_stocks.py` is the model).
 - [ ] 🔶 **AR-9 (Phase 2)** GitHub Actions CI **written 2026-10-12** (`.github/workflows/ci.yml`: docs/manifest drift check, all unit + shell tests,
-  manifest sanity, gitleaks; no secrets; verified step-by-step in a clean venv) — **first GitHub run = the push of 2026-10-12 (result recorded in the maintenance item if checked)**. Lint
+  manifest sanity, gitleaks; no secrets; verified step-by-step in a clean venv) — **has run on GitHub: run #1 failed (nodewatch test needed the local hosts file — fixed in `f3e203d`), #2 and #4 (the push of 2026-10-12, lint included) are green — docs/manifest drift, all unit + shell tests, manifest sanity and the full-history gitleaks scan**. Lint
   (syntax: `py_compile` + `bash -n`) added 2026-10-12 and the workflow now also runs on `feat/**` / `fix/**` pushes. Remaining: a real linter (ruff/shellcheck) and a
   branch/worktree per session so WIP is never committed by the wrong session.
 - [ ] 🔶 **AR-4 (Phase 3)** DB `Guaranteed` QoS + readiness probe, bot liveness (StatefulSet
