@@ -29,6 +29,9 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
     1 event (power-on transient, none live) · pi2 `0x80000`, 0 events (58 °C; soft-temp flag since boot only; 246 MB avail) ·
     pi3 `0x0`, 0 events. **Since then:** pi1 logged undervolt events during bulk image imports (2 for the telegram v7 import, 3 for
     the screener v9 import; node stayed Ready) — it is still sensitive to heavy SSD/IO bursts; avoid bulk transfers to pi1.
+  - **pi3 under the load that wedged it before (2026-10-12 08:30–08:36 UTC):** the first *scheduled* run of the fixed `pg-backup`
+    (`BACKUP-OK marketdata-2026-10-12.dump size=171766332 entries=15102`, `.sha256` sidecar, 6 min) wrote ~170 MB to pi3's SSD and
+    pi3 stayed `0x0` with 0 undervoltage events. On 10-11 the same write coincided with pi3 dropping off the network on the shared charger.
   - **Review = pass/fail:** run **`bash ops-tools/power-review.sh`** (new 2026-10-12; pulls the CSVs and applies the rule: no live
     `throttle_hex` bit `0x1/0x2/0x4`, no new since-boot undervolt bit, no sample gap > 15 min; heat is a WARN, not a power fail;
     exit 0 = PASS). Also compare `dmesg | grep -ci undervoltage` with the baseline. The CronJobs are already running
