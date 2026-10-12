@@ -2,7 +2,7 @@
 name: ci
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/**', 'fix/**']
   pull_request:
 
 permissions:
@@ -29,6 +29,13 @@ jobs:
           tar xzf "gitleaks_${V}_linux_x64.tar.gz" gitleaks
           sudo mv gitleaks /usr/local/bin/
           gitleaks version
+      - name: Lint (syntax)
+        run: |
+          fail=0
+          for f in $(git ls-files '*.py'); do python3 -m py_compile "$f" || fail=1; done
+          for f in $(git ls-files '*.sh'); do bash -n "$f" || fail=1; done
+          python3 -c "import ast,sys; ast.parse(open('.githooks/pre-commit').read())" || fail=1
+          exit $fail
       - name: Docs agree with manifests
         run: python3 ops-tools/workloads.py --check
       - name: Unit tests
