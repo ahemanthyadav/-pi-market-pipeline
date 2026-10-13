@@ -4,7 +4,7 @@
 > the linked docs — this file is the index + status. Maintained per AGENTS.md docs
 > discipline: mark items ✅ with a date (and where the completion is recorded) when
 > done; prune ✅ lines into the relevant doc's history at housekeeping time.
-> **Last reviewed: 2026-10-12 09:50 UTC** (maintenance pass: scheduled runs verified, Grafana alerts retuned and applied, data-quality findings DQ-1/DQ-4/G-22, power review interim = pi1 FAIL; see §1. Previously 2026-10-10: the 2026-10-09→10 outage —
+> **Last reviewed: 2026-10-13 04:55 UTC** (final power review = pi1 FAIL; DQ-4 repaired, CTVA repaired, stale-feed noise fixed; earlier 2026-10-12 maintenance pass: scheduled runs verified, Grafana alerts retuned and applied, data-quality findings DQ-1/DQ-4/G-22, power review interim = pi1 FAIL; see §1. Previously 2026-10-10: the 2026-10-09→10 outage —
 > node-local stats logging deployed per ADR 0011; screener v8 fixes + first
 > full-quality run verified 2026-10-09; Grafana screener dashboard live).
 
@@ -20,7 +20,7 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 > from `a4b9567` + the 2026-10-11/12 sessions. Check `git show a4b9567:docs/pending-tasks.md` if anything else looks missing.
 
 - [ ] 🔶 **Fix the Pi power supplies — IN TEST, acceptance NOT passed** (owner reports all Pis moved to separate power
-  ~2026-10-12 02:30 UTC; before that pi1/pi2/pi3 shared one multiport block). **24 h review due ~02:59 UTC 2026-10-13.**
+  ~2026-10-12 02:30 UTC; before that pi1/pi2/pi3 shared one multiport block). **24 h review run 2026-10-13 03:51 UTC: pi1 FAIL (below).**
   - **Evidence (2026-10-10/11):** pi2 live undervolt+throttle (`0xd0005`, 62 °C) and wedged ~16 h. A 5 V 2 A adapter still gave
     9 `Undervoltage detected` events in 5.5 min at near-idle load. pi1/pi2/pi3 dropped off together while pi0 stayed up; pi2 and
     pi3 logged events within ~0.5 s of each other; pi3 went from clean to ~80–110 events/h from ~11:40 UTC 10-11 (1,364 by
@@ -41,6 +41,10 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
     host-local ≈ 08:22 UTC if PDT — not verified), **pi0/pi2/pi3 = 0**. Live `get_throttled`: pi0 `0x0`, pi1 `0x50000`, pi2 `0x80000`, pi3 `0x0`;
     pi1 load 0.24 at that moment, so its events are not only the import bursts. The remaining ~18 h of the window cannot rescue pi1
     (the rule fails on any live hit); the physical swap test does not need to wait for 02:59 UTC.
+  - **FINAL 24 h REVIEW, 2026-10-12 02:59 → 10-13 03:51 UTC (299 samples/node, no gaps, no node wedged or rebooted): pi0 PASS · pi2 PASS · pi3 PASS · pi1 FAIL — acceptance NOT passed.**
+    pi1: 4 live `0x50005` samples (04:35, 04:50, 09:10 UTC on 10-12; **03:10 UTC on 10-13, at load 0.58**) and **36** `dmesg` undervoltage events since boot (pi0/pi2/pi3: **0** each; pi2 max 56 °C, 2.19 load;
+    pi3 max load 1.83 incl. the 170 MB backup writes). The dedicated supplies fixed pi0/pi2/pi3; pi1 is the open hardware item. Next = physical: swap pi1's PSU + cable (spare set), re-run
+    `bash ops-tools/power-review.sh --since <swap time>` for another 24 h. (The 10-13 pre-migration backup and the DQ-4 rewrite ran on TX2/pi3, not pi1.)
   - **Update 09:46 UTC (82 samples/node): pi0/pi2/pi3 still PASS (pi3 max load 1.83, 0 events); pi1 FAIL with a third live sample `0x50005` at 09:10 UTC —
     at load 0.41, no image transfer running** — and 27 `dmesg` events (was 25 at 08:41). pi1 undervolts at near-idle, so this is its supply/cable
     (or the board), not workload: do the swap test now (spare PSU + cable first). `collect-node-stats.sh` no longer errors (`tail -1` on several files).
@@ -63,6 +67,10 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   - **Later (decision, not part of this fix):** one shared regulated 5 V rail with fused branches — architecture review AR-10;
     needs an enclosed supply and careful mains-side wiring. Detail: `architecture-review-2026-10-10.md` AR-10; skill
     `node-power-health`; ADR 0011.
+- [x] ✅ 2026-10-13 **Fix pass (03:50–04:55 UTC):** final power review (pi1 FAIL — see the power item); **DQ-4 repaired** and **CTVA (DQ-1) repaired** on the live DB (see §1 "Data correctness"); new tools
+  `ops-tools/audit-price-adjustments.py` and `ops-tools/sql/2026-10-13-stock-prices-normalise-ts.sql`; stale-feed alert no longer counts `stock_fundamentals` until 10-18; overnight health re-verified (all
+  23 CronJobs active; nse-fetcher 18:15, rbi 14:00, fiidii 21:00, telegram-digest 02:30 (`DIGEST-DONE recipients=3`) all Completed; the 10-12 Nifty close replaced the intraday bar). Left alone on purpose:
+  anything needing an image rebuild/import (pi1 is still the undervolting node), the physical/owner items, and the large roadmap work.
 - [x] ✅ 2026-10-12 **Maintenance pass (09:00–09:50 UTC) — what was verified, changed, found:**
   - **First scheduled runs verified:** `stock-metrics` 09:00 Completed (3 m 27 s) · `stock-screener` 09:15 `SCREENER-OK scored=997 eligible=884 shortlisted=50`
     (on pi3; no duplicate score rows; `stock_scores` now 10-12) · `stock-report` 09:30 `REPORT-OK reports=50 digest=yes` · **`telegram-alerts` 09:45 — its first
@@ -153,8 +161,7 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   un-suspended (staggered), missed runs refired (fiidii, rbi, news, sentiment, ner, universe-refresh, health) — details in the 10-12 entry
   below. The root cause (undervoltage) is only *claimed* fixed until the 24 h acceptance in the power item passes.
 - [x] ✅ 2026-10-12 **Telegram v6 running** — bot pod Running on pi1 (`local/telegram-digest:v6`), `COMMANDS['nifty']('/nifty')` returns the
-  card (22,531.65, "12 Oct close"), `telegram-digest` ran in-window and sent. 🔶 The "12 Oct close" is likely a live intraday bar from the
-  04:00 UTC yfinance canary; the `nse-fetcher` run at 11:15 PDT overwrites it (DELETE+INSERT) — spot-check tomorrow.
+  card (22,531.65, "12 Oct close"), `telegram-digest` ran in-window and sent. ✅ Spot-checked 2026-10-13: the `nse-fetcher` run overwrote the intraday bar — `^NSEI` 10-12 is now 22,363.35 (was 22,531.65).
 - [x] ✅ 2026-10-12 **News feeds repaired** — diagnosed: Moneycontrol (both feeds) 302-redirect to a login-consent wall for every user-agent, Reuters
   (`feeds.reuters.com`) no longer resolves. Fixed with a `FEEDS` env override in `manifests/ingestion/news/cronjob.yaml` (no image rebuild): kept
   ET + Business Standard, added LiveMint, Hindu BusinessLine (India) and CNBC, MarketWatch (global). Canary: 6/6 feeds parse, 160 headlines, 127 new
@@ -209,7 +216,7 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 - [ ] 🔶 **Grafana alerting tuning** — Telegram contact point + policy tree +
   rules deployed AND live-fire-validated 2026-10-09 (FII rule fired on real data: −12,944 Rs cr).
   **2026-10-12: retuned and applied — VIX 30, FII −5000, sentiment-drop rule now live (4 rules, health ok).** Remaining: re-tune FII/sentiment at ~60 days of
-  history (only 8 FII days and ~2 weeks of sentiment exist); and the **stale-feed noise** — the rule counts every `fresh=false` heartbeat row, so it fires while
+  history (only 8 FII days and ~2 weeks of sentiment exist); and the **stale-feed noise** (*partly fixed 2026-10-13: the rule now excludes `stock_fundamentals` until 2026-10-18 09:00 UTC — a self-expiring clause, remove it after the 10-17 run proves out; `stock_scores` still shows until the 08:45 UTC health run today*) — the rule counts every `fresh=false` heartbeat row, so it fired while
   `stock_fundamentals` (stale until the Sat 10-17 pass + the next health run 10-18) and `stock_scores` (until 10-13 08:45 UTC) are stale; consider a per-feed
   exclusion or a Grafana silence for `stock_fundamentals` until then (not applied — a true alert, owner's call).
   Detail: findings Tier 1 #1; architecture §12.4; ADR 0009.
@@ -333,18 +340,21 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   on the wrong scale. **MRNA (+177 % on 08-19) and HEGAM.NS (−63 %) are not adjustment errors**: Yahoo shows the same jumps (MRNA volume ×40 — a real event; HEGAM.NS has
   no split flag, so a demerger/real drop) — they must not be "corrected". Design hint for the fix: the daily job should read Yahoo's `Stock Splits` column and re-backfill
   a symbol when it is non-zero in the refresh window; a > 40 % move *without* a split flag is a review item, not an auto-fix.
-- [ ] 🔶 **P0 · DQ-4 `stock_prices` mixes timestamp conventions and holds 4,434 duplicate rows (found 2026-10-12, verified on the live DB).** The pre-10-02 history was written with
-  exchange-local midnight (US `04:00`/`05:00` UTC, NSE `18:30` UTC *of the previous calendar day*) — **6,324,536 of 6,343,427 rows (99.7 %)** — while the rows written since ~09-28
-  are `00:00` UTC on the trade date. Consequences: (a) **4,434 duplicate symbol-days across 987 symbols, 2026-09-28 → 10-02** (same trade stored twice; the unique index is on
-  `(symbol, ts)` so it cannot see them) — row-count lookbacks in `stock_metrics.py` (`iloc[-1-lag]`, `LIMIT BARS`) are shortened by up to 5 bars for those symbols, and duplicate
-  days add zero-return observations to volatility; (b) `ts::date` of every old NSE row is **one day early** (Monday's bar sits on Sunday — e.g. HEGAM.NS's 09-07 bar is
-  stored 09-06), which breaks date joins and the monthly buckets EV-0 will use; (c) the Nifty 500 bar dated today is a **partial intraday bar** (the 06:30 UTC run fires while NSE is
-  open) — it is overwritten by the next run, harmless. **Proposed repair — needs approval, NOT run** (non-SELECT on the live DB; fresh verified dumps exist, 10-12 08:30 UTC, on pi3 and
-  `out/backups/`): step 1, delete the 4,434 old-convention duplicates (keep the `00:00` row): `DELETE FROM stock_prices o WHERE o.ts >= '2026-09-27' AND extract(hour FROM o.ts) <> 0
-  AND EXISTS (SELECT 1 FROM stock_prices n WHERE n.symbol = o.symbol AND extract(hour FROM n.ts) = 0 AND n.ts >= '2026-09-27' AND n.ts::date = CASE WHEN o.symbol LIKE '%.NS'
-  THEN (o.ts + interval '6 hours')::date ELSE o.ts::date END);` — the SELECT form of exactly this predicate returned 4,434 rows / 987 symbols; step 2 (later, maintenance window): normalise the
-  6.3 M old rows to `00:00` UTC on the trade date (heavy: 3,381 chunks, rows cross chunk boundaries — batch per year, off-peak) or add a `trade_date` expression every reader uses;
-  step 3: make the writer set `ts` explicitly to the trade date at `00:00` UTC so the convention cannot drift again. Interacts with DQ-1 (re-backfills must use the same convention).
+  **Audit + repair 2026-10-13:** new `ops-tools/audit-price-adjustments.py` compared DB vs Yahoo closes at three anchors (2025-06, 2019-01, 2010-01) for the whole universe — **2,474 comparisons,
+  no Yahoo batch unanswered; exactly one mismatch: CTVA (ratio 6.665 ≈ the 6.66 split)**. `emit-repair CTVA` generated SQL from Yahoo's current series (1,856 rows), rehearsed locally, and applied live in one
+  transaction: CTVA is now continuous (11.65 → 12.57 → 11.92 around the spin-off; max close 14.45, was 90.51). **Remaining (code, needs a rebuild — keep the pi1 import caveat):** make the daily job detect a
+  non-zero `Stock Splits` in its refresh window and re-backfill that symbol, add `adj_close` + a `corporate_actions` table (additive schema), and until then re-run the audit weekly
+  (`PSQL_CMD=… python3 ops-tools/audit-price-adjustments.py audit`; add `--tol` to tune). Dividend (total-return) effects are still omitted.
+- [x] ✅ 2026-10-13 **P0 · DQ-4 `stock_prices` timestamp conventions + 4,434 duplicate rows — REPAIRED.** Found 2026-10-12: pre-10-02 history was stamped with exchange-local
+  midnight (US `04:00`/`05:00` UTC, NSE `18:30` UTC of the *previous* day — 99.7 % of the 6.34 M rows) while newer rows are `00:00` UTC on the trade date; the overlap left 4,434 duplicate
+  symbol-days (987 symbols, 09-28 → 10-02) and made every old NSE `ts::date` one day early (e.g. HEGAM.NS's 09-07 bar stored 09-06). **Fix (approved by the owner's "fix all that can be done"):**
+  `ops-tools/sql/2026-10-13-stock-prices-normalise-ts.sql` — step 1 deleted the 4,434 duplicates, step 2 rewrote 6,320,102 rows (987 symbols, per-symbol transactions, each verified inserted == deleted)
+  to `00:00` UTC of the trade date (`date_trunc('day', ts + 6 h)`). **Process:** fresh verified dump first (`marketdata-2026-10-13.dump`, 04:06 UTC, pulled to `out/backups/`); rehearsed on a local
+  restore of the 10-12 dump (5.5 min, counts and dates verified); live run 04:08→04:43 UTC on the TX2 DB (~35 min, DB pod peaked 1.75 GiB of 2, no failures, nodes stayed Ready), then autovacuum
+  cleaned up for ~10 min (a `count(*)` during that time was slow — cancelled). **Verified live:** 6,338,993 rows = 6,343,427 − 4,434; **0** non-midnight rows; 0 duplicate trade days; HEGAM.NS 09-07 = 272.20
+  (matches Yahoo). **Step 3 (writer change) turned out unnecessary:** the current daily writer already produces `00:00` UTC rows (every row since 10-05 is), so the convention cannot drift back. Readers
+  (`stock_metrics` row-count lookbacks) are now consistent; tomorrow's `stock-metrics` run is the first to score on the repaired series. Note: the Nifty 500 bar for "today" is a partial intraday bar until the
+  next run overwrites it — harmless. Rollback if ever needed: restore from the pre-migration dump (no inverse UPDATE exists).
 - [ ] 🔶 **P0 · DQ-2 fundamentals period + point-in-time errors** (verified 2026-10-10, live DB; design + DDL in
   `data-foundations-schema-draft-2026-10-10.md`). (a) `edgar_facts()` ignores period length, so quarterly rows hold
   year-to-date values (MSFT net income 27.75 → 66.21 → 97.98 → 133.75 bn across Sep/Dec/Mar/Jun) and

@@ -2,7 +2,7 @@
 
 > **Purpose:** one place that answers "what does each machine do, what breaks if it dies, and what must I
 > never do to it". Detail stays in the linked docs; this file is the index per node.
-> **Last verified: 2026-10-12 09:50 UTC** (live `kubectl`, DB queries, `power-review.sh` and per-Pi SSH `dmesg`/`vcgencmd`;
+> **Last verified: 2026-10-13 04:55 UTC** (live `kubectl`, DB queries, `power-review.sh` and per-Pi SSH `dmesg`/`vcgencmd`;
 > TX2 fixed-config facts are from the ops manual and were not re-checked today).
 > No IP addresses here (AGENTS.md rule 8): node names only; real values live in the gitignored `.hosts.env`.
 
@@ -40,10 +40,10 @@
   pi3 (verified with `ctr images ls` 2026-10-12 08:22 UTC) — and since then most floating jobs run here (§3.1).
 - **Host jobs:** node-stats logger — root cron added 2026-10-11 (the crontab was empty; AR-12).
 - **Power (2026-10-12):** the only Pi that **fails** the power review — live undervolt + throttle (`0x50005`) at 04:35 and
-  04:50 UTC under image-import load (CPU 58–73 %), even after the move to separate supplies. Re-checked 08:41 UTC:
-  `power-review.sh` → pi0/pi2/pi3 PASS, **pi1 FAIL** (same 2 samples); `dmesg` shows **25** (08:41 UTC; **27** by 09:46) undervoltage events since its boot
+  04:50 UTC under image-import load (CPU 58–73 %), even after the move to separate supplies. **Final 24 h review 2026-10-13: FAIL** (pi0/pi2/pi3 PASS). Re-checked 08:41 UTC 10-12:
+  `power-review.sh` → pi0/pi2/pi3 PASS, **pi1 FAIL** (same 2 samples); `dmesg` shows **36** undervoltage events by 2026-10-13 03:52 UTC (25 at 08:41 UTC 10-12) since its boot
   (~02:55 UTC, ~5.7 h) against **0** on pi0/pi2/pi3, the last stamped 01:22 host-local (≈ 08:22 UTC if the host clock is PDT — not
-  verified) — events continued well after the image imports, and a third live sample (`0x50005`, 09:10 UTC) came at **load 0.41 with no transfer running** — so it is not workload: its supply/cable (or board) is at fault. Suspect its own supply/cable. No bulk imports/transfers to it until the
+  verified) — events continued well after the image imports, and a third and fourth live sample (`0x50005`, 09:10 UTC 10-12 and 03:10 UTC 10-13) came at **load 0.4–0.6 with no transfer running** — so it is not workload: its supply/cable (or board) is at fault. Suspect its own supply/cable. No bulk imports/transfers to it until the
   swap-test ladder is done (tracker §1).
 - **Also holds:** a leftover `screener:v9` tarball in the SSH user's home (tracker §1). Planned second copy of DB dumps (AR-11) — not done.
 - **Watch:** accumulates undervolt events; was NotReady during the 2026-10-10 wedge. Agent runs with

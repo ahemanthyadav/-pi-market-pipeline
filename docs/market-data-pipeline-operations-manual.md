@@ -231,7 +231,7 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | FRED (DFF, DGS2/10/30) | fredapi + key in Secret | ✅ live | key verified 2026-10-03 (DFF 3.88) |
 | News RSS | feedparser (6 feeds: ET, BS, LiveMint, BusinessLine, CNBC, MarketWatch) | ✅ live 2026-10-12 | Moneycontrol ×2 dead (302 to a login-consent wall for every user-agent) and Reuters dead (`feeds.reuters.com` no longer resolves) — replaced via the CronJob's `FEEDS` env override, no image rebuild; the script's `DEFAULT_FEEDS` is stale until the next rebuild |
 | NSE FII/DII | fiidiiTradeReact JSON + session | ✅ live | API returns bare list, not `{data:…}` envelope |
-| Stock prices/fundamentals (screener layer) | yfinance per-universe + EDGAR + yfinance stmts | ✅ live (2026-10-09) | Yahoo pre-open "today" bars (partial OHLC, ~0 volume) land for a handful of tickers each run; self-healing — the next run DELETE+INSERTs the final bar, but same-day metrics/scores can key to the partial bar. `DUMMYHEG.NS` dead (WARN-tolerant). |
+| Stock prices/fundamentals (screener layer) | yfinance per-universe + EDGAR + yfinance stmts | ✅ live (2026-10-09) | **`stock_prices.ts` = 00:00 UTC on the trade date for EVERY row (normalised 2026-10-13, DQ-4)**; Yahoo back-adjusts splits/spin-offs but we refresh only 5 days — audit with `ops-tools/audit-price-adjustments.py` (CTVA repaired 2026-10-13); Yahoo pre-open "today" bars (partial OHLC, ~0 volume) land for a handful of tickers each run; self-healing — the next run DELETE+INSERTs the final bar, but same-day metrics/scores can key to the partial bar. `DUMMYHEG.NS` dead (WARN-tolerant). |
 | RBI/G-Secs | official RBI mobile "Current Rates" widget (lxml scrape) | ✅ live (2026-10-09, `rbi-fetcher`) | benchmark SECURITY names rotate — matched by maturity-year→tenor bucket; page hides a stale date in an HTML comment (lxml text_content drops it); values carry '#'/'*' markers |
 | Headline intelligence | gazetteer extraction over raw_headlines (`headline-ner`, ADR 0010) | ✅ live (2026-10-09) | deterministic ticker_names matching; common-word first-tokens stoplisted (measured FPs: "live/target/realty"); 16-event keyword taxonomy; events link the single company mentioned |
 | FDI monthly | watch + manual INSERT | 🔶 reporter only | DPIIT PDFs; 5-min quarterly task (template in job log) |
@@ -444,18 +444,18 @@ kubectl -n market-data port-forward svc/grafana 3000:3000
 
 ## 8. Failure recovery runbook (copy-paste commands)
 
-### Power acceptance trial (started 2026-10-12 02:59 UTC) — interim verdicts
+### Power acceptance trial (2026-10-12 02:59 → 10-13 03:51 UTC) — FINAL: pi0/pi2/pi3 PASS, pi1 FAIL
 Rule and tool: `bash ops-tools/power-review.sh` (no live `throttle_hex` bit `0x1/0x2/0x4`, no new since-boot undervolt bit, no sample
-gap > 15 min; heat is a WARN). Final review due ~02:59 UTC 2026-10-13; record the final verdict here and in `pending-tasks.md` §1.
+gap > 15 min; heat is a WARN). Final 24 h review run 2026-10-13 03:51 UTC (299 samples per node, no gaps); verdict also in `pending-tasks.md` §1.
 
-| Node | Interim (02:59→09:46 UTC, 82 samples) | `dmesg` undervoltage events (since boot) | Note |
+| Node | Final (02:59→03:51 UTC next day, 299 samples) | `dmesg` undervoltage events (since boot) | Note |
 |---|---|---|---|
-| pi0 | PASS (max 36 °C, load 1.13) | 0 | `0x0` |
-| pi1 | **FAIL** — 3 live samples `0x50005` (04:35, 04:50, **09:10 UTC at load 0.41**) | **27** at 09:46 (25 at 08:41) | the first two during image imports; the third at near-idle with no transfer → its own supply/cable (or board) |
-| pi2 | PASS (max 56 °C, load 1.94) | 0 | `0x80000` = heat since boot only |
+| pi0 | PASS (max 38 °C, load 1.13) | 0 | `0x0` |
+| pi1 | **FAIL** — 4 live samples `0x50005` (04:35, 04:50, 09:10 UTC on 10-12; **03:10 UTC 10-13 at load 0.58**) | **36** (up ~1 day) | the first two during image imports; the others at near-idle with no transfer → its own supply/cable (or board) |
+| pi2 | PASS (max 56 °C, load 2.19) | 0 | `0x80000` = heat since boot only |
 | pi3 | PASS (max 52 °C, load 1.83) | 0 | held through the 170 MB `pg-backup` write at 08:30 UTC |
 
-Next if pi1 still fails at the 24 h mark: swap-test ladder on pi1 (spare PSU + cable first; skill `node-power-health` §4), no bulk
+pi1 failed: swap-test ladder on pi1 (spare PSU + cable first; skill `node-power-health` §4), no bulk
 imports/transfers to pi1 meanwhile. Never swap boot SSDs between nodes.
 
 ### pi2 wedged ~16 h + live undervoltage found (2026-10-09→10) — full post-mortem
