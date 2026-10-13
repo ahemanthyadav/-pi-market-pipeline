@@ -22,7 +22,8 @@ skill); never commit credentials or IPs (rules 7–8; run the audit before any p
    re-verification steps.
 4. **Data invariants:** fetchers DELETE+INSERT only their own (key, ts) rows —
    re-runs must be idempotent, never duplicate. `index_prices` stays pure-daily
-   (intraday goes to `intraday_prices`). Timestamps are UTC.
+   (intraday goes to `intraday_prices`). Timestamps are UTC. `stock_prices.ts` is
+   `00:00 UTC` on the trade date for every row (ADR 0013) — a new writer or backfill must keep it.
 5. **PV `timescaledb-tx2-ssd` is Retain** — deleting the PVC does not delete the
    data on sda4, but never delete the `timescaledb` StatefulSet/PVC/PV casually.
    (The permission config denies it anyway.)

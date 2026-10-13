@@ -700,6 +700,9 @@ kubectl logs -n market-data job/restore-drill --tail=5
 #   the 13th differs by exactly the 3 rows universe-refresh added after the dump. Procedure: create DB → CREATE EXTENSION
 #   timescaledb → SELECT timescaledb_pre_restore() → pg_restore (SERIAL — `-j` fails on the catalog foreign keys) →
 #   SELECT timescaledb_post_restore(). The in-cluster restore-drill-job.yaml is unchanged and still the quarterly check.
+# Pre-migration dump pattern (used 2026-10-13 before the DQ-4 rewrite): `kubectl -n market-data create job pg-backup-premig-<tag> --from=cronjob/pg-backup`
+#   (same script, same-day file name — the scheduled run overwrites it atomically, so pull a copy first; its Job is TTL-cleaned after 7 days).
+#   The restore drill was NOT re-run after that data rewrite (no schema change); re-run it at the next quarterly slot.
 # Second copy: python3 ops-tools/pull-backups.py   (checksummed pull to out/backups; exit 2 if the newest verified dump is > 36 h old)
 # Re-run quarterly, or after any schema/backup change.
 ```

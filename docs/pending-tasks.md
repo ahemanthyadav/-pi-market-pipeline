@@ -352,7 +352,7 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   to `00:00` UTC of the trade date (`date_trunc('day', ts + 6 h)`). **Process:** fresh verified dump first (`marketdata-2026-10-13.dump`, 04:06 UTC, pulled to `out/backups/`); rehearsed on a local
   restore of the 10-12 dump (5.5 min, counts and dates verified); live run 04:08→04:43 UTC on the TX2 DB (~35 min, DB pod peaked 1.75 GiB of 2, no failures, nodes stayed Ready), then autovacuum
   cleaned up for ~10 min (a `count(*)` during that time was slow — cancelled). **Verified live:** 6,338,993 rows = 6,343,427 − 4,434; **0** non-midnight rows; 0 duplicate trade days; HEGAM.NS 09-07 = 272.20
-  (matches Yahoo). **Step 3 (writer change) turned out unnecessary:** the current daily writer already produces `00:00` UTC rows (every row since 10-05 is), so the convention cannot drift back. Readers
+  (matches Yahoo). **Decision recorded as ADR 0013.** **Step 3 (writer change) turned out unnecessary:** the current daily writer already produces `00:00` UTC rows (every row since 10-05 is), so the convention cannot drift back. Readers
   (`stock_metrics` row-count lookbacks) are now consistent; tomorrow's `stock-metrics` run is the first to score on the repaired series. Note: the Nifty 500 bar for "today" is a partial intraday bar until the
   next run overwrites it — harmless. Rollback if ever needed: restore from the pre-migration dump (no inverse UPDATE exists).
 - [ ] 🔶 **P0 · DQ-2 fundamentals period + point-in-time errors** (verified 2026-10-10, live DB; design + DDL in
@@ -476,6 +476,8 @@ practice · ⚪ unproven here · ⚠️ citation not verified.
 ## 5. Recurring (never "done" — calendar items)
 
 - [ ] 🔄 Daily: `/health` checklist (ops manual §7). Automatic: 23 CronJobs.
+- [ ] 🔄 Weekly (until the daily split detection ships — DQ-1): `PSQL_CMD=… python3 ops-tools/audit-price-adjustments.py audit`; repair any mismatch with `emit-repair <SYM>`
+  (reviewed SQL, one transaction per symbol). Last run 2026-10-13: only CTVA, repaired.
 - [ ] 🔄 Monthly (1st): fdi-watch logs DPIIT links → 5-min manual INSERT.
   Detail: ops manual §11.
 - [ ] 🔄 Quarterly: timed restore drill (`restore-drill-job.yaml`), after any
