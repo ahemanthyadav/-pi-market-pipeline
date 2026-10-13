@@ -94,7 +94,7 @@ data:
                   editorMode: code
                   format: table
                   rawQuery: true
-                  rawSql: "SELECT count(*) AS value FROM pipeline_heartbeat WHERE fresh = false"
+                  rawSql: "SELECT count(*) AS value FROM pipeline_heartbeat WHERE fresh = false AND NOT (feed = 'stock_fundamentals' AND now() < timestamptz '2026-10-18 09:00+00')"
                   refId: A
               - refId: B
                 relativeTimeRange:
@@ -126,7 +126,7 @@ data:
                   type: threshold
             annotations:
               summary: "Stale feeds: {{ $values.B }}"
-              description: "One or more feeds report fresh=false in pipeline_heartbeat. Run /health; runbook is ops manual §8."
+              description: "One or more feeds report fresh=false in pipeline_heartbeat. Run /health; runbook is ops manual §8. stock_fundamentals is excluded until 2026-10-18 09:00 UTC (its weekly pass was a no-op on 10-10; the next full pass is Sat 10-17) — delete that clause from the rule after the 10-17 run proves out."
             labels:
               severity: warning
           - uid: vix-spike
