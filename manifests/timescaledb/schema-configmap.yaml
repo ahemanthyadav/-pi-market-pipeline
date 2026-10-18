@@ -275,6 +275,95 @@ data:
       last_key TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+  06b-corporate-actions.sql: |
+    -- DQ-1 (2026-10-17): adjusted close + corporate actions tracking.
+    -- Yahoo's raw Close is split-adjusted but NOT dividend-adjusted; Adj Close is both.
+    -- stock_prices previously dropped Adj Close; now we store it for correct returns.
+    ALTER TABLE IF EXISTS stock_prices ADD COLUMN IF NOT EXISTS adj_close DOUBLE PRECISION;
+
+    -- Corporate actions log: splits, spin-offs, bonuses, dividends.
+    -- One row per action per symbol; used to detect when backfilled history
+    -- needs re-scaling (DQ-1 fix: re-backfill when Stock Splits != 0 in refresh window).
+    CREATE TABLE IF NOT EXISTS corporate_actions (
+      symbol TEXT NOT NULL,
+      ts TIMESTAMPTZ NOT NULL,            -- action / ex-date
+      action_type TEXT NOT NULL,          -- 'split' | 'spinoff' | 'bonus' | 'dividend'
+      ratio DOUBLE PRECISION,             -- split/spin-off ratio (e.g. 6.66 for 1:6.66)
+      amount DOUBLE PRECISION,            -- dividend / bonus amount per share
+      source TEXT NOT NULL DEFAULT 'yfinance',
+      PRIMARY KEY (symbol, ts, action_type)
+    );
+  06c-data-foundations.sql: |
+    -- DQ-2 / G-1 / EV-1 / EV-2 (2026-10-17): data foundations schema (additive, idempotent).
+    -- See docs/data-foundations-schema-draft-2026-10-10.md §2.
+
+    -- Point-in-time fundamentals: one row per (period, filing) only when value differs
+    -- from previous filing (first release + genuine restatements). Replaces nothing;
+    -- stock_fundamentals stays as the "latest" view.
+    CREATE TABLE IF NOT EXISTS financial_facts (
+      symbol        TEXT NOT NULL,
+      source        TEXT NOT NULL,                -- 'edgar' | 'yfinance'
+      metric        TEXT NOT NULL,
+      period_end    DATE NOT NULL,
+      period_start  DATE,                         -- NULL for balance-sheet (instant) facts
+      duration_days INT,                          -- ~91 / 182 / 273 / 365; NULL = instant
+      value         DOUBLE PRECISION NOT NULL,
+      filed         DATE NOT NULL,                -- EDGAR 'filed'; yfinance = first date WE observed it
+      form          TEXT,                         -- '10-K' | '10-Q' | NULL
+      accession     TEXT,                         -- EDGAR accn, provenance
+      observed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (symbol, source, metric, period_end, duration_days, filed)
+    );
+    CREATE INDEX IF NOT EXISTS idx_financial_facts_pit
+      ON financial_facts (symbol, metric, period_end, duration_days, filed);
+
+    -- Weekly universe membership snapshot (EV-1): append-only, one row per
+    -- (universe, snapshot_date, symbol) — never overwritten.
+    CREATE TABLE IF NOT EXISTS universe_membership_snapshots (
+      universe      TEXT NOT NULL,            -- 'SP500' | 'NIFTY500'
+      snapshot_date DATE NOT NULL,
+      symbol        TEXT NOT NULL,
+      sector        TEXT,
+      PRIMARY KEY (universe, snapshot_date, symbol)
+    );
+
+    -- Price anomalies: jumps >40%, history restatements, bad bars (G-1).
+    -- Written by stock_prices.py daily pull; reviewed before EV-0 backtests.
+    CREATE TABLE IF NOT EXISTS price_anomalies (
+      symbol      TEXT NOT NULL,
+      ts          TIMESTAMPTZ NOT NULL,
+      kind        TEXT NOT NULL,                  -- 'jump_gt_40pct' | 'history_restated' | 'bad_bar'
+      detail      TEXT,
+      ret         DOUBLE PRECISION,
+      status      TEXT NOT NULL DEFAULT 'open',   -- 'open' | 'explained' | 'refetched'
+      detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (symbol, ts, kind)
+    );
+
+    -- Standard factor returns (EV-9/P1): Ken French (US) / IIM-A (India).
+    -- Loaded by a separate fetcher; reader changes come later.
+    CREATE TABLE IF NOT EXISTS factor_returns (
+      market  TEXT NOT NULL,                      -- 'US' | 'IN'
+      factor  TEXT NOT NULL,                      -- 'MKT_RF' | 'SMB' | 'HML' | 'RMW' | 'CMA' | 'MOM' | 'RF'
+      ts      DATE NOT NULL,                      -- month end or day
+      freq    TEXT NOT NULL,                      -- 'M' | 'D'
+      value   DOUBLE PRECISION NOT NULL,          -- percent, as published
+      source  TEXT NOT NULL,
+      PRIMARY KEY (market, factor, freq, ts)
+    );
+  06d-job-runs.sql: |
+    -- AR-3 (2026-10-17): durable job run record. One row per job execution:
+    -- start/end timestamps, rows written, status, error text. Plain table
+    -- (small, append-only) — survives pod eviction, unlike k8s Job status.
+    CREATE TABLE IF NOT EXISTS job_runs (
+      job_name    TEXT NOT NULL,
+      started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      ended_at    TIMESTAMPTZ,
+      rows_written BIGINT NOT NULL DEFAULT 0,
+      status      TEXT NOT NULL DEFAULT 'running',   -- 'running' | 'ok' | 'fail'
+      error       TEXT,
+      PRIMARY KEY (job_name, started_at)
+    );
   07-headline-intelligence.sql: |
     -- Headline entity/event extraction v1 (2026-10-09, findings Tier 1 #2;
     -- ADR 0010). Gazetteer-first: entities are INSTRUMENT-linked matches from

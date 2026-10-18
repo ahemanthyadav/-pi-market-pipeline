@@ -12,8 +12,8 @@
 > Earlier healthy check 2026-10-09: all 4 nodes Ready · **23 CronJobs** (per `manifests/`; telegram-digest 08:00 IST) · Telegram alert channel
 > live (contact point + 3 rules) · **Telegram two-way listener live**
 > (Deployment telegram-bot: /status /vix /nifty /sensex /gold /fii /scores
-> /digest) · screener toolkit `local/screener:v9` ·
-> health monitor `local/pipeline-health:v4`.
+> /digest) · screener toolkit `local/screener:v11` ·
+> health monitor `local/pipeline-health:v5`.
 
 ## Reading order (new session? start here)
 

@@ -25,7 +25,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: health
-              image: local/pipeline-health:v4
+              image: local/pipeline-health:v5
               imagePullPolicy: Never
               env:
                 - name: PGHOST

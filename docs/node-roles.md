@@ -2,7 +2,7 @@
 
 > **Purpose:** one place that answers "what does each machine do, what breaks if it dies, and what must I
 > never do to it". Detail stays in the linked docs; this file is the index per node.
-> **Last verified: 2026-10-13 04:55 UTC** (live `kubectl`, DB queries, `power-review.sh` and per-Pi SSH `dmesg`/`vcgencmd`;
+> **Last verified: 2026-10-18** (live `kubectl`, per-Pi `uptime`/`dmesg`/`vcgencmd`, all 4 nodes Ready, all 23 CronJobs active;
 > TX2 fixed-config facts are from the ops manual and were not re-checked today).
 > No IP addresses here (AGENTS.md rule 8): node names only; real values live in the gitignored `.hosts.env`.
 
@@ -11,7 +11,7 @@
 | Node | Hardware | In k3s? | Primary job | Pinned workloads | If it dies |
 |---|---|---|---|---|---|
 | **pi0** | Pi 1 B+, 512 MB, SD | **No** | LAN DNS (Pi-hole + unbound), out-of-cluster watcher | none (not a k8s node) | LAN ad-block DNS gone; the dead-man's switch goes silent |
-| **pi1** | Pi 3 B, 1 GB, 233 GB SSD | Worker | Telegram bot host; general ingestion pool | `telegram-bot`, `telegram-digest`, `telegram-alerts` | Bot stops answering; digest/alerts not sent; unpinned jobs land on pi3 only |
+| **pi1** | Pi 3 B, 1 GB, 233 GB SSD | Worker | Telegram bot host; general ingestion pool | `telegram-bot`, `telegram-digest`, `telegram-alerts` | Bot stops answering; digest/alerts not sent; unpinned jobs land on pi3 only. Power supply replaced 2026-10-14; 24h acceptance pending (due ≥ 2026-10-15 05:40 UTC). |
 | **pi2** | Pi 3 B+, 1 GB | **Control plane** | k3s server (API, scheduler, datastore, CoreDNS, Traefik) | none (**cordoned**) | Whole cluster loses its API; nothing new schedules (see §4) |
 | **pi3** | Pi 3 B, 1 GB, SSD | Worker | Grafana, backups, general ingestion pool | `grafana`, `pg-backup`, `restore-drill` (Job) | No dashboards, no nightly dump; unpinned jobs land on pi1 only |
 | **tx2** (`ahytx2-desktop`) | Jetson TX2, 7.7 GB, eMMC + 224 GB SSD | Worker (GPU, tainted) | **The database**, NLP jobs, image build host | `timescaledb`, `sentiment-scorer`, `headline-ner` | **Every pipeline write fails** (DB down); data is safe on the Retain PV |
@@ -36,15 +36,14 @@
   allow-list — ADR 0012), CronJobs `telegram-digest` (08:00 IST — the only job with an explicit timeZone) and `telegram-alerts` (02:45).
   Pinned so image imports are needed on one node only.
 - **Unpinned jobs:** eligible for any of the 18 unpinned CronJobs (§3.1) — **only if the image is imported on pi1** (no registry).
-  The earlier image gap is closed: `yfinance-fetcher:v5`, `nse-fetcher:v4` and `screener:v9` are imported on **both** pi1 and
-  pi3 (verified with `ctr images ls` 2026-10-12 08:22 UTC) — and since then most floating jobs run here (§3.1).
+  `screener:v11` + `pipeline-health:v5` imported on pi1 and pi3 2026-10-18 (v10/v4 kept for rollback; pi2 skipped — cordoned). After the
+  10-18 prune incident pi1 holds all 14 images its jobs need (incl. telegram-digest:v8), pi3 all 13 floating ones — verified against the manifests.
+  The earlier image gap is closed: `yfinance-fetcher:v5`, `nse-fetcher:v4` and `screener:v10` (v9 kept) are imported on **both** pi1 and
+  pi3 (verified with `ctr images ls` 2026-10-14 06:20 UTC) — and since then most floating jobs run here (§3.1).
 - **Host jobs:** node-stats logger — root cron added 2026-10-11 (the crontab was empty; AR-12).
-- **Power (2026-10-12):** the only Pi that **fails** the power review — live undervolt + throttle (`0x50005`) at 04:35 and
-  04:50 UTC under image-import load (CPU 58–73 %), even after the move to separate supplies. **Final 24 h review 2026-10-13: FAIL** (pi0/pi2/pi3 PASS). Re-checked 08:41 UTC 10-12:
-  `power-review.sh` → pi0/pi2/pi3 PASS, **pi1 FAIL** (same 2 samples); `dmesg` shows **36** undervoltage events by 2026-10-13 03:52 UTC (25 at 08:41 UTC 10-12) since its boot
-  (~02:55 UTC, ~5.7 h) against **0** on pi0/pi2/pi3, the last stamped 01:22 host-local (≈ 08:22 UTC if the host clock is PDT — not
-  verified) — events continued well after the image imports, and a third and fourth live sample (`0x50005`, 09:10 UTC 10-12 and 03:10 UTC 10-13) came at **load 0.4–0.6 with no transfer running** — so it is not workload: its supply/cable (or board) is at fault. Suspect its own supply/cable. No bulk imports/transfers to it until the
-  swap-test ladder is done (tracker §1).
+- **Power (2026-10-14):** pi1 was the only Pi failing the power review (live undervolt + throttle `0x50005`, 36 dmesg events). Supply replaced 2026-10-14 (~02:30 UTC). Import stress test
+  2026-10-14 06:19–06:21 UTC (116 MB screener:v10 tarball push + ctr import, load peaked 2.78): **`0x0` throughout, 0 dmesg undervoltage events**. 24 h acceptance trial pending
+  — run `bash ops-tools/power-review.sh --since 2026-10-14T05:39:00Z`, verdict due ≥ 2026-10-15 05:40 UTC. Until acceptance: no bulk imports to pi1, treat as fragile worker.
 - **Also holds:** a leftover `screener:v9` tarball in the SSH user's home (tracker §1). Planned second copy of DB dumps (AR-11) — not done.
 - **Watch:** accumulates undervolt events; was NotReady during the 2026-10-10 wedge. Agent runs with
   `--disable-apiserver-lb` (direct to the control plane).
@@ -69,7 +68,7 @@
 ### pi3 — Grafana + backups + ingestion worker
 - **Pinned:** `grafana` Deployment (tailnet-only; dashboards + the Telegram alert rules), CronJob `pg-backup`
   (01:30; dumps to a hostPath on pi3's SSD), the `restore-drill` Job (backups live on pi3's SSD).
-- **Unpinned jobs:** in practice runs most of them today — it holds the newest images (`screener:v9`, `yfinance-fetcher:v5`,
+- **Unpinned jobs:** in practice runs most of them today — it holds the newest images (`screener:v11` + v10 for rollback — v1–v9 removed 2026-10-18; all images re-imported after the 10-18 prune incident, ops manual §8; `yfinance-fetcher:v5`,
   `nse-fetcher:v4`); the live pods on 2026-10-11 (intraday, rbi, stock-fundamentals, schema Job) all ran here.
 - **Responsibility:** the node-side copy of the DB dumps. The fixed `pg-backup` ran on schedule 2026-10-12 08:30 UTC
   (`marketdata-2026-10-12.dump`, 171,766,332 bytes, `.sha256` sidecar, ~6 min). A second copy is pulled to the workstation with
@@ -175,16 +174,17 @@ scheduled); fixed that day on all five (ADR 0011 amendment).
   point of failure across all of them (tracker §1).
 - **No registry:** an image missing on a node gives `ErrImageNeverPull`; keep the "which node has which image" list true.
 
-## 5. Current state (2026-10-12 live check)
+## 5. Current state (2026-10-18 live check)
 
-- Nodes (2026-10-12 08:40 UTC): pi1, pi3, tx2 Ready; pi2 Ready but **cordoned**; pi0 up (not a k8s node).
-- **CronJobs (08:22 UTC 2026-10-12): all 23 active, none suspended.** All jobs since the re-activation Completed; no failed or
-  pending pods. `nse-fetcher:v4` is imported on both pi1 and pi3, so floating jobs can run on either.
+- **Site-wide power event ~05:55–06:20 UTC 2026-10-18:** all five machines rebooted (pi0 + pi2 ~06:02, pi1 + pi3 together ~06:17, TX2 same
+  window). **Owner confirmed: mains power loss.** 0 undervoltage events on any Pi since boot — not a Pi supply fault. `nodewatch` (on pi0) went down with everything else, so
+  nothing alerted. Everything recovered on its own; DB restarted once.
+- Nodes (2026-10-18): pi1, pi2, pi3, tx2 all **Ready**; pi2 **cordoned** (SchedulingDisabled); pi0 up (not a k8s node).
+- **CronJobs: all 23 active, none suspended.** No failed or pending pods.
 - Running: `timescaledb-0` (tx2), `telegram-bot` (pi1), `grafana` (pi3).
-- Host-level 2026-10-12 08:41 UTC (all five nodes run the 5-min stats logger; hosts up ~6 h since the rewire/reboot): throttle
-  `0x0` pi0/pi3, `0x80000` pi2 (heat, since boot), `0x50000` pi1 (since boot; 2 live samples earlier, 25 `dmesg` events) — see the pi1
-  Power note above. Telegram bot is on `telegram-digest:v8` (ADR 0012); two member rows exist in `bot_users` (tracker §1).
-  Not re-verified today: the TX2 fixed config.
+- Host-level: throttle `0x0` pi0/pi3, `0x80000` pi2 (heat flag since boot, no undervolt), pi1 `0x0` on new supply — 24 h acceptance pending.
+- Telegram bot on `telegram-digest:v8` (ADR 0012).
+- Not re-verified today: the TX2 fixed config.
 
 ## 6. Keeping this file true
 

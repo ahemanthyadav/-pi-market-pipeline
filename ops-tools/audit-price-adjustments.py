@@ -89,7 +89,6 @@ def yahoo_closes(syms, anchor, batch=50, pause=3.0):
 
 
 def audit(tol):
-    syms = symbols()
     rows, bad = [], {}
     for anchor in ANCHORS:
         mine = db_closes(anchor)

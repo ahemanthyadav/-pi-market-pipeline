@@ -44,12 +44,19 @@ FEEDS = [
      "SELECT count(*) FROM capital_flows", 120),
     ("intraday", "SELECT max(ts) FROM intraday_prices",
      "SELECT count(*) FROM intraday_prices", 96),
+    # stock_prices/stock_scores were 48h until v5 (2026-10-18): every Sunday the Friday
+    # bar is ~57h old, so they paged on weekends against the policy above. 96h like the
+    # other price feeds.
     ("stock_prices", "SELECT max(ts) FROM stock_prices",
-     "SELECT count(*) FROM stock_prices", 48),
+     "SELECT count(*) FROM stock_prices", 96),
     ("stock_fundamentals", "SELECT max(ts) FROM stock_fundamentals",
      "SELECT count(*) FROM stock_fundamentals", 192),
     ("stock_scores", "SELECT max(ts) FROM stock_scores",
-     "SELECT count(*) FROM stock_scores", 48),
+     "SELECT count(*) FROM stock_scores", 96),
+    # rbi-fetcher writes its own row with fresh=true, which can never go stale on its
+    # own; checking it here makes a dead rbi job visible. Policy rows carry the fetch date.
+    ("rbi", "SELECT max(ts) FROM interest_rates WHERE left(rate_name, 3) = 'IN_'",
+     "SELECT count(*) FROM interest_rates WHERE left(rate_name, 3) = 'IN_'", 96),
 ]
 
 UPSERT = """

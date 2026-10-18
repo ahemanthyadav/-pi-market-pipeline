@@ -14,7 +14,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: prices
-          image: local/screener:v9
+          image: local/screener:v11
           imagePullPolicy: Never
           command: ["python", "stock_prices.py"]
           env:
@@ -49,7 +49,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: fundamentals
-          image: local/screener:v9
+          image: local/screener:v11
           imagePullPolicy: Never
           command: ["python", "stock_fundamentals.py"]
           env:

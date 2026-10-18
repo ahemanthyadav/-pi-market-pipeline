@@ -8,6 +8,8 @@
 #   k3s ctr -n k8s.io images import screener-v1.tar.gz   # on each Pi
 FROM python:3.12-slim
 WORKDIR /app
-RUN pip install --no-cache-dir yfinance pandas "psycopg[binary]" requests lxml
+# requirements.lock (AR-5): the exact set frozen from the running v9 image — build context must contain it.
+COPY requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock
 COPY *.py ./
 CMD ["python", "universe_refresh.py"]

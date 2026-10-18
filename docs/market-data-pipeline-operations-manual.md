@@ -1,7 +1,8 @@
 # Market Data Pipeline — Operations Manual & System Reference
 
 > **Reconciled with `manifests/` 2026-10-10** (schedules/images checked by `ops-tools/workloads.py --check`).
-> Last fully healthy cluster check: 2026-10-09; degraded since 2026-10-09 15:02 UTC — see §8 and pending-tasks §1.
+> **Last fully healthy cluster check: 2026-10-17** — all 4 k8s nodes Ready (pi2 cordoned), all 23 CronJobs active,
+> TimescaleDB/Grafana/Telegram-bot all Running. See §8 and pending-tasks §1 for known gaps.
 > **Repo layout (2026-10-03):** everything lives in `projects/marketdata/` —
 > `docs/` (project docs), `manifests/` (k8s), `ops-tools/` (SSH helpers),
 > `validation/` (Grafana scripts + screenshots), `AGENTS.md` + `opencode.jsonc` +
@@ -127,6 +128,11 @@ re-runs and late corrections overwrite cleanly, never duplicate.
   to take it off the rail keep its data path direct (powered SSD enclosure, or separate-power Y-cable /
   data-only adapter); a hub in the boot path is unverified on Pi 3 / 3B+ — test on pi3 or a spare, never
   first on pi2. Triage ladder: skill `node-power-health`; plan: pending-tasks §1.
+  **Current state (2026-10-17):** every Pi now has its own dedicated supply — the shared multiport block that caused the
+  2026-10-09→10 outage is gone (rewire ~2026-10-12 02:30 UTC; pi1's supply replaced 2026-10-14). pi0/pi2/pi3 PASS the 24 h
+  acceptance rule; pi1 import stress test clean 2026-10-14 06:19–06:21 UTC (`0x0` throughout, 0 dmesg undervoltage
+  events); pi1 24 h acceptance re-trial pending — run `bash ops-tools/power-review.sh --since 2026-10-14T05:39:00Z`,
+  verdict due ≥ 2026-10-15 05:40 UTC. Until acceptance: no bulk imports to pi1.
 
 ## 3. Workloads (namespace `market-data`)
 
@@ -163,14 +169,14 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | sentiment-scorer | 15 0 * * * | local/sentiment-fetcher:v1 (TX2 only) | news_sentiment |
 | ta-compute | 30 0 * * * | local/ta-compute:v1 | technical_indicators |
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | /var/lib/market-data/backups on pi3 |
-| pipeline-health | 45 1 * * * | local/pipeline-health:v4 | pipeline_heartbeat (feed freshness, 13 feeds) |
+| pipeline-health | 45 1 * * * | local/pipeline-health:v5 | pipeline_heartbeat (feed freshness, 14 feeds incl. rbi; weekend-safe 96 h on stock prices/scores since v5) |
 | intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
-| universe-refresh | 0 9 * * 0 | local/screener:v9 | universe_constituents + ticker_names (998 symbols) |
-| stock-prices | 30 23 * * * | local/screener:v9 | stock_prices (998 symbols, 5d window) |
-| stock-fundamentals | 0 6 * * 6 | local/screener:v9 | stock_fundamentals (EDGAR US + yfinance NSE, resumable) |
-| stock-metrics | 0 2 * * * | local/screener:v9 | stock_metrics_daily |
-| stock-screener | 15 2 * * * | local/screener:v9 | stock_scores + screening_runs (v8: house conn pattern, both universes — see §8) |
-| stock-report | 30 2 * * * | local/screener:v9 | stock_reports (top-25/universe + __digest__; v8: today's shortlist only) |
+| universe-refresh | 0 9 * * 0 | local/screener:v11 | universe_constituents + ticker_names (998 symbols) |
+| stock-prices | 30 23 * * * | local/screener:v11 | stock_prices (998 symbols, 5d window) |
+| stock-fundamentals | 0 6 * * 6 | local/screener:v11 | stock_fundamentals (EDGAR US + yfinance NSE, resumable) |
+| stock-metrics | 0 2 * * * | local/screener:v11 | stock_metrics_daily |
+| stock-screener | 15 2 * * * | local/screener:v11 | stock_scores + screening_runs (v8: house conn pattern, both universes — see §8) |
+| stock-report | 30 2 * * * | local/screener:v11 | stock_reports (top-25/universe + __digest__; v8: today's shortlist only) |
 | rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (7 IN_* policy rates) + bond_yields (5 G-Sec tenors + 3 T-bills) + pipeline_heartbeat self-row 'rbi' |
 | headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (gazetteer extraction over raw_headlines, ADR 0010) |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only (manual INSERT follows) |
@@ -231,7 +237,7 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | FRED (DFF, DGS2/10/30) | fredapi + key in Secret | ✅ live | key verified 2026-10-03 (DFF 3.88) |
 | News RSS | feedparser (6 feeds: ET, BS, LiveMint, BusinessLine, CNBC, MarketWatch) | ✅ live 2026-10-12 | Moneycontrol ×2 dead (302 to a login-consent wall for every user-agent) and Reuters dead (`feeds.reuters.com` no longer resolves) — replaced via the CronJob's `FEEDS` env override, no image rebuild; the script's `DEFAULT_FEEDS` is stale until the next rebuild |
 | NSE FII/DII | fiidiiTradeReact JSON + session | ✅ live | API returns bare list, not `{data:…}` envelope |
-| Stock prices/fundamentals (screener layer) | yfinance per-universe + EDGAR + yfinance stmts | ✅ live (2026-10-09) | **`stock_prices.ts` = 00:00 UTC on the trade date for EVERY row (normalised 2026-10-13, DQ-4)**; Yahoo back-adjusts splits/spin-offs but we refresh only 5 days — audit with `ops-tools/audit-price-adjustments.py` (CTVA repaired 2026-10-13); Yahoo pre-open "today" bars (partial OHLC, ~0 volume) land for a handful of tickers each run; self-healing — the next run DELETE+INSERTs the final bar, but same-day metrics/scores can key to the partial bar. `DUMMYHEG.NS` dead (WARN-tolerant). |
+| Stock prices/fundamentals (screener layer) | yfinance per-universe + EDGAR + yfinance stmts | ✅ live (2026-10-09) | **`stock_prices.ts` = 00:00 UTC on the trade date for EVERY row (normalised 2026-10-13, DQ-4)**; Yahoo back-adjusts splits/spin-offs but we refresh only 5 days — **since `screener:v10` (2026-10-14) the daily job pulls `actions=True` and, when a symbol shows a non-zero `Stock Splits` in the 5-day window, re-fetches and rewrites that symbol's full history (`SPLIT-RESYNC <sym> <date>x<ratio> rows=N` in the log; cap `SPLIT_RESYNC_MAX`=25; `PRICES-OK … splits_resynced=N`)**; **since `screener:v11` (2026-10-18) every split and dividend in the 5-day window is also upserted into `corporate_actions` (splits → `ratio`, dividends → `amount`; a dividend never triggers a resync; a failed actions write logs `WARN <sym> corporate_actions write failed` and the prices still count). `stock_prices.adj_close` exists but stays NULL until our own total-return calculation lands (DQ-1 — never copy Yahoo's `Adj Close`)**; the weekly `ops-tools/audit-price-adjustments.py` stays as the safety net (CTVA repaired 2026-10-13); `Ticker.history()` returns tz-aware local midnights, so `trade_ts()` forces 00:00 UTC on every write path (ADR 0013); Yahoo pre-open "today" bars (partial OHLC, ~0 volume) land for a handful of tickers each run; self-healing — the next run DELETE+INSERTs the final bar, but same-day metrics/scores can key to the partial bar. `DUMMYHEG.NS` dead (WARN-tolerant). |
 | RBI/G-Secs | official RBI mobile "Current Rates" widget (lxml scrape) | ✅ live (2026-10-09, `rbi-fetcher`) | benchmark SECURITY names rotate — matched by maturity-year→tenor bucket; page hides a stale date in an HTML comment (lxml text_content drops it); values carry '#'/'*' markers |
 | Headline intelligence | gazetteer extraction over raw_headlines (`headline-ner`, ADR 0010) | ✅ live (2026-10-09) | deterministic ticker_names matching; common-word first-tokens stoplisted (measured FPs: "live/target/realty"); 16-event keyword taxonomy; events link the single company mentioned |
 | FDI monthly | watch + manual INSERT | 🔶 reporter only | DPIIT PDFs; 5-min quarterly task (template in job log) |
@@ -370,6 +376,10 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
   psql -U postgres -d postgres -c "SELECT count(*), count(DISTINCT ticker) FROM index_prices;"
 ```
 
+**Image tarball store (2026-10-18):** `/mnt/tx2-ssd/image-tarballs/` on the TX2 holds a gzip tarball of EVERY image a manifest
+references (sentiment: `/mnt/tx2-ssd/sentiment-fetcher-v1.tar.gz`), checksums in `SHA256SUMS.all` — the restore source if a node's
+containerd store is lost (incident §8). After every build, save the new tarball there and regenerate `SHA256SUMS.all`.
+
 **Dependency locking:** After any build, dump the versions:
 ```bash
 python3 ops-tools/runcmd.py tx2 ahytx2 \
@@ -457,6 +467,15 @@ gap > 15 min; heat is a WARN). Final 24 h review run 2026-10-13 03:51 UTC (299 s
 
 pi1 failed: swap-test ladder on pi1 (spare PSU + cable first; skill `node-power-health` §4), no bulk
 imports/transfers to pi1 meanwhile. Never swap boot SSDs between nodes.
+
+**2026-10-14 update:** pi1 hung ~02:02 UTC (last stats row `0x50000`), was power-cycled and rebooted 05:39 UTC; the owner reports it now has its
+own supply (swap time/cable not recorded). Re-trial: `bash ops-tools/power-review.sh --since 2026-10-14T05:39:00Z`, verdict due ≥ 2026-10-15 05:40 UTC.
+First read (06:11 UTC, idle): `0x0`, 0 undervoltage events — not evidence yet.
+
+**Hardware fix recorded COMPLETE 2026-10-14** (owner confirmed; pending-tasks §1). Read at 06:49 UTC over
+2026-10-14T05:39:00Z → 06:49:21Z (14 samples/node, no gaps) — **all four PASS**: pi0 `0x0` (36.9 °C, load 0.96) ·
+pi1 `0x0` throughout (50.5 °C, load 1.17) · pi2 `0x80000` heat-only, WARN at 60.1 °C (load 2.32) · pi3 `0x0` (50.5 °C, load 1.93).
+`dmesg` undervoltage since boot: **pi0 0 · pi1 0 · pi2 0 · pi3 0**. Positive but short — the 24 h verdict is still the acceptance.
 
 ### pi2 wedged ~16 h + live undervoltage found (2026-10-09→10) — full post-mortem
 **Root cause (first catch of the node-stats logger, ADR 0011):** pi2 ran
@@ -668,7 +687,44 @@ python3 ops-tools/runcmd.py pi2 pi2 'echo @@PW@@ | sudo -S systemctl restart k3s
 # Then verify agents re-register one-by-one (pi3 → pi1 → TX2).
 ```
 
+### NEVER `crictl rmi --prune` (or `ctr images prune`) on a node — incident 2026-10-18
+With no registry, `crictl rmi --prune` deletes **every image not used by a running container** — i.e. every
+CronJob image, which `imagePullPolicy: Never` can never re-pull. On 2026-10-18 it wiped all `local/*` images on pi3
+and 6 on pi1 (fdi-watch, fiidii, fx, nse, rbi, yfinance) before a timeout stopped it. Recovered in ~30 min with no
+failed job: pi3 cordoned at once (floating jobs went to pi1, which still had the screener/health images), images
+re-sourced from the TX2 tarballs, `ctr images export` on pi1 and on pi2 (still holds old copies), checksummed at
+each hop, imported, two pinned test pods run on pi3, then uncordoned.
+```bash
+# Remove ONE named old tag (safe) — and nothing else:
+python3 ops-tools/runcmd.py pi3 pi3 'echo @@PW@@ | sudo -S /usr/local/bin/k3s ctr -n k8s.io images rm docker.io/local/screener:v8'
+# Check before/after against what the manifests need:
+kubectl -n market-data get cronjob,deploy -o jsonpath='{range .items[*]}{.spec.jobTemplate.spec.template.spec.containers[0].image}{.spec.template.spec.containers[0].image}{"\n"}{end}' | sort -u
+# Emergency: an image is missing on a node → cordon that node first, then restore (export from a node that
+# has it: ctr -n k8s.io images export f.tar docker.io/local/<img> → getfile → putfile → ctr import).
+```
+Also: `ps`/`pgrep -af` on a host while a `runcmd.py` command runs shows the expanded `@@PW@@` — never print them.
+
 ## 9. Backup & restore (copy-paste commands)
+
+### Control-plane datastore (pi2) — daily second copy since 2026-10-18
+k3s runs kine on SQLite (`/var/lib/rancher/k3s/server/db/state.db`), so `k3s etcd-snapshot` does not apply.
+`ops-tools/pull-k3s-backup.sh` takes a consistent copy with Python's sqlite3 online-backup API (pi2 has no
+`sqlite3` CLI), checks `PRAGMA integrity_check`, adds the server `token`, `server/tls` (CA + keys) and `server/cred`, pulls it to
+`out/backups/k3s/k3s-cp-backup-<date>.tar.gz` (mode 600 — **contains the join token and the cluster CA private keys**), verifies sha256,
+deletes the remote copy, keeps 14. Skips (exit 5) if pi2 load1 > 3. Workstation cron 03:30 local →
+`out/logs/k3s-backup.log`; `pull-backups.py --prune-local 7` at 03:00 → `out/logs/pull-backups.log`.
+**Restore (pi2 disk/datastore lost — untested drill, quiet window, agents stay up):**
+```bash
+# 1. on pi2 (same hostname/IP; k3s installed):  sudo systemctl stop k3s
+# 2. putfile the archive, then:  tar -xzf k3s-cp-backup-<date>.tar.gz -C /tmp
+# 3. sudo cp /var/lib/rancher/k3s/server/db/state.db /tmp/state.db.broken 2>/dev/null; \
+#    sudo rm -f /var/lib/rancher/k3s/server/db/state.db-{wal,shm}; \
+#    sudo cp /tmp/k3s-cp-backup/state.db /var/lib/rancher/k3s/server/db/state.db
+# 4. same token + certs: sudo cp /tmp/k3s-cp-backup/token /var/lib/rancher/k3s/server/token; \
+#    sudo cp -a /tmp/k3s-cp-backup/tls /tmp/k3s-cp-backup/cred /var/lib/rancher/k3s/server/
+# 5. sudo systemctl start k3s → kubectl get nodes (agents keep trusting the restored CA and reconnect).
+#    Never rehearsed — do a drill on a spare SD/SSD before relying on it.
+```
 
 ### Verify backup ran (daily 01:30 UTC)
 ```bash
@@ -703,6 +759,10 @@ kubectl logs -n market-data job/restore-drill --tail=5
 # Pre-migration dump pattern (used 2026-10-13 before the DQ-4 rewrite): `kubectl -n market-data create job pg-backup-premig-<tag> --from=cronjob/pg-backup`
 #   (same script, same-day file name — the scheduled run overwrites it atomically, so pull a copy first; its Job is TTL-cleaned after 7 days).
 #   The restore drill was NOT re-run after that data rewrite (no schema change); re-run it at the next quarterly slot.
+# Re-run 2026-10-17 in-cluster (restore-drill-job.yaml on pi3, 164.6 MB 10-17 dump): RESTORE-DRILL-OK, pg_restore 289 s,
+#   index_prices live=drill=292,577. In-cluster RTO ≈ 5 min at this size (vs 30 s off-cluster on the workstation).
+# Control-plane copy (2026-10-18, one-off; see pending-tasks AR-10): out/backups/k3s/k3s-cp-backup-<date>.tar.gz = state.db
+#   (sqlite online-backup API, integrity ok) + server token. Mode 600 — it holds the cluster join token.
 # Second copy: python3 ops-tools/pull-backups.py   (checksummed pull to out/backups; exit 2 if the newest verified dump is > 36 h old)
 # Re-run quarterly, or after any schema/backup change.
 ```
