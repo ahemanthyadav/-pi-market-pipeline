@@ -364,6 +364,13 @@ data:
       error       TEXT,
       PRIMARY KEY (job_name, started_at)
     );
+  06e-chunk-intervals.sql: |
+    -- 2026-10-18: stock_prices had 3,382 seven-day chunks (data back to 1961) -> 34 s
+    -- query PLANNING for any open-ended per-symbol read. New chunks are one year; the
+    -- existing weekly chunks for 1962-2025 were merged per year with merge_chunks()
+    -- (ops-tools/sql/2026-10-18-merge-weekly-chunks.sql) -> 107 chunks, 34 ms planning.
+    -- Idempotent: only affects chunks created from now on.
+    SELECT set_chunk_time_interval('stock_prices', INTERVAL '365 days');
   07-headline-intelligence.sql: |
     -- Headline entity/event extraction v1 (2026-10-09, findings Tier 1 #2;
     -- ADR 0010). Gazetteer-first: entities are INSTRUMENT-linked matches from
@@ -437,3 +444,36 @@ data:
         ALTER TABLE watchlist ADD PRIMARY KEY (chat_id, symbol);
       END IF;
     END $$;
+  10-roles.sql: |
+    -- AR-8 (2026-10-18): least-privilege roles for the readers exposed on the tailnet.
+    -- Created NOLOGIN here (no secret in git); LOGIN + password are set out-of-band from
+    -- the Secrets grafana-db-ro / telegram-db (ops manual §10). Idempotent.
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_ro') THEN
+        CREATE ROLE grafana_ro NOLOGIN;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'telegram_app') THEN
+        CREATE ROLE telegram_app NOLOGIN;
+      END IF;
+    END $$;
+    GRANT CONNECT ON DATABASE postgres TO grafana_ro, telegram_app;
+    GRANT USAGE ON SCHEMA public TO grafana_ro, telegram_app;
+    GRANT SELECT ON ALL TABLES IN SCHEMA public TO grafana_ro, telegram_app;
+    ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+      GRANT SELECT ON TABLES TO grafana_ro, telegram_app;
+    -- Grafana never writes: every session is read-only even if a panel tried.
+    ALTER ROLE grafana_ro SET default_transaction_read_only = on;
+    -- The bot's only writes (bot.py /watch, users.py /adduser /rmuser).
+    GRANT INSERT, UPDATE, DELETE ON watchlist, bot_users TO telegram_app;
+  11-news-constraints.sql: |
+    -- 2026-10-18 (roadmap §3.4): the last two tables without a DB-level dedup guard.
+    -- Keys mirror the writers exactly: news-fetcher skips (headline, source, UTC day);
+    -- the scorer writes each staged row once, inserts + `scored` flag in ONE transaction,
+    -- so a crash leaves nothing half-done and a re-run can never hit these indexes.
+    -- md5(headline): no btree size limit on long headlines. Verified 0 conflicts first.
+    -- Republished articles (same headline on a later day) remain separate rows on purpose.
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_raw_headlines_key
+      ON raw_headlines (md5(headline), source, ((ts AT TIME ZONE 'UTC')::date));
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_news_sentiment_key
+      ON news_sentiment (md5(headline), source, ts);

@@ -37,11 +37,19 @@ def bars(dates, splits=None, tz=None, close=10.0):
 
 
 class FakeCursor:
+    rowcount = 0
+
     def __init__(self, log):
         self.log = log
 
     def execute(self, sql, params=()):
         self.log.append((" ".join(sql.split()), params))
+
+    def fetchall(self):
+        return []
+
+    def fetchone(self):
+        return None
 
     def __enter__(self):
         return self
@@ -104,13 +112,15 @@ class SplitEvents(unittest.TestCase):
 class DailyRun(unittest.TestCase):
     """main() in daily mode with the split symbol re-fetched in full."""
 
-    def run_main(self, universe, download_df, history, env=None):
+    def run_main(self, universe, download_df, history, env=None, stored=None):
         calls = {"download_kwargs": None, "history": []}
         conn = FakeConn()
 
         class Cur(FakeCursor):
             def fetchall(s):
-                return [(x,) for x in universe]
+                if "universe_constituents" in s.log[-1][0]:
+                    return [(x,) for x in universe]
+                return (stored or {}).get(s.log[-1][1][0] if s.log[-1][1] else None, [])
 
             def fetchone(s):
                 return None
@@ -204,13 +214,73 @@ class DailyRun(unittest.TestCase):
         ca = [p for q, p in conn.log if q.startswith("INSERT INTO corporate_actions")]
         self.assertEqual(ca, [("CTVA", dt.datetime(2026, 10, 13, tzinfo=UTC), "split", 6.665, None)])
 
-    def test_adj_close_is_not_taken_from_yahoo(self):
+    def test_adj_close_starts_at_close_never_yahoo_adj_close(self):
         conn = FakeConn()
         df = bars(["2026-10-13"])
         df["Adj Close"] = 9.0
         sp.write_symbol(conn, "AAPL", df, "j")
-        ins = [q for q, p in conn.log if q.startswith("INSERT INTO stock_prices")]
-        self.assertTrue(ins and all("adj_close" not in q for q in ins))
+        ins = [p for q, p in conn.log if q.startswith("INSERT INTO stock_prices")]
+        self.assertEqual(ins[0][5:7], (10.0, 10.0))  # close, adj_close — not Yahoo's 9.0
+
+    def test_dividend_in_window_triggers_adj_recompute(self):
+        df = bars(["2026-10-12", "2026-10-13"])
+        df["Dividends"] = [0.0, 0.26]
+        stored = {"AAPL": [(dt.datetime(2026, 10, 12, tzinfo=UTC), 10.0)]}
+        rc, out, conn, calls = self.run_main(["AAPL"], {"AAPL": df}, {}, stored=stored)
+        self.assertTrue(any(q.startswith("UPDATE stock_prices p SET adj_close") for q, p in conn.log))
+
+    def test_no_dividend_no_recompute(self):
+        rc, out, conn, calls = self.run_main(["AAPL"], {"AAPL": bars(["2026-10-13"])}, {})
+        self.assertFalse(any(q.startswith("UPDATE stock_prices p SET adj_close") for q, p in conn.log))
+
+    def test_restated_history_is_resynced_without_split_flag(self):
+        days = ["2026-10-07", "2026-10-08", "2026-10-09", "2026-10-12", "2026-10-13"]
+        stored = {"MSFT": [(dt.datetime(2026, 10, 7, tzinfo=UTC), 20.0)]}  # Yahoo now says 10.0
+        full = bars(days)
+        rc, out, conn, calls = self.run_main(["MSFT"], {"MSFT": bars(days)}, {"MSFT": full},
+                                             stored=stored)
+        self.assertIn("SPLIT-RESYNC MSFT restated", out)
+        kinds = {p[2] for q, p in conn.log if q.startswith("INSERT INTO price_anomalies")}
+        self.assertEqual(kinds, {"history_restated"})
+
+
+class AdjSeries(unittest.TestCase):
+    D = [dt.datetime(2026, 1, d, tzinfo=UTC) for d in (5, 6, 7, 8)]
+
+    def test_no_dividends_equals_close(self):
+        self.assertEqual(sp.adj_series([(d, 10.0) for d in self.D], []), [10.0] * 4)
+
+    def test_dividend_scales_only_earlier_bars(self):
+        bars_ = [(self.D[0], 100.0), (self.D[1], 100.0), (self.D[2], 98.0), (self.D[3], 99.0)]
+        adj = sp.adj_series(bars_, [(self.D[2], 2.0)])  # ex-date D2, prev close 100 -> f=0.98
+        self.assertAlmostEqual(adj[0], 98.0)
+        self.assertAlmostEqual(adj[1], 98.0)
+        self.assertEqual(adj[2:], [98.0, 99.0])  # on/after ex-date: unchanged
+
+    def test_factors_compound_and_bad_dividends_are_skipped(self):
+        bars_ = [(d, 100.0) for d in self.D]
+        adj = sp.adj_series(bars_, [(self.D[1], 1.0), (self.D[3], 1.0), (self.D[0], 5.0),
+                                    (self.D[2], 500.0)])  # D0: no earlier bar; D2: >= close
+        self.assertAlmostEqual(adj[0], 100 * 0.99 * 0.99)
+        self.assertAlmostEqual(adj[2], 99.0)
+        self.assertEqual(adj[3], 100.0)
+
+
+class Anomalies(unittest.TestCase):
+    D = [dt.datetime(2026, 10, d, tzinfo=UTC) for d in (7, 8, 9, 12, 13)]
+
+    def test_jump_flagged_against_stored_previous_close(self):
+        out = sp.find_anomalies({}, 100.0, [(self.D[0], 50.0), (self.D[1], 51.0)])
+        self.assertEqual([(o[0], o[1]) for o in out], [(self.D[0], "jump_gt_40pct")])
+
+    def test_newest_bars_may_change_without_restatement(self):
+        fetched = [(d, 10.0) for d in self.D]
+        stored = {self.D[3]: 11.0, self.D[4]: 12.0}  # the two newest: partial-bar territory
+        self.assertEqual(sp.find_anomalies(stored, 10.0, fetched), [])
+
+    def test_small_differences_are_not_restatements(self):
+        fetched = [(d, 10.0) for d in self.D]
+        self.assertEqual(sp.find_anomalies({self.D[0]: 10.04}, 10.0, fetched), [])
 
 
 if __name__ == "__main__":

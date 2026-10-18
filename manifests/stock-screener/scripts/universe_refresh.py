@@ -103,6 +103,16 @@ def main() -> int:
                             "WHERE universe=%s AND active", (universe,))
                 total[universe] = cur.fetchone()[0]
                 print(f"{universe}: {len(rows)} fetched, {total[universe]} active", flush=True)
+                if not limit:
+                    # G-2a / EV-1: append-only weekly record of who was in the index, so
+                    # future backtests are not limited to today's survivors. One row per
+                    # (universe, date, symbol); a same-day re-run adds nothing.
+                    cur.execute("INSERT INTO universe_membership_snapshots "
+                                "(universe, snapshot_date, symbol, sector) "
+                                "SELECT universe, current_date, symbol, sector "
+                                "FROM universe_constituents WHERE universe=%s AND active "
+                                "ON CONFLICT DO NOTHING", (universe,))
+                    print(f"{universe}: snapshot {cur.rowcount} rows", flush=True)
     conn.close()
     if empty_after_fail:
         print(f"UNIVERSE-FAIL empty after fetch failure: {empty_after_fail}", flush=True)

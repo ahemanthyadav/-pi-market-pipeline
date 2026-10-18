@@ -92,6 +92,71 @@ def annual_series(cur, symbols, metric, as_of, years_back):
     return series
 
 
+# DQ-2 reader switch (v12): 'yfinance' = v9 behaviour (full-year yfinance rows only);
+# 'facts' = EDGAR financial_facts first (duration-aware, point-in-time by first filing),
+# yfinance as the fallback for symbols without EDGAR facts (all of NIFTY 500).
+FUND_SOURCE = os.environ.get("FUND_SOURCE", "yfinance").strip().lower()
+DRY_RUN = os.environ.get("DRY_RUN", "") == "1"   # score + print the shortlist, write nothing
+# A facts series whose newest annual period ended longer ago than this is stale (e.g. a
+# company switched XBRL revenue tags and our map stopped seeing it: CBOE ends 2017).
+# Stale -> fall back to yfinance, never score on it. ~15 months = FY end + 10-K deadline.
+FACTS_MAX_AGE_DAYS = 460
+
+
+def ttm_value(rows, as_of=None):
+    """Pure. rows: [(period_end date, duration_days, value)] as known on the as-of date.
+    Trailing twelve months = latest annual + newest YTD after it − same-length YTD one year
+    earlier; falls back to the latest annual when no matching pair exists; None without
+    an annual figure. Durations are fuzzy: EDGAR uses 89–91 / 182–184 / 273–274 / 364–365."""
+    annual = [r for r in rows if 350 <= r[1] <= 380]
+    if not annual:
+        return None
+    a = max(annual, key=lambda r: r[0])
+    if as_of is not None and (as_of - a[0]).days > FACTS_MAX_AGE_DAYS:
+        return None
+    ytd = [r for r in rows if 80 <= r[1] <= 290 and r[0] > a[0]]
+    if not ytd:
+        return a[2]
+    q = max(ytd, key=lambda r: (r[0], r[1]))
+    prior = [r for r in rows if abs(r[1] - q[1]) <= 10 and abs((q[0] - r[0]).days - 365) <= 20]
+    if not prior:
+        return a[2]
+    p = min(prior, key=lambda r: abs((q[0] - r[0]).days - 365))
+    return a[2] + q[2] - p[2]
+
+
+def facts_annual_series(cur, symbols, metric, as_of):
+    """{symbol: [(period_end, value)]} EDGAR full-year values known on as_of, newest first
+    (latest filing per period wins, so restatements count only once they were filed)."""
+    cur.execute(
+        """SELECT DISTINCT ON (symbol, period_end) symbol, period_end, value
+           FROM financial_facts
+           WHERE source = 'edgar' AND symbol = ANY(%s) AND metric = %s
+             AND duration_days BETWEEN 350 AND 380 AND filed <= %s
+           ORDER BY symbol, period_end, filed DESC""",
+        (symbols, metric, as_of))
+    out = {}
+    for sym, end, val in cur.fetchall():
+        out.setdefault(sym, []).append((end, val))
+    return {s: sorted(v, reverse=True) for s, v in out.items()}
+
+
+def facts_ttm(cur, symbols, metric, as_of):
+    """{symbol: ttm value} from EDGAR financial_facts, point-in-time."""
+    cur.execute(
+        """SELECT DISTINCT ON (symbol, period_end, duration_days)
+                  symbol, period_end, duration_days, value
+           FROM financial_facts
+           WHERE source = 'edgar' AND symbol = ANY(%s) AND metric = %s AND filed <= %s
+             AND period_end > (%s::date - 800)
+           ORDER BY symbol, period_end, duration_days, filed DESC""",
+        (symbols, metric, as_of, as_of))
+    rows = {}
+    for sym, end, dur, val in cur.fetchall():
+        rows.setdefault(sym, []).append((end, dur, val))
+    return {s: v for s, v in ((s, ttm_value(r, as_of)) for s, r in rows.items()) if v is not None}
+
+
 def latest_metrics(cur, symbols):
     """{symbol: {metric: value}} at each symbol's max ts."""
     cur.execute(
@@ -127,6 +192,15 @@ def run_universe(conn, universe, today, limit):
         mets, stamps = latest_metrics(cur, symbols)
         rev = annual_series(cur, symbols, "total_revenue", today, 3)
         eps = annual_series(cur, symbols, "eps", today, 1)
+        fcf_ttm = {}
+        if FUND_SOURCE == "facts":
+            day = today.date()
+            for name, series in (("total_revenue", rev), ("eps", eps)):
+                for sym, hist in facts_annual_series(cur, symbols, name, day).items():
+                    if len(hist) >= 2 and (day - hist[0][0]).days <= FACTS_MAX_AGE_DAYS:
+                        series[sym] = hist
+            ocf, capex = facts_ttm(cur, symbols, "ocf", day), facts_ttm(cur, symbols, "capex", day)
+            fcf_ttm = {s: ocf[s] - capex[s] for s in ocf if s in capex}
 
         rows = []
         for sym in symbols:
@@ -151,9 +225,10 @@ def run_universe(conn, universe, today, limit):
                 if f["shareholder_equity"] != 0:
                     de = f["total_debt"] / f["shareholder_equity"]
             fcf_y = None
-            if f.get("fcf") is not None and f.get("market_cap"):
+            fcf_v = fcf_ttm.get(sym, f.get("fcf"))
+            if fcf_v is not None and f.get("market_cap"):
                 if f["market_cap"] != 0:
-                    fcf_y = f["fcf"] / f["market_cap"]
+                    fcf_y = fcf_v / f["market_cap"]
             rows.append({
                 "symbol": sym, "ts": ts,
                 "pe": f.get("pe"), "pb": f.get("pb"), "ev_ebitda": f.get("ev_ebitda"),
@@ -208,6 +283,14 @@ def run_universe(conn, universe, today, limit):
         el_pos = composite[eligible].rank(ascending=False, method="min")
         rank_series[eligible] = el_pos.astype(int).values
         n_short = int((rank_series <= 25).sum())
+        if DRY_RUN:
+            top = df.assign(c=composite, r=rank_series)[eligible].sort_values("r").head(50)
+            for _, row in top.iterrows():
+                print(f"TOP {FUND_SOURCE} {universe} {int(row['r'])} {row['symbol']} "
+                      f"{row['c']:.2f} rev_cagr={row['rev_cagr_3y']} fcf_y={row['fcf_yield']}",
+                      flush=True)
+            print(f"{universe}: DRY-RUN scored={len(df)} eligible={int(eligible.sum())}", flush=True)
+            return (len(df), int(eligible.sum()), n_short)
         with conn.transaction():  # single atomic write per universe
             with conn.cursor() as c2:
                 for i in df.index:
@@ -262,7 +345,8 @@ def main() -> int:
         total = tuple(a + b for a, b in zip(total, res))
     conn.close()
     print(f"SCREENER-OK scored={total[0]} eligible={total[1]} "
-          f"shortlisted={total[2]}", flush=True)
+          f"shortlisted={total[2]} fund_source={FUND_SOURCE}{' dry_run' if DRY_RUN else ''}",
+          flush=True)
     return 0 if total[0] else 1
 
 

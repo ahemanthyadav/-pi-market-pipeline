@@ -4,7 +4,7 @@
 > the linked docs — this file is the index + status. Maintained per AGENTS.md docs
 > discipline: mark items ✅ with a date (and where the completion is recorded) when
 > done; prune ✅ lines into the relevant doc's history at housekeeping time.
-> **Last reviewed: 2026-10-18 07:50 UTC** (`screener:v11` live — corporate_actions recording, canary OK; first k3s control-plane backup;
+> **Last reviewed: 2026-10-18 13:10 UTC** (engineering pass done — see §1 first two items). Earlier: **2026-10-18 07:50 UTC** (`screener:v11` live — corporate_actions recording, canary OK; first k3s control-plane backup;
 > site-wide power event 10-18 ~06:00 UTC explained — all 5 machines rebooted, 0 undervolt; pi1 formal 24 h window due 10-19 06:20 UTC;
 > DQ-3 proven via DB; 10-17 overclaims on DQ-2/AR-2/AR-5 corrected back to open). Previously **2026-10-14 06:49 UTC** (power item **closed as hardware-complete** — owner confirmed pi1 on its own
 > supply; live read 06:49 UTC: all four nodes PASS, `dmesg` undervoltage counts 0 on every Pi, pi2 heat WARN only;
@@ -30,6 +30,11 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   (4 rules `health=ok`) · k3s control-plane backup made daily (`pull-k3s-backup.sh`, incl. tls/cred) + `pull-backups.py` daily with safe
   rotation, both via workstation cron · CI: ruff fatal set + shellcheck errors · weekly price audit (2,471 comparisons, **0 mismatches**;
   `out/price-audit-2026-10-18.csv`) · old screener v1–v9 removed on pi1/pi3 · tarball of every live image on the TX2 SSD.
+- [x] ✅ 2026-10-18 **Engineering pass (plan: `engineering-plan-2026-10-18.md`), 09:50–13:10 UTC:** AR-4 DB Guaranteed QoS + probe (17 s
+  downtime) · **chunk merge** (stock_prices 3,382 → 107, index_prices 300 → 84 chunks, rows identical, after a verified pre-merge dump;
+  per-symbol query planning 34 s → 34 ms — the reason v12's first canary was 2× slower) · `screener:v12`/`v13` (DQ-1 done, DQ-2 done +
+  flipped live, G-2a, price anomalies) · corporate-actions + fundamentals full backfills · EV-0 built and run · AR-8 reader roles · news
+  unique constraints · manifest-safeguard CI test · dedup retired · UPS decided not needed. Details in each item below.
 - [x] ✅ 2026-10-18 **INCIDENT (self-inflicted, recovered, no job failed): image wipe by `crictl rmi --prune`.** While pruning old screener tags,
   `crictl rmi --prune` removed every image not used by a running container — all `local/*` on pi3 and 6 on pi1 (fdi-watch, fiidii, fx, nse,
   rbi, yfinance); a timeout stopped it on pi1. ~09:00–09:27 UTC: pi3 cordoned within a minute (stock-metrics/screener/intraday ran on pi1),
@@ -37,8 +42,10 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   pi3, uncordoned; every Job in the window Succeeded. Rule added to ops manual §8 ("NEVER `crictl rmi --prune`"). **Also during recovery a
   `pgrep -af` on pi2 printed the expanded `@@PW@@` (the Pi sudo password) into the session transcript** — owner informed; whether to rotate is the
   owner's call. Lesson recorded in the same §8 entry.
-- [ ] 🤔 **Power resilience (owner, hardware):** the 2026-10-18 mains loss took all five machines down and `nodewatch` (pi0) with them, so nothing
-  alerted. Options: small UPS for pi0 + router (keeps the watcher and LAN up) or for the whole rack (TX2 + pi2 too — fewer hard power cuts on SSDs).
+- [x] ✅ 2026-10-18 **Power resilience — DECIDED: no UPS** (owner). Accepted: a mains loss takes every node and the pi0 watcher down together;
+  recovery is automatic (verified on the 10-18 outage). Not to be re-proposed.
+- [x] ✅ 2026-10-18 **Cluster dedup — RETIRED, not redesigned** (owner delegated the call). Measured: 1–2 GB of user data per Pi on 229 GB SSDs,
+  TX2 SSD 12 % used — nothing to deduplicate; the design targeted non-existent drives. Note: `piCluster/cluster/RETIRED.md`.
 - [ ] 🤔 **pi2 heat (owner, hardware):** soft-temp flag (`0x80000`/`0x80008`) recurs, max 69.3 °C in the 10-18 review — heatsink/airflow.
 - [ ] 🔶 **pi2 still holds old images** (screener v1–v8, nse v1–v3, pipeline-health v1–v4, yfinance v1–v3, fiidii v1) — it is cordoned and its disk is
   4 % used, so no pressure; if ever pruned, remove named tags one by one (ops manual §8), in a quiet window, never `--prune`. Note: pi2's copies were the
@@ -328,8 +335,10 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   its own 'rbi' row). ✅ 2026-10-18 `pipeline-health:v5` adopted `rbi` into its FEEDS (checks `max(ts)` of the
   `IN_*` interest-rate rows, 96 h) — a dead rbi job is now visible (its self-row alone could never go stale).
   `job_runs` table + `manifests/_common/mdjob.py` are ready for per-job records. Detail: roadmap §3.1/§3.2.
-- [ ] 🔶 `news_sentiment`/`raw_headlines` unique constraints (need ON CONFLICT
-  in scorer/fetcher first). Detail: ops manual §12.5; roadmap §3.4.
+- [x] ✅ 2026-10-18 `news_sentiment`/`raw_headlines` unique constraints — **live, no rebuild needed** (`11-news-constraints.sql`). The premise
+  "needs ON CONFLICT first" was checked and is false: news-fetcher already skips (headline, source, UTC day) and the scorer commits all inserts +
+  `scored` flags in ONE transaction, so no re-run can collide. Indexes mirror those keys exactly (md5(headline) — no btree size limit); 0 existing
+  conflicts; both verified to reject a duplicate. The 24 same-headline pairs on different days are feed republications and stay (decision recorded).
 
 ### Architecture review follow-ups (2026-10-10 — recommendations, none applied)
 
@@ -355,10 +364,18 @@ Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §
 - [ ] 🔶 **AR-5 (Phase 1→2)** ✅ step 1 done 2026-10-12: a `requirements.lock` for every Python image (16/16, verified 2026-10-17).
   Step 2: the screener (v10/v11) and `pipeline-health` (v5, 2026-10-18 — freeze == lock) Dockerfiles install from their locks; the other 14 still use inline `pip install` —
   switch each at its next natural rebuild. Step 3: consolidate ~16 images to ~3 by dependency profile (ADR candidate; touches ADR 0004) — not started.
-- [ ] 🔶 **AR-6/AR-7 (Phase 2)** repo layout (`src/ images/ deploy/ db/`) + kustomize base so
-  safeguards live in one place; parity-checked, no rebuild for pure moves.
-- [ ] 🔶 **AR-8 (Phase 1→2)** read-only DB roles for Grafana/bot, writer role for jobs;
-  fixture tests for pure job logic (`tests/test_stocks.py` is the model).
+- [x] ✅ 2026-10-18 **AR-6/AR-7 — intent delivered, file move declined.** The goal ("safeguards live in one place") is now enforced by
+  `tests/test_manifest_safeguards.py` in CI: all 23 CronJobs must carry Forbid / starting + active deadlines / TTL / history ≤ 3/1 / backoffLimit,
+  `Never` pull for `local/*`, resource limits, no inline password/token env. The `src/ images/ deploy/ db/` move + `kubectl apply -k` was NOT done:
+  it renames every path the runbooks, CI, `workloads.py` and two months of docs use and changes the owner's apply workflow, for no runtime benefit.
+  Revisit only if image consolidation (AR-5 step 3) makes a restructure happen anyway.
+- [x] ✅ 2026-10-18 **AR-8 — reader roles live.** `10-roles.sql` creates `grafana_ro` (SELECT on all tables + future ones via default
+  privileges, `default_transaction_read_only = on`) and `telegram_app` (SELECT all + INSERT/UPDATE/DELETE on `watchlist`, `bot_users` only).
+  Passwords generated straight into Secrets `grafana-db-ro` / `telegram-db` (never printed; set via stdin). Verified: grafana_ro reads, every write
+  fails; telegram_app writes only its two tables. Grafana datasource + `telegram-bot` Deployment + `telegram-digest`/`telegram-alerts` CronJobs
+  switched (env only, no rebuild); Grafana 4 rules `health=ok` + datasource query OK; bot `/nifty` card OK in the new pod; `pg_stat_activity` shows
+  `grafana_ro`. Not done on purpose: a writer role for the 18 pipeline jobs (they also need DDL-free writes on every table — low gain, 23-job blast
+  radius; revisit with AR-2 adoption). Fixture tests: added for stock_prices, financial_facts, EV-0, pull-backups, manifest safeguards.
 - [ ] 🔶 **AR-9 (Phase 2)** GitHub Actions CI **written 2026-10-12** (`.github/workflows/ci.yml`: docs/manifest drift check, all unit + shell tests,
   manifest sanity, gitleaks; no secrets; verified step-by-step in a clean venv) — **has run on GitHub: run #1 failed (nodewatch test needed the local hosts file — fixed in `f3e203d`), #2 and #4 (the push of 2026-10-12, lint included) are green — docs/manifest drift, all unit + shell tests, manifest sanity and the full-history gitleaks scan**. Lint
   (syntax: `py_compile` + `bash -n`) added 2026-10-12 and the workflow now also runs on `feat/**` / `fix/**` pushes. ✅ 2026-10-18: real linters added —
@@ -366,8 +383,10 @@ Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §
   Not enforced yet: F401/F841 (6 unused imports in fetchers baked into live images — clean each at its next rebuild: fdi-watch `os`, fx-fetcher
   `pandas`, stock_fundamentals `json`, telegram bot.py `timedelta`/`timezone`/`IST`). `tests/test_pull_backups.py` added to CI. Not yet run on GitHub
   (nothing pushed). Remaining: a branch/worktree per session so WIP is never committed by the wrong session.
-- [ ] 🔶 **AR-4 (Phase 3)** DB `Guaranteed` QoS + readiness probe, bot liveness (StatefulSet
-  change restarts the single DB — quiet window only).
+- [x] ✅ 2026-10-18 **AR-4 — DB Guaranteed QoS + readiness probe live.** requests = limits = 1 CPU / 2 Gi (QoS `Guaranteed`, so the
+  kubelet evicts anything else on the TX2 first), `pg_isready` readiness probe (no liveness — a restart during a long vacuum would hurt more than
+  help). Applied 09:50 UTC in a quiet slot: 17 s total DB downtime, 0 restarts, data verified. Bot liveness not added: a dead bot process
+  already restarts by itself; a hung long-poll needs a heartbeat in `bot.py` (do it at the next telegram image change).
 - [ ] 🤔 **AR-10 (Phase 3, decisions/hardware)** ~~control-plane `state.db` backup~~ ✅ first copy 2026-10-18 (below), stronger
   control-plane host, DB-host/GPU-host separation, off-site backups, schedule timezone
   (decide before 2026-11-01, ADR 0002 revisit).
@@ -417,23 +436,16 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
 
 ### Data correctness — prerequisite for EV-0 and every ML backtest (found 2026-10-10)
 
-- [ ] 🔶 **P0 · DQ-1 (G-1) corporate actions / adjusted prices.** Background: `stock_prices` kept only OHLCV with `auto_adjust=False`;
-  Yahoo's raw `Close` is split-adjusted but not dividend-adjusted, and a split after a symbol's backfill left older rows on the old scale.
-  **CTVA proven 2026-10-12** (spin-off recorded as `Stock Splits = 6.66`); MRNA +177 % and HEGAM.NS −63 % are real moves, not adjustment errors.
-  **Audit + repair 2026-10-13:** `ops-tools/audit-price-adjustments.py` — 2,474 comparisons, exactly one mismatch (CTVA, ratio 6.665), repaired live.
-  **2026-10-14 (`screener:v10`):** split detection + full-history re-backfill in the daily job.
-  **2026-10-17/18 — corporate actions LIVE in `screener:v11`:** schema `06b-corporate-actions.sql` (`stock_prices.adj_close` column +
-  `corporate_actions` table: symbol, ts, action_type, ratio, amount, source; PK symbol+ts+action_type) applied, SCHEMA-OK. `stock_prices.py`
-  records splits (`ratio`) and dividends (`amount`) via `action_events()`; only splits trigger a resync; a failed actions write is a WARN, not a
-  symbol failure. 13 tests (`tests/test_stock_prices.py`, 3 new). v11 built on TX2 (8 files sha256-identical to the repo), tarball `d14bf219…`
-  checked at each hop, imported pi3 (64 s) then pi1 (62 s, 25/25 throttle samples `0x0`); live diff = 6 image lines. **Canary 2026-10-18 on pi1:**
-  `PRICES-OK fetched=997 warn=1 rows=4985 splits_resynced=0`; 18 dividends recorded (18 symbols, 10-13→10-16); 0 duplicate trade days; 0
-  non-midnight rows. **Not yet exercised on a real split** (unit-tested only). **Remaining:** (1) `adj_close` is still NULL on purpose — per the
-  data-foundations draft §2/§3.1 it must be OUR total-return series computed from `close` + `corporate_actions`, NOT Yahoo's `Adj Close`
-  (rewritten backwards on every dividend, stale in rows the 5-day job skips); (2) one-off `corporate_actions` history backfill (per-symbol,
-  `period=max`); (3) `price_anomalies` writer (>40 % jumps, restatements); (4) keep running the weekly audit until (1)–(3) land.
-  Note: the live `corporate_actions` shape differs from the draft's (`action_type/ratio/amount` vs `action/value/detected_at`, no `source` in PK) —
-  fine for one source; revisit if a second source is added.
+- [x] ✅ 2026-10-18 **P0 · DQ-1 (G-1) corporate actions / adjusted prices — DONE.** History: CTVA proven 2026-10-12 and repaired 10-13
+  (`audit-price-adjustments.py`); split detection + resync in v10 (10-14); `corporate_actions` recording in v11 (10-17).
+  **Completed 2026-10-18 in `screener:v12`/`v13`:** (1) **own total-return `adj_close`** (`adj_series()`: close × Π(1 − div/prev close) over later
+  dividends; never Yahoo's Adj Close) recomputed per symbol after full-history writes or a dividend in the daily window; (2) **full actions
+  backfill** (`backfill-corporate-actions`, 998/998, 0 warn: 58,866 dividends / 858 symbols, 2,030 splits / 630 symbols; plus the 3 delisted
+  symbols WBD/PSKY/CTVA) — **0 NULL `adj_close` of 6,343,487 rows; `adj_close ≤ close` everywhere**; sanity: 10-year total − price return
+  ≈ dividend yield (KO 3.4 %/yr, XOM 4.75 %, AAPL 1.1 %, BRK-B 0.0); (3) **`price_anomalies` writer** (`jump_gt_40pct`, `history_restated`;
+  restated history now resyncs even without a split flag; the 2 newest bars are exempt); 22 tests. v12 canary: `PRICES-OK fetched=997
+  anomalies=0 adj_updated=152223`. The weekly audit can retire after 4 clean weekly runs with the restatement detector live.
+  Downstream (not done, separate decision): point `stock_metrics.py` returns/vol at `adj_close` — EV-0 shows small rank effects (§5a).
 - [x] ✅ 2026-10-13 **P0 · DQ-4 `stock_prices` timestamp conventions + 4,434 duplicate rows — REPAIRED.** Found 2026-10-12: pre-10-02 history was stamped with exchange-local
   midnight (US `04:00`/`05:00` UTC, NSE `18:30` UTC of the *previous* day — 99.7 % of the 6.34 M rows) while newer rows are `00:00` UTC on the trade date; the overlap left 4,434 duplicate
   symbol-days (987 symbols, 09-28 → 10-02) and made every old NSE `ts::date` one day early (e.g. HEGAM.NS's 09-07 bar stored 09-06). **Fix (approved by the owner's "fix all that can be done"):**
@@ -444,13 +456,19 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   (matches Yahoo). **Decision recorded as ADR 0013.** **Step 3 (writer change) turned out unnecessary:** the current daily writer already produces `00:00` UTC rows (every row since 10-05 is), so the convention cannot drift back. Readers
   (`stock_metrics` row-count lookbacks) are now consistent; tomorrow's `stock-metrics` run is the first to score on the repaired series. Note: the Nifty 500 bar for "today" is a partial intraday bar until the
   next run overwrites it — harmless. Rollback if ever needed: restore from the pre-migration dump (no inverse UPDATE exists).
-- [ ] 🔶 **P0 · DQ-2 fundamentals period + point-in-time errors.** (a) `edgar_facts()` ignores period length → quarterly rows hold YTD values
-  (MSFT net income 27.75 → 66.21 → 97.98 → 133.75 bn); measured 2026-10-10: median 3-y revenue CAGR −17.8 % vs like-for-like +8.8 %, 351/477 sign-flipped.
-  (b) `filing_published_at` is the latest re-filing, so history is not point-in-time. **Interim fix live since `screener:v9`** (flow metrics from
-  full-year yfinance rows only; median CAGR +8.5 %). **2026-10-17: schema only** — `06c-data-foundations.sql` created `financial_facts`
-  (duration-keyed, first-filing `filed`), `universe_membership_snapshots`, `price_anomalies`, `factor_returns`; all empty, SCHEMA-OK.
-  **Remaining (the actual fix):** `stock_fundamentals.py` writer for `financial_facts` (draft §3.2), canary on MSFT/a Dec-FY name/an NSE name,
-  backfill, then switch screener readers to duration-aware TTM and diff the top-50. Same flaw unfixed in Telegram `stocks.py` `series()`.
+- [x] ✅ 2026-10-18 **P0 · DQ-2 fundamentals period + point-in-time — DONE (screener reads it live).** Problem (2026-10-10): EDGAR YTD
+  quarters collapsed onto one key (median 3-y revenue CAGR −17.8 % vs +8.8 %) and `filing_published_at` was the latest re-filing.
+  **Fix:** `financial_facts` writer in `stock_fundamentals.py` (v12): every 10-K/10-Q value keyed by duration and first filing date, repeated
+  comparatives dropped (MSFT check: FY2024 NI $88.1 bn first filed 2024-07-30, not 2026; 2,189 raw entries → 829 facts); yfinance values with
+  `filed` = first day observed. Full pass 2026-10-18: `FUNDAMENTALS-OK done=998/998 failed=0` → **305,422 EDGAR facts / 502 US companies,
+  27,258 yfinance facts / 997 symbols.** Screener reader (v13, `FUND_SOURCE=facts`): EDGAR full-year series + TTM FCF (annual + YTD − prior
+  YTD), point-in-time `filed <= as_of`, **stale series (> 460 days) fall back to yfinance**. Dry-run diff before flipping: NIFTY top-50 50/50,
+  SP500 top-50 46/50 (changes = fresher 10-Ks, e.g. MU FY2026, and TTM FCF). **Flipped live 2026-10-18** (env on CronJob `stock-screener`;
+  rollback = `FUND_SOURCE=yfinance`). Bug caught by the diff and fixed before the flip: CBOE's EDGAR revenue stops in 2017 (tag change) →
+  scored on a 9-year-old CAGR in v12's dry run; v13 guard. Logs: `out/screener-dry-{yfinance,facts}.log` (gitignored).
+  **Follow-up (EV-9):** 19/486 revenue, 58/388 capex, 33/488 net-income EDGAR series are stale because companies moved to tags the map lacks
+  (utilities `RegulatedAndUnregulatedOperatingRevenue`, banks `RevenuesNetOfInterestExpense`, …) — extend `EDGAR_MAP` (append-only, first tag
+  still wins) + one fundamentals pass. Telegram `stocks.py` `series()` still reads the old path (own image).
 - [x] ✅ 2026-10-17 **P0 · DQ-3 weekly fundamentals job — PROVEN LIVE.** Fix shipped in v9 (`failed` initialised; `upsert()` keeps the earliest
   `filing_published_at`). The Sat 2026-10-17 run (`stock-fundamentals-29870700`, 13:00→14:40 UTC, Complete) is the first real pass on it.
   Its pod log was lost (likely in the 10-18 site-wide power event), so the proof is DB-side: `job_state.stock_fundamentals` cursor = NULL
@@ -468,12 +486,22 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
 
 ### Evidence-based signals (plan 2026-10-10 — `evidence-based-signals-roadmap.md`)
 
-- [ ] 🔶 **EV-0** signal test harness (monthly IC, t-stat, quintile spread, costs)
-  — prerequisite for every item below; acceptance test in roadmap §5.
-- [ ] 🔶 **EV-2** keep every weekly fundamentals snapshot (stop overwriting) —
-  cheap now, unrecoverable later.
-- [ ] 🔶 **EV-3/EV-4/EV-5/EV-7** price-only signals, data on hand: 12-1 momentum,
-  nearness to 52-week high, beta, index trend flag.
+- [x] ✅ 2026-10-18 **EV-0 signal test harness — built and run.** `ops-tools/ev0.py export|run` (6 synthetic-data tests in CI; export via the
+  read-only `grafana_ro` role): monthly Spearman IC + Newey-West t, halves, quintile spread net of 0.2/0.4 % costs, turnover, Fama-MacBeth
+  with the composite's price inputs as controls. First run 2001–2026, 9 price signals × 2 universes × {adj_close, close}: **nothing passes §5
+  (both universes required)**. NIFTY 500: 12-1 momentum IC 0.045, t 4.2, +13.5 %/yr net — strong; S&P 500 momentum ≈ 0 and low-vol/low-beta
+  *negative* = survivorship artefact of today's constituents. `pos_52w` adds nothing after controls. Full table + reading: evidence roadmap §5a.
+  **Composite unchanged** (per §5). Next: EV-1 (blocking for US), then composite v2 (EV-17) — per-universe rules are an owner decision.
+- [x] ✅ 2026-10-18 **EV-2** — statement history now accumulates in `financial_facts` (EDGAR: one row per first filing / restatement;
+  yfinance: a new row only when Yahoo's value changes, `filed` = first day observed). Ratio rows already keep their fetch-date `ts`
+  (`pe`/`pb` hold 10-04 and 10-17 snapshots).
+- [x] ✅ 2026-10-18 **G-2a weekly membership snapshots** — `universe_refresh.py` (v12) appends `universe_membership_snapshots` every Sunday;
+  first snapshot seeded 2026-10-18 (503 SP500 + 495 NIFTY500). Survivorship-free backtests become possible only as this accrues (EV-1 still
+  needed for the past).
+- [ ] 🔶 **EV-3/EV-4/EV-5/EV-7** — EV-3/4/5 **tested 2026-10-18** (EV-0 §5a): 12-1 momentum passes on NIFTY only; near-high and beta fail
+  both. Not added to `stock_metrics` until composite v2 is decided. EV-7 (index trend flag) is a display item, not a score — not started.
+- [ ] 🔶 **EV-1 historical index membership — now the BLOCKING item for US signals** (EV-0 shows survivorship dominates S&P results).
+  Sources: S&P 500 change history; NSE reconstitution circulars. Snapshots accrue weekly from 2026-10-18 (G-2a) but cannot fill the past.
 - [ ] 🔶 **EV-9** more statement lines (total assets, gross profit, operating cash
   flow, shares) → **EV-10…EV-14** profitability, investment, accruals, issuance,
   F-score / G-score.

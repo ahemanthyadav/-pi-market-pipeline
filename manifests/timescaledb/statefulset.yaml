@@ -1,7 +1,7 @@
 # TimescaleDB on the TX2. Single replica (this data volume does not need HA).
 # - Pinned to ahytx2-desktop (only node with the SSD) + tolerates the gpu taint.
 # - PGDATA subdir convention required by the upstream postgres entrypoint.
-# - Telemetry off. Memory capped at 2Gi (TX2 has 7.7G shared; sentiment gets ~4G).
+# - Telemetry off. Guaranteed 1 CPU / 2Gi (TX2 has 7.7G shared; sentiment gets ~4G).
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -47,13 +47,25 @@ spec:
           ports:
             - containerPort: 5432
               name: postgres
+          # AR-4 (2026-10-18): requests == limits -> Guaranteed QoS, so the kubelet evicts
+          # anything else on the TX2 before the database under memory pressure.
           resources:
             requests:
-              memory: 1Gi
-              cpu: 250m
+              memory: 2Gi
+              cpu: "1"
             limits:
               memory: 2Gi
               cpu: "1"
+          # Readiness only (no liveness: a restart during a long vacuum/rewrite would do
+          # more harm than a slow probe). Not-ready drops the pod from the headless
+          # Service, so clients get a clean connection error instead of a hang.
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-h", "127.0.0.1", "-p", "5432"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
           volumeMounts:
             - name: pgdata
               mountPath: /var/lib/postgresql/data

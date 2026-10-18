@@ -171,12 +171,12 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | /var/lib/market-data/backups on pi3 |
 | pipeline-health | 45 1 * * * | local/pipeline-health:v5 | pipeline_heartbeat (feed freshness, 14 feeds incl. rbi; weekend-safe 96 h on stock prices/scores since v5) |
 | intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
-| universe-refresh | 0 9 * * 0 | local/screener:v11 | universe_constituents + ticker_names (998 symbols) |
-| stock-prices | 30 23 * * * | local/screener:v11 | stock_prices (998 symbols, 5d window) |
-| stock-fundamentals | 0 6 * * 6 | local/screener:v11 | stock_fundamentals (EDGAR US + yfinance NSE, resumable) |
-| stock-metrics | 0 2 * * * | local/screener:v11 | stock_metrics_daily |
-| stock-screener | 15 2 * * * | local/screener:v11 | stock_scores + screening_runs (v8: house conn pattern, both universes — see §8) |
-| stock-report | 30 2 * * * | local/screener:v11 | stock_reports (top-25/universe + __digest__; v8: today's shortlist only) |
+| universe-refresh | 0 9 * * 0 | local/screener:v13 | universe_constituents + ticker_names (998 symbols) |
+| stock-prices | 30 23 * * * | local/screener:v13 | stock_prices (998 symbols, 5d window) |
+| stock-fundamentals | 0 6 * * 6 | local/screener:v13 | stock_fundamentals (EDGAR US + yfinance NSE, resumable) |
+| stock-metrics | 0 2 * * * | local/screener:v13 | stock_metrics_daily |
+| stock-screener | 15 2 * * * | local/screener:v13 | stock_scores + screening_runs (v8: house conn pattern, both universes — see §8) |
+| stock-report | 30 2 * * * | local/screener:v13 | stock_reports (top-25/universe + __digest__; v8: today's shortlist only) |
 | rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (7 IN_* policy rates) + bond_yields (5 G-Sec tenors + 3 T-bills) + pipeline_heartbeat self-row 'rbi' |
 | headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (gazetteer extraction over raw_headlines, ADR 0010) |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only (manual INSERT follows) |
@@ -237,13 +237,18 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | FRED (DFF, DGS2/10/30) | fredapi + key in Secret | ✅ live | key verified 2026-10-03 (DFF 3.88) |
 | News RSS | feedparser (6 feeds: ET, BS, LiveMint, BusinessLine, CNBC, MarketWatch) | ✅ live 2026-10-12 | Moneycontrol ×2 dead (302 to a login-consent wall for every user-agent) and Reuters dead (`feeds.reuters.com` no longer resolves) — replaced via the CronJob's `FEEDS` env override, no image rebuild; the script's `DEFAULT_FEEDS` is stale until the next rebuild |
 | NSE FII/DII | fiidiiTradeReact JSON + session | ✅ live | API returns bare list, not `{data:…}` envelope |
-| Stock prices/fundamentals (screener layer) | yfinance per-universe + EDGAR + yfinance stmts | ✅ live (2026-10-09) | **`stock_prices.ts` = 00:00 UTC on the trade date for EVERY row (normalised 2026-10-13, DQ-4)**; Yahoo back-adjusts splits/spin-offs but we refresh only 5 days — **since `screener:v10` (2026-10-14) the daily job pulls `actions=True` and, when a symbol shows a non-zero `Stock Splits` in the 5-day window, re-fetches and rewrites that symbol's full history (`SPLIT-RESYNC <sym> <date>x<ratio> rows=N` in the log; cap `SPLIT_RESYNC_MAX`=25; `PRICES-OK … splits_resynced=N`)**; **since `screener:v11` (2026-10-18) every split and dividend in the 5-day window is also upserted into `corporate_actions` (splits → `ratio`, dividends → `amount`; a dividend never triggers a resync; a failed actions write logs `WARN <sym> corporate_actions write failed` and the prices still count). `stock_prices.adj_close` exists but stays NULL until our own total-return calculation lands (DQ-1 — never copy Yahoo's `Adj Close`)**; the weekly `ops-tools/audit-price-adjustments.py` stays as the safety net (CTVA repaired 2026-10-13); `Ticker.history()` returns tz-aware local midnights, so `trade_ts()` forces 00:00 UTC on every write path (ADR 0013); Yahoo pre-open "today" bars (partial OHLC, ~0 volume) land for a handful of tickers each run; self-healing — the next run DELETE+INSERTs the final bar, but same-day metrics/scores can key to the partial bar. `DUMMYHEG.NS` dead (WARN-tolerant). |
+| Stock prices/fundamentals (screener layer) | yfinance per-universe + EDGAR + yfinance stmts | ✅ live (2026-10-09) | **`stock_prices.ts` = 00:00 UTC on the trade date for EVERY row (normalised 2026-10-13, DQ-4)**; Yahoo back-adjusts splits/spin-offs but we refresh only 5 days — **since `screener:v10` (2026-10-14) the daily job pulls `actions=True` and, when a symbol shows a non-zero `Stock Splits` in the 5-day window, re-fetches and rewrites that symbol's full history (`SPLIT-RESYNC <sym> <date>x<ratio> rows=N` in the log; cap `SPLIT_RESYNC_MAX`=25; `PRICES-OK … splits_resynced=N`)**; **since `screener:v11` (2026-10-18) every split and dividend in the 5-day window is also upserted into `corporate_actions` (splits → `ratio`, dividends → `amount`; a dividend never triggers a resync; a failed side write logs `WARN <sym> … failed` and the prices still count). Since v12: `adj_close` = OUR total-return close (never Yahoo's `Adj Close`), recomputed for a symbol on a dividend in the window or a full rewrite (log: `PRICES-OK … anomalies=N adj_updated=N`); before overwriting, the window is checked against the DB — >40 % jumps and restated history (>0.5 %, the 2 newest bars exempt) go to `price_anomalies`, and restated symbols resync even without a split flag (`SPLIT-RESYNC <sym> restated`). Full re-derivation: Job `backfill-corporate-actions` (resumable). Screener reads EDGAR `financial_facts` since v13 (`FUND_SOURCE=facts`, stale series fall back to yfinance; `DRY_RUN=1` prints the shortlist without writing)**; the weekly `ops-tools/audit-price-adjustments.py` stays as the safety net (CTVA repaired 2026-10-13); `Ticker.history()` returns tz-aware local midnights, so `trade_ts()` forces 00:00 UTC on every write path (ADR 0013); Yahoo pre-open "today" bars (partial OHLC, ~0 volume) land for a handful of tickers each run; self-healing — the next run DELETE+INSERTs the final bar, but same-day metrics/scores can key to the partial bar. `DUMMYHEG.NS` dead (WARN-tolerant). |
 | RBI/G-Secs | official RBI mobile "Current Rates" widget (lxml scrape) | ✅ live (2026-10-09, `rbi-fetcher`) | benchmark SECURITY names rotate — matched by maturity-year→tenor bucket; page hides a stale date in an HTML comment (lxml text_content drops it); values carry '#'/'*' markers |
 | Headline intelligence | gazetteer extraction over raw_headlines (`headline-ner`, ADR 0010) | ✅ live (2026-10-09) | deterministic ticker_names matching; common-word first-tokens stoplisted (measured FPs: "live/target/realty"); 16-event keyword taxonomy; events link the single company mentioned |
 | FDI monthly | watch + manual INSERT | 🔶 reporter only | DPIIT PDFs; 5-min quarterly task (template in job log) |
 | TIC mirror stat | — | deferred | — |
 
 ## 5. Database reference
+
+**DB facts (2026-10-18):** pod QoS `Guaranteed` (1 CPU / 2 Gi) with a `pg_isready` readiness probe (AR-4);
+`stock_prices`/`index_prices` on 1-year chunks (old weekly chunks merged — see §8 "Slow queries"); roles
+`postgres` (jobs), `grafana_ro` (SELECT, read-only), `telegram_app` (SELECT + `watchlist`/`bot_users`).
+For read-only ad-hoc work prefer `grafana_ro` (password in Secret `grafana-db-ro`) — it cannot write by accident.
 
 ### Connect (password from `timescaledb-auth` Secret)
 
@@ -687,6 +692,14 @@ python3 ops-tools/runcmd.py pi2 pi2 'echo @@PW@@ | sudo -S systemctl restart k3s
 # Then verify agents re-register one-by-one (pi3 → pi1 → TX2).
 ```
 
+### Slow queries on a hypertable = chunk count (found 2026-10-18)
+`stock_prices` had 3,382 seven-day chunks back to 1961: `EXPLAIN ANALYZE` of an open-ended per-symbol read
+showed **34 s planning, 0.2 s execution**. Fixed by 1-year chunks for new data (`06e-chunk-intervals.sql`) and
+merging the old ones per year (`ops-tools/sql/2026-10-18-merge-weekly-chunks.sql`, after a verified dump;
+merge_chunks is a PROCEDURE → `CALL`, chunk list passed via psql `\gset`): 107 chunks, 34 ms planning,
+rows identical. Check: `SELECT hypertable_name, count(*) FROM timescaledb_information.chunks GROUP BY 1;`
+and keep hot-path queries bounded in `ts` (AGENTS rule 9).
+
 ### NEVER `crictl rmi --prune` (or `ctr images prune`) on a node — incident 2026-10-18
 With no registry, `crictl rmi --prune` deletes **every image not used by a running container** — i.e. every
 CronJob image, which `imagePullPolicy: Never` can never re-pull. On 2026-10-18 it wiped all `local/*` images on pi3
@@ -822,6 +835,17 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
   **Docs never carry values** — commands use the `@@PW@@` token (see §6), any
   `@@KEY@@` from `.secrets.env` (e.g. `@@TELEGRAM_BOT_TOKEN@@` for a direct
   getMe/sendMessage channel check), or the variable names above.
+- **DB role Secrets (AR-8, 2026-10-18), created out-of-band, not in any file:** `grafana-db-ro` and
+  `telegram-db` (keys `username`, `password`). Recreate/rotate one without printing it:
+  ```bash
+  P=$(python3 -c "import secrets,string;print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(32)))")
+  kubectl -n market-data create secret generic grafana-db-ro --from-literal=username=grafana_ro \
+    --from-literal=password="$P" --dry-run=client -o yaml | kubectl apply -f -
+  printf "ALTER ROLE grafana_ro LOGIN PASSWORD '%s';\n" "$P" | kubectl -n market-data exec -i timescaledb-0 -- \
+    env PGPASSWORD="$PW" psql -U postgres -d postgres -q; unset P
+  # then restart the consumer (grafana: apply-grafana-provisioning.sh + rollout restart; bot: rollout restart)
+  ```
+  Grants are code (`10-roles.sql`); new tables are covered by default privileges.
 - Secret manifests (`manifests/timescaledb|grafana|ingestion/rates/secret.yaml`) are
   gitignored too; `secret.yaml.example` files show their shape. Live values also
   live in the cluster. Credential rotation is not a current priority.

@@ -14,7 +14,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: prices
-          image: local/screener:v11
+          image: local/screener:v13
           imagePullPolicy: Never
           command: ["python", "stock_prices.py"]
           env:
@@ -49,12 +49,48 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: fundamentals
-          image: local/screener:v11
+          image: local/screener:v13
           imagePullPolicy: Never
           command: ["python", "stock_fundamentals.py"]
           env:
             - name: BACKFILL
               value: "1"
+            - name: PGHOST
+              value: timescaledb.market-data.svc.cluster.local
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: timescaledb-auth
+                  key: password
+            - name: PGDATABASE
+              value: postgres
+          resources:
+            requests: {memory: 256Mi, cpu: 100m}
+            limits: {memory: 1Gi, cpu: 500m}
+---
+# DQ-1 (2026-10-18): full dividend/split history -> corporate_actions, then our own adj_close
+# for every symbol. Resumable (job_state 'corporate_actions_backfill'); re-runs are safe.
+# Rewrites adj_close on ~6.3 M rows in per-symbol transactions — run in a quiet window.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backfill-corporate-actions
+  namespace: market-data
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 14400
+  ttlSecondsAfterFinished: 604800
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: actions
+          image: local/screener:v13
+          imagePullPolicy: Never
+          command: ["python", "corporate_actions_backfill.py"]
+          env:
             - name: PGHOST
               value: timescaledb.market-data.svc.cluster.local
             - name: PGUSER

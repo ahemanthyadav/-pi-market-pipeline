@@ -55,6 +55,9 @@ jobs:
           python3 tests/test_stock_fundamentals_fixes.py
           python3 tests/test_stock_prices.py
           python3 tests/test_pull_backups.py
+          python3 tests/test_financial_facts.py
+          python3 tests/test_ev0.py
+          python3 tests/test_manifest_safeguards.py
       - name: Shell tests
         run: |
           bash tests/test-precommit-hook.sh
