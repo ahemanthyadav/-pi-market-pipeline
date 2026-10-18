@@ -383,6 +383,42 @@ safe to re-run via the `timescaledb-schema` one-shot Job).
 | price_anomalies (10-18) | 0 so far (detector live since v12) |
 | raw_headlines / news_sentiment (10-18) | 1,545 / 1,545 |
 
+### 4.3a Historical coverage — how far back each table goes (verified 2026-10-18)
+
+Long history exists for **prices, corporate actions and US fundamentals**; most other feeds start when they went
+live (2026-09-29). Query used: `min(ts)/max(ts)/count(*)/count(DISTINCT key)` per table, as `grafana_ro`.
+
+**Long history**
+
+| Data | From | Detail |
+|---|---|---|
+| `stock_prices` — S&P 500 | 1962 | median first bar 1992; 386/503 ≥ 20 years, 17 < 5 years |
+| `stock_prices` — NIFTY 500 | 1991 | median first bar 2007; 207/494 ≥ 20 years, 97 < 5 years (recent listings) |
+| `index_prices` (38 tickers) | 1985 | ^GSPC ^IXIC ^FTSE ^N225 ^GSPTSE DXY 1985 · ^HSI 1986 · ^GDAXI ^RUT ^STI 1987 · ^FCHI ^SSMI ^VIX 1990 · ^MXX 1991 · ^AEX ^AXJO ^DJI ^RUI 1992 · ^BVSP ^IBEX 1993 · ^KS11 1996 · ^BSESN SSE SZSE FTSEMIB ^TWII 1997 · GC/SI/CL futures 2000 · NIFTY Smallcap 250 + ^CRSLDX 2005 · ^NSEI ^NSEBANK ^CNXIT ^STOXX50E 2007 · ^INDIAVIX 2008 · ^CNXPHARMA 2011 · **NIFTY Midcap 150 2019** (Yahoo's limit) |
+| `corporate_actions` | 1962 | 58,896 dividends + 2,031 splits, 913 symbols (full Yahoo history) |
+| `stock_prices.adj_close` | as `stock_prices` | every row (0 NULL) |
+| `financial_facts` — EDGAR (US) | 2006 | 502 companies, first-filing dates (ADR 0015) |
+| `financial_facts` / `stock_fundamentals` — yfinance (India) | 2021 | ~4 annual statements per company — Yahoo's limit; the India gap behind G-6 |
+
+**Short history — live since the pipeline started**
+
+| Data | From | Backfillable? |
+|---|---|---|
+| `fx_rates` (10 pairs) | 2025-12-15 (backfill) | **yes** — Yahoo has decades |
+| `bond_yields` (15 instruments) | 2026-09-29 | **US yes** (Yahoo ^TNX/^FVX/^TYX/^IRX, FRED DGS*); India: RBI widget is current-only |
+| `interest_rates` (8) | 2026-10-01 | **DFF yes** (FRED from 1954); RBI policy rates: current-only feed |
+| `technical_indicators` (38 tickers) | 2026-09-29 | **yes** — computable from `index_prices` history |
+| `capital_flows` (FII/DII) | 2026-09-29 | partly — NSE archive depth unverified |
+| `raw_headlines` / `news_sentiment` / `headline_*` | 2026-09-29 | no — RSS serves current items only |
+| `stock_metrics_daily`, `stock_scores`, `stock_reports` | 2026-10-01/04 | metrics yes (from prices); historical scores only meaningful with point-in-time fundamentals (US) and EV-1 membership |
+| `intraday_prices` (4) | 2026-10-01 | limited — Yahoo keeps hourly bars ~2 years |
+| `universe_membership_snapshots` | 2026-10-18 | no — the past needs EV-1 (historical index changes) |
+| `commodity_prices` | empty by design | futures live in `index_prices` |
+
+Consequence for research: EV-0 can test price signals over 25 years (both universes) and US fundamentals from 2006;
+India fundamentals signals cannot be tested historically until a filings source exists (G-6). Backfill plan: pending-tasks
+"History backfills".
+
 ### 4.4 Backup & durability
 
 - **Automated:** CronJob `pg-backup` 01:30 UTC on pi3 → `pg_dump -Fc` to

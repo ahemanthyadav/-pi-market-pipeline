@@ -434,6 +434,21 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
 - [ ] 🔶 **P3:** **ML-4/6/7b–d** · **G-11** India delivery/bulk/OI · **G-16** filing-text analytics · **G-17** mid/small-cap
   universe · **G-19** 13F holdings · **TP-2** GBM quarterly retrain + gate.
 
+### History backfills (found 2026-10-18 — coverage table: architecture §4.3a)
+
+- [ ] 🔶 **H-1 FX history** — `fx_rates` starts 2025-12-15; Yahoo has decades for all 10 pairs. One-shot Job on the existing
+  `fx-fetcher:v1` image (pattern: `manifests/ingestion/fx/backfill-job.yaml`, 2026-10-12), daily closes at 00:00 UTC.
+- [ ] 🔶 **H-2 US bond yields** — `bond_yields` starts 2026-09-29; ^TNX/^FVX/^TYX/^IRX on Yahoo (1960s+) and FRED DGS2/10/30.
+  India G-Sec history has no stable source (RBI widget is current-only) — stays forward-only.
+- [ ] 🔶 **H-3 Fed funds (DFF)** — `interest_rates` starts 2026-10-01; FRED has DFF from 1954 (`rates-fetcher` already uses fredapi).
+  RBI policy-rate history: forward-only unless a source is found.
+- [ ] 🔶 **H-4 technical indicators** — recompute RSI/MACD/MA/Bollinger over the full `index_prices` history (1985+); no new feed.
+- [ ] 🔶 **H-5 stock metrics history** — `stock_metrics_daily` only from 2026-10-01; recomputable from prices (now with `adj_close`).
+  Historical *scores* wait for EV-1 + point-in-time fundamentals.
+- [ ] 🤔 **H-6 FII/DII history** — check NSE archive depth before deciding.
+- Not backfillable (record so nobody tries): news/sentiment (RSS is current-only), intraday beyond ~2 years, membership snapshots
+  (needs EV-1), India fundamentals beyond ~4 years (G-6).
+
 ### Data correctness — prerequisite for EV-0 and every ML backtest (found 2026-10-10)
 
 - [x] ✅ 2026-10-18 **P0 · DQ-1 (G-1) corporate actions / adjusted prices — DONE.** (ADR 0014) History: CTVA proven 2026-10-12 and repaired 10-13
