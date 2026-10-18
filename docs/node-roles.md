@@ -2,7 +2,7 @@
 
 > **Purpose:** one place that answers "what does each machine do, what breaks if it dies, and what must I
 > never do to it". Detail stays in the linked docs; this file is the index per node.
-> **Last verified: 2026-10-18** (live `kubectl`, per-Pi `uptime`/`dmesg`/`vcgencmd`, all 4 nodes Ready, all 23 CronJobs active;
+> **Last verified: 2026-10-18** (live `kubectl`, per-Pi `uptime`/`dmesg`/`vcgencmd`, all 4 nodes Ready, every CronJob then deployed (23) active — the 24th, nse-fundamentals, was added later that day, suspended until its backfill ends;
 > TX2 fixed-config facts are from the ops manual and were not re-checked today).
 > No IP addresses here (AGENTS.md rule 8): node names only; real values live in the gitignored `.hosts.env`.
 
@@ -36,7 +36,7 @@
   allow-list — ADR 0012), CronJobs `telegram-digest` (08:00 IST — the only job with an explicit timeZone) and `telegram-alerts` (02:45).
   Pinned so image imports are needed on one node only.
 - **Unpinned jobs:** eligible for any of the 18 unpinned CronJobs (§3.1) — **only if the image is imported on pi1** (no registry).
-  `screener:v13` (2026-10-18, data foundations + facts reader) + `pipeline-health:v5` imported on pi1 and pi3 (v12/v11/v10/v4 kept for rollback — remove old tags one by one, never `--prune`; pi2 skipped — cordoned). After the
+  `screener:v15` (2026-10-18: data foundations, facts reader, NSE fundamentals) + `pipeline-health:v5` imported on pi1 and pi3 (v10–v14 + health v4 kept for rollback — remove old tags one by one, never `--prune`; pi2 skipped — cordoned). The NSE backfill Job runs on pi1/pi3 (network-bound, ~19 h). After the
   10-18 prune incident pi1 holds all 14 images its jobs need (incl. telegram-digest:v8), pi3 all 13 floating ones — verified against the manifests.
   The earlier image gap is closed: `yfinance-fetcher:v5`, `nse-fetcher:v4` and `screener:v10` (v9 kept) are imported on **both** pi1 and
   pi3 (verified with `ctr images ls` 2026-10-14 06:20 UTC) — and since then most floating jobs run here (§3.1).

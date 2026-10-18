@@ -1,7 +1,7 @@
 # Market Data Pipeline — Operations Manual & System Reference
 
 > **Reconciled with `manifests/` 2026-10-10** (schedules/images checked by `ops-tools/workloads.py --check`).
-> **Last fully healthy cluster check: 2026-10-17** — all 4 k8s nodes Ready (pi2 cordoned), all 23 CronJobs active,
+> **Last fully healthy cluster check: 2026-10-17** — all 4 k8s nodes Ready (pi2 cordoned), every CronJob then deployed (23) active,
 > TimescaleDB/Grafana/Telegram-bot all Running. See §8 and pending-tasks §1 for known gaps.
 > **Repo layout (2026-10-03):** everything lives in `projects/marketdata/` —
 > `docs/` (project docs), `manifests/` (k8s), `ops-tools/` (SSH helpers),
@@ -146,7 +146,7 @@ time written in these docs has actually been firing at PDT — functionally fine
 (each fetch still lands after its market close; the staggering order holds), so
 schedules are left as-is; do not "fix" them without re-validating everything.
 
-**Safeguards (review AR-1) — in the repo manifests since 2026-10-11, APPLIED to the cluster 2026-10-12 (all 23 CronJobs, still suspended at the time).** Every CronJob now carries
+**Safeguards (review AR-1) — in the repo manifests since 2026-10-11, APPLIED to the cluster 2026-10-12 (to all 23 then-existing CronJobs, still suspended at the time; every later CronJob carries them — CI test).** Every CronJob now carries
 `concurrencyPolicy: Forbid`, `startingDeadlineSeconds` (1 h for jobs whose next run recovers the data — their pulls cover 2–5
 days; 10 min for hourly `intraday-fetcher`; 6 h for latest-snapshot feeds `fiidii`/`news`/`rbi` and the weekly jobs, where late
 beats skipped; 24 h for monthly `fdi-watch`), `activeDeadlineSeconds` (3–10× measured runtime: 300 s intraday, 600 s fast
@@ -171,12 +171,13 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | /var/lib/market-data/backups on pi3 |
 | pipeline-health | 45 1 * * * | local/pipeline-health:v5 | pipeline_heartbeat (feed freshness, 14 feeds incl. rbi; weekend-safe 96 h on stock prices/scores since v5) |
 | intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
-| universe-refresh | 0 9 * * 0 | local/screener:v13 | universe_constituents + ticker_names (998 symbols) |
-| stock-prices | 30 23 * * * | local/screener:v13 | stock_prices (998 symbols, 5d window) |
-| stock-fundamentals | 0 6 * * 6 | local/screener:v13 | stock_fundamentals (EDGAR US + yfinance NSE, resumable) |
-| stock-metrics | 0 2 * * * | local/screener:v13 | stock_metrics_daily |
-| stock-screener | 15 2 * * * | local/screener:v13 | stock_scores + screening_runs (v8: house conn pattern, both universes — see §8) |
-| stock-report | 30 2 * * * | local/screener:v13 | stock_reports (top-25/universe + __digest__; v8: today's shortlist only) |
+| universe-refresh | 0 9 * * 0 | local/screener:v15 | universe_constituents + ticker_names (998 symbols) |
+| stock-prices | 30 23 * * * | local/screener:v15 | stock_prices (998 symbols, 5d window) |
+| stock-fundamentals | 0 6 * * 6 | local/screener:v15 | stock_fundamentals (EDGAR US + yfinance NSE, resumable) |
+| stock-metrics | 0 2 * * * | local/screener:v15 | stock_metrics_daily |
+| stock-screener | 15 2 * * * | local/screener:v15 | stock_scores + screening_runs (v8: house conn pattern, both universes — see §8) |
+| stock-report | 30 2 * * * | local/screener:v15 | stock_reports (top-25/universe + __digest__; v8: today's shortlist only) |
+| nse-fundamentals | 0 10 * * 0 | local/screener:v15 | financial_facts `nse_cons`/`nse_sa` — India results filings (G-6, ADR 0021); **suspended until the first backfill completes** |
 | rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (7 IN_* policy rates) + bond_yields (5 G-Sec tenors + 3 T-bills) + pipeline_heartbeat self-row 'rbi' |
 | headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (gazetteer extraction over raw_headlines, ADR 0010) |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only (manual INSERT follows) |
@@ -237,6 +238,7 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | FRED (DFF, DGS2/10/30) | fredapi + key in Secret | ✅ live | key verified 2026-10-03 (DFF 3.88) |
 | News RSS | feedparser (6 feeds: ET, BS, LiveMint, BusinessLine, CNBC, MarketWatch) | ✅ live 2026-10-12 | Moneycontrol ×2 dead (302 to a login-consent wall for every user-agent) and Reuters dead (`feeds.reuters.com` no longer resolves) — replaced via the CronJob's `FEEDS` env override, no image rebuild; the script's `DEFAULT_FEEDS` is stale until the next rebuild |
 | NSE FII/DII | fiidiiTradeReact JSON + session | ✅ live | API returns bare list, not `{data:…}` envelope |
+| India fundamentals (G-6, ADR 0021) | NSE results filings: `/api/corporates-financial-results` list (2005–2024; archive HTML pages 2005–11, `/api/corporates-financial-results-data` JSON 2012–24) + `/api/integrated-filing-results` XBRL (2025→) | 🔄 backfill running 2026-10-18 | Session-cookie pattern (home page may 403 — the API still answers); 1.3 s pacing, session refresh every 300 calls, back-off on 401/403/429. Values in ₹ lakhs (×10⁵) except XBRL (₹). Revenue = `re_gro_inc` (net sales + other operating income); banks = total income; old pages print `0.00` for missing figures; missing filing date → period end + 60 d. Log: `NSE-FUNDAMENTALS-OK symbols= warn= filings= rows= partial=`; `MAX_MINUTES` stops cleanly with the cursor kept. |
 | Stock prices/fundamentals (screener layer) | yfinance per-universe + EDGAR + yfinance stmts | ✅ live (2026-10-09) | **`stock_prices.ts` = 00:00 UTC on the trade date for EVERY row (normalised 2026-10-13, DQ-4)**; Yahoo back-adjusts splits/spin-offs but we refresh only 5 days — **since `screener:v10` (2026-10-14) the daily job pulls `actions=True` and, when a symbol shows a non-zero `Stock Splits` in the 5-day window, re-fetches and rewrites that symbol's full history (`SPLIT-RESYNC <sym> <date>x<ratio> rows=N` in the log; cap `SPLIT_RESYNC_MAX`=25; `PRICES-OK … splits_resynced=N`)**; **since `screener:v11` (2026-10-18) every split and dividend in the 5-day window is also upserted into `corporate_actions` (splits → `ratio`, dividends → `amount`; a dividend never triggers a resync; a failed side write logs `WARN <sym> … failed` and the prices still count). Since v12: `adj_close` = OUR total-return close (never Yahoo's `Adj Close`), recomputed for a symbol on a dividend in the window or a full rewrite (log: `PRICES-OK … anomalies=N adj_updated=N`); before overwriting, the window is checked against the DB — >40 % jumps and restated history (>0.5 %, the 2 newest bars exempt) go to `price_anomalies`, and restated symbols resync even without a split flag (`SPLIT-RESYNC <sym> restated`). Full re-derivation: Job `backfill-corporate-actions` (resumable). Screener reads EDGAR `financial_facts` since v13 (`FUND_SOURCE=facts`, stale series fall back to yfinance; `DRY_RUN=1` prints the shortlist without writing)**; the weekly `ops-tools/audit-price-adjustments.py` stays as the safety net (CTVA repaired 2026-10-13); `Ticker.history()` returns tz-aware local midnights, so `trade_ts()` forces 00:00 UTC on every write path (ADR 0013); Yahoo pre-open "today" bars (partial OHLC, ~0 volume) land for a handful of tickers each run; self-healing — the next run DELETE+INSERTs the final bar, but same-day metrics/scores can key to the partial bar. `DUMMYHEG.NS` dead (WARN-tolerant). |
 | RBI/G-Secs | official RBI mobile "Current Rates" widget (lxml scrape) | ✅ live (2026-10-09, `rbi-fetcher`) | benchmark SECURITY names rotate — matched by maturity-year→tenor bucket; page hides a stale date in an HTML comment (lxml text_content drops it); values carry '#'/'*' markers |
 | Headline intelligence | gazetteer extraction over raw_headlines (`headline-ner`, ADR 0010) | ✅ live (2026-10-09) | deterministic ticker_names matching; common-word first-tokens stoplisted (measured FPs: "live/target/realty"); 16-event keyword taxonomy; events link the single company mentioned |
@@ -403,7 +405,7 @@ kubectl get nodes
 
 # 2. CronJob schedules present?
 kubectl get cronjobs -n market-data
-# Should show 23 CronJobs: nse-fetcher, fiidii-fetcher, yfinance-fetcher,
+# Should show 24 CronJobs: nse-fetcher, fiidii-fetcher, yfinance-fetcher, … nse-fundamentals,
 # fx-fetcher, yields-fetcher, rates-fetcher, news-fetcher, sentiment-scorer,
 # ta-compute, pg-backup, pipeline-health, intraday-fetcher, fdi-watch,
 # universe-refresh, stock-prices, stock-fundamentals, stock-metrics,

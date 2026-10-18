@@ -2,8 +2,8 @@
 
 > **Status:** live in production on the home k3s cluster. Updated 2026-10-18 (screener v12, health v5, roles,
 > chunk merge, data foundations — plan: `engineering-plan-2026-10-18.md`). Reconciled with `manifests/` 2026-10-10
-> (23 CronJobs; `ops-tools/workloads.py --check` keeps the tables honest). **Live state re-verified
-> 2026-10-17: all 4 k8s nodes Ready (pi2 control-plane cordoned), all 23 CronJobs active, TimescaleDB,
+> (24 CronJobs since 2026-10-18; `ops-tools/workloads.py --check` keeps the tables honest). **Live state re-verified
+> 2026-10-17: all 4 k8s nodes Ready (pi2 control-plane cordoned), every CronJob then deployed (23) active, TimescaleDB,
 > Grafana, and Telegram bot all Running.** (see ops manual §8 and pending-tasks for known gaps).
 > Doc map: this file = **architecture** (what the system is);
 > `market-data-pipeline-plan.md` = design history + build log;
@@ -78,7 +78,7 @@ flowchart LR
     end
 
     subgraph K8S["k3s cluster · namespace market-data · Tailscale-only perimeter"]
-        JOBS["23 CronJobs + 2 Deployments<br/>(fetchers · scorers · screener chain · telegram)"]
+        JOBS["24 CronJobs + 2 Deployments<br/>(fetchers · scorers · screener chain · telegram)"]
         TSDB[("TimescaleDB 2.30.1-pg16<br/>single instance · TX2 sda4 SSD")]
         GRAF["Grafana 12 (pi3)<br/>6 dashboards · 3 alert rules"]
         TGB["Telegram digest CronJob +<br/>two-way listener Deployment (pi1)"]
@@ -255,7 +255,7 @@ whole DB via `pg_dump`.*
 |---|---|---|
 | Orchestration | k3s (server v1.36.4+k3s1; TX2 agent pinned v1.35.3+k3s1) | Whole cluster |
 | DNS | Pi-hole v6.4.3 + unbound | pi0 |
-| Scheduling | k3s CronJobs (23 live); no workflow engine by design (pi2 RAM) | Pi workers / TX2 |
+| Scheduling | k3s CronJobs (24 live); no workflow engine by design (pi2 RAM) | Pi workers / TX2 |
 | Storage | TimescaleDB 2.30.1-pg16 (Postgres 16.15) | TX2, sda4 SSD |
 | Ingestion | Python 3.12-slim images: `yfinance`, `pandas`, `psycopg[binary]`, `feedparser`, `fredapi` | Pi workers |
 | Sentiment/NLP | FinBERT on CPU (TX2 inference needs no GPU at this volume) | TX2 only |
@@ -398,7 +398,8 @@ live (2026-09-29). Query used: `min(ts)/max(ts)/count(*)/count(DISTINCT key)` pe
 | `corporate_actions` | 1962 | 58,896 dividends + 2,031 splits, 913 symbols (full Yahoo history) |
 | `stock_prices.adj_close` | as `stock_prices` | every row (0 NULL) |
 | `financial_facts` — EDGAR (US) | 2006 | 502 companies, first-filing dates (ADR 0015) |
-| `financial_facts` / `stock_fundamentals` — yfinance (India) | 2021 | ~4 annual statements per company — Yahoo's limit; the India gap behind G-6 |
+| `financial_facts` — NSE results filings (India, G-6) | **2005** | every quarterly + annual result since 2005 (or listing), filing-date point-in-time, consolidated preferred (ADR 0021) — **backfill running from 2026-10-18 (~19 h)**; canary TCS / HDFCBANK / DIXON verified |
+| `stock_fundamentals` / `financial_facts` — yfinance (India) | 2021 | ~4 annual statements per company (Yahoo's limit) — now the fallback |
 
 **Short history — live since the pipeline started**
 
@@ -416,7 +417,7 @@ live (2026-09-29). Query used: `min(ts)/max(ts)/count(*)/count(DISTINCT key)` pe
 | `commodity_prices` | empty by design | futures live in `index_prices` |
 
 Consequence for research: EV-0 can test price signals over 25 years (both universes) and US fundamentals from 2006;
-India fundamentals signals cannot be tested historically until a filings source exists (G-6). Backfill plan: pending-tasks
+India fundamentals history comes from NSE filings (G-6) once the backfill completes; EV-0 can then test fundamentals in both universes. Backfill plan: pending-tasks
 "History backfills".
 
 ### 4.4 Backup & durability
@@ -623,12 +624,13 @@ layer (JOINs on ticker/symbol), not in DDL.*
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | pi3 SSD dumps |
 | pipeline-health | 45 1 * * * | local/pipeline-health:v5 | pipeline_heartbeat (14 feeds incl. rbi; stock prices/scores 96 h since v5) |
 | intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
-| universe-refresh | 0 9 * * 0 | local/screener:v13 | universe_constituents + ticker_names (998) |
-| stock-prices | 30 23 * * * | local/screener:v13 | stock_prices (5d window) |
-| stock-fundamentals | 0 6 * * 6 | local/screener:v13 | stock_fundamentals (EDGAR US + yfinance NSE) |
-| stock-metrics | 0 2 * * * | local/screener:v13 | stock_metrics_daily |
-| stock-screener | 15 2 * * * | local/screener:v13 | stock_scores + screening_runs |
-| stock-report | 30 2 * * * | local/screener:v13 | stock_reports (top-25/universe + digest) |
+| universe-refresh | 0 9 * * 0 | local/screener:v15 | universe_constituents + ticker_names (998) |
+| stock-prices | 30 23 * * * | local/screener:v15 | stock_prices (5d window) |
+| stock-fundamentals | 0 6 * * 6 | local/screener:v15 | stock_fundamentals (EDGAR US + yfinance NSE) |
+| stock-metrics | 0 2 * * * | local/screener:v15 | stock_metrics_daily |
+| stock-screener | 15 2 * * * | local/screener:v15 | stock_scores + screening_runs |
+| stock-report | 30 2 * * * | local/screener:v15 | stock_reports (top-25/universe + digest) |
+| nse-fundamentals | 0 10 * * 0 | local/screener:v15 | financial_facts `nse_cons`/`nse_sa` — India results filings (G-6, ADR 0021); **suspended until the first backfill completes** |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only → manual INSERT |
 
 **Schedules are node-local PDT, not UTC** (verified 2026-10-04 — the "02:00-02:30"

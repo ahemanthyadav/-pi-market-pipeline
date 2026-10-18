@@ -93,8 +93,9 @@ def annual_series(cur, symbols, metric, as_of, years_back):
 
 
 # DQ-2 reader switch (v12): 'yfinance' = v9 behaviour (full-year yfinance rows only);
-# 'facts' = EDGAR financial_facts first (duration-aware, point-in-time by first filing),
-# yfinance as the fallback for symbols without EDGAR facts (all of NIFTY 500).
+# 'facts' = financial_facts first (duration-aware, point-in-time by first filing): EDGAR for
+# US (v12) and NSE consolidated filings for India (G-6, v14); yfinance is the fallback.
+FACT_SOURCES = ["edgar", "nse_cons"]
 FUND_SOURCE = os.environ.get("FUND_SOURCE", "yfinance").strip().lower()
 DRY_RUN = os.environ.get("DRY_RUN", "") == "1"   # score + print the shortlist, write nothing
 # A facts series whose newest annual period ended longer ago than this is stale (e.g. a
@@ -118,23 +119,37 @@ def ttm_value(rows, as_of=None):
     if not ytd:
         return a[2]
     q = max(ytd, key=lambda r: (r[0], r[1]))
-    prior = [r for r in rows if abs(r[1] - q[1]) <= 10 and abs((q[0] - r[0]).days - 365) <= 20]
-    if not prior:
+
+    def year_before(r):
+        cands = [x for x in rows if abs(x[1] - r[1]) <= 10 and abs((r[0] - x[0]).days - 365) <= 20]
+        return min(cands, key=lambda x: abs((r[0] - x[0]).days - 365)) if cands else None
+
+    if abs((q[0] - a[0]).days - q[1]) <= 20:          # q is a true YTD: it starts where the annual ends
+        p = year_before(q)
+        return a[2] + q[2] - p[2] if p else a[2]
+    # Only single quarters exist (NSE 2012-2024): TTM = annual + quarters since − the same quarters a year earlier.
+    quarters = sorted({r[0]: r for r in rows if 80 <= r[1] <= 100 and r[0] > a[0]}.values())
+    span = 0
+    for r in quarters:
+        span += r[1]
+    if not quarters or abs((quarters[-1][0] - a[0]).days - span) > 20:
+        return a[2]                                    # gaps: refuse to guess
+    priors = [year_before(r) for r in quarters]
+    if any(x is None for x in priors):
         return a[2]
-    p = min(prior, key=lambda r: abs((q[0] - r[0]).days - 365))
-    return a[2] + q[2] - p[2]
+    return a[2] + sum(r[2] for r in quarters) - sum(x[2] for x in priors)
 
 
 def facts_annual_series(cur, symbols, metric, as_of):
-    """{symbol: [(period_end, value)]} EDGAR full-year values known on as_of, newest first
+    """{symbol: [(period_end, value)]} full-year facts (EDGAR / NSE) known on as_of, newest first
     (latest filing per period wins, so restatements count only once they were filed)."""
     cur.execute(
         """SELECT DISTINCT ON (symbol, period_end) symbol, period_end, value
            FROM financial_facts
-           WHERE source = 'edgar' AND symbol = ANY(%s) AND metric = %s
+           WHERE source = ANY(%s) AND symbol = ANY(%s) AND metric = %s
              AND duration_days BETWEEN 350 AND 380 AND filed <= %s
            ORDER BY symbol, period_end, filed DESC""",
-        (symbols, metric, as_of))
+        (FACT_SOURCES, symbols, metric, as_of))
     out = {}
     for sym, end, val in cur.fetchall():
         out.setdefault(sym, []).append((end, val))
@@ -142,15 +157,15 @@ def facts_annual_series(cur, symbols, metric, as_of):
 
 
 def facts_ttm(cur, symbols, metric, as_of):
-    """{symbol: ttm value} from EDGAR financial_facts, point-in-time."""
+    """{symbol: ttm value} from financial_facts (EDGAR / NSE consolidated), point-in-time."""
     cur.execute(
         """SELECT DISTINCT ON (symbol, period_end, duration_days)
                   symbol, period_end, duration_days, value
            FROM financial_facts
-           WHERE source = 'edgar' AND symbol = ANY(%s) AND metric = %s AND filed <= %s
+           WHERE source = ANY(%s) AND symbol = ANY(%s) AND metric = %s AND filed <= %s
              AND period_end > (%s::date - 800)
            ORDER BY symbol, period_end, duration_days, filed DESC""",
-        (symbols, metric, as_of, as_of))
+        (FACT_SOURCES, symbols, metric, as_of, as_of))
     rows = {}
     for sym, end, dur, val in cur.fetchall():
         rows.setdefault(sym, []).append((end, dur, val))

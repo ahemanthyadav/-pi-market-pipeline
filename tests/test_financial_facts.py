@@ -85,6 +85,17 @@ class TtmValue(unittest.TestCase):
         # YTD after the annual but no matching prior-year period
         self.assertEqual(ss.ttm_value([(D(2024, 6, 30), 365, 100.0), (D(2025, 3, 31), 274, 80.0)]), 100.0)
 
+    def test_single_quarters_are_summed_nse_style(self):
+        rows = [(D(2024, 3, 31), 365, 1000.0),
+                (D(2023, 6, 30), 91, 240.0), (D(2023, 9, 30), 92, 250.0),     # prior-year Q1, Q2
+                (D(2024, 6, 30), 91, 260.0), (D(2024, 9, 30), 92, 270.0)]     # current Q1, Q2 (no YTD)
+        self.assertEqual(ss.ttm_value(rows), 1000 + 260 + 270 - 240 - 250)
+
+    def test_quarter_gap_falls_back_to_annual(self):
+        rows = [(D(2024, 3, 31), 365, 1000.0), (D(2023, 9, 30), 92, 250.0),
+                (D(2024, 9, 30), 92, 270.0)]                                  # Q1 missing
+        self.assertEqual(ss.ttm_value(rows), 1000.0)
+
     def test_stale_annual_is_none_when_as_of_given(self):
         rows = [(D(2017, 12, 31), 364, 2.2)]          # CBOE-style: tag stopped in 2017
         self.assertIsNone(ss.ttm_value(rows, as_of=D(2026, 10, 18)))

@@ -43,6 +43,7 @@ Decisions recorded as ADRs: 0014 own adj_close · 0015 point-in-time fundamental
 | 8 AR-8 | ✅ grafana_ro, telegram_app live (pipeline-job writer role deferred, reasoned) |
 | 9 news constraints | ✅ live without a rebuild (writers already safe) |
 | 10 AR-6/7 | ◐ intent via CI safeguard test; path move declined (reasoned) |
+| 11 G-6 India fundamentals (added same day) | ✅ built (NSE filings, ADR 0021, v15); full backfill running ~19 h |
 
 ## 2. Explicitly not in this pass (gated by their own plans)
 ML-0…ML-7, regime layer, 3090/GraphRAG, composite v2 (EV-17/18): `ml-roadmap-2026-10-10.md` and the EV

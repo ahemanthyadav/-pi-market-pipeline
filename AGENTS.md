@@ -83,7 +83,7 @@ layer (2026-10-04): `universe_constituents`, `stock_prices`, `stock_fundamentals
 `stock_metrics_daily`, `stock_scores`, `stock_reports`, `screening_runs`,
 `job_state`; plus the Telegram bot layer (2026-10-12, ADR 0012): `watchlist` (per `chat_id`) and `bot_users`;
 plus data foundations (2026-10-17/18): `corporate_actions`, `stock_prices.adj_close` (OUR total-return close —
-never Yahoo's Adj Close), `price_anomalies`, `financial_facts` (duration-keyed, first-filing point-in-time),
+never Yahoo's Adj Close), `price_anomalies`, `financial_facts` (duration-keyed, first-filing point-in-time; sources `edgar`, `nse_cons`, `nse_sa`, `yfinance`),
 `universe_membership_snapshots`, `factor_returns` (empty), `job_runs` (empty until AR-2 adoption).
 Non-SELECT SQL: propose it first and get approval before running.
 

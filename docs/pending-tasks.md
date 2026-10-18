@@ -426,7 +426,7 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
 - [ ] 🔶 **P0 (in order):** **G-1/DQ-1** adjusted prices + corporate actions → **G-2a** weekly membership snapshots, **EV-2**
   keep fundamentals snapshots, **G-3/PV-0** prediction ledger + outcome resolver (parallel; design in `prediction-validation-and-training-2026-10-10.md`) → **EV-0 + ML-0** test harness → **EV-1** historical
   membership. Prerequisite: power + backup fixes (§1, AR-11).
-- [ ] 🔶 **P1:** **G-6** India fundamentals source (decision: quarterly filings vs paid API) · **EV-3/4/5/7** price signals under
+- [ ] 🔶 **P1:** ~~**G-6** India fundamentals source~~ ✅ decided + built 2026-10-18 (NSE filings, ADR 0021 — see History backfills) · **EV-3/4/5/7** price signals under
   EV-0 · **EV-9 → EV-10…13** statement lines + signals · **ML-2** store embeddings now · **PV-1** model-health dashboard + alerts.
 - [ ] 🔶 **P2:** **EV-17/18** composite v2 + measured confidence (after EV-0 results) · **EV-14/15/6/8** · **G-9** US insider +
   short interest · **G-10** India promoter pledge/holding · **EV-16** portfolio rules + risk dashboard · **ML-1/3/5/7a** ·
@@ -435,6 +435,16 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   universe · **G-19** 13F holdings · **TP-2** GBM quarterly retrain + gate.
 
 ### History backfills (found 2026-10-18 — coverage table: architecture §4.3a)
+
+- [ ] 🔶 **G-6 India fundamentals from NSE filings — BUILT, backfill running** (ADR 0021). `nse_fundamentals.py` (`screener:v15`): three
+  eras (archive HTML 2005–11, JSON 2012–24 incl. banks, integrated XBRL 2025→), consolidated preferred, all filings of a period kept,
+  filing-date point-in-time; 11 tests on real captured filings (`tests/fixtures/nse/`). Canary in-cluster (TCS / HDFCBANK / DIXON): 259
+  filings, 1,580 facts, 0 warn; TCS revenue FY2005 ₹9,749 cr → FY2026 ₹2,67,021 cr, FY2014 ₹81,809 cr (two parser bugs found by the
+  canary and fixed before the full run: net sales vs gross income; restated filings dropped). Screener reads `nse_cons` + EDGAR, TTM from
+  summed quarters where no YTD exists. **Started 2026-10-18 ~16:30 UTC: Job `backfill-nse-fundamentals` (~19 h, resumable — re-apply if
+  it stops). When it logs `cursor cleared`:** (1) un-suspend CronJob `nse-fundamentals` (remove `suspend: true`, apply); (2) screener
+  DRY_RUN diff for NIFTY top-50 (facts vs yfinance) before trusting India ranks — the live screener already reads it; (3) re-run EV-0 with
+  India fundamentals; (4) update the coverage row in architecture §4.3a with final counts.
 
 - [ ] 🔶 **H-1 FX history** — `fx_rates` starts 2025-12-15; Yahoo has decades for all 10 pairs. One-shot Job on the existing
   `fx-fetcher:v1` image (pattern: `manifests/ingestion/fx/backfill-job.yaml`, 2026-10-12), daily closes at 00:00 UTC.

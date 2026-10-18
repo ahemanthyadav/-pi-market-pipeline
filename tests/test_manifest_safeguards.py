@@ -24,7 +24,7 @@ def cronjobs():
 
 class Safeguards(unittest.TestCase):
     def test_found_all(self):
-        self.assertEqual(len(list(cronjobs())), 23)
+        self.assertEqual(len(list(cronjobs())), 24)  # nse-fundamentals added 2026-10-18 (G-6)
 
     def test_each_cronjob(self):
         for path, cj in cronjobs():
