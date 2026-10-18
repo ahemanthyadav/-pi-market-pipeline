@@ -5,14 +5,15 @@
 > commodities, yields, rates, news, FinBERT sentiment, FII/DII flows, technicals,
 > and a 998-stock fundamental screener (Nifty 500 + S&P 500) — into TimescaleDB,
 > with Grafana dashboards, Tailscale-only access, and no container registry.
-> **Status 2026-10-12 — recovered, power fix on trial.** The 2026-10-09→10 outages are over: all 4 nodes Ready, DB Running,
-> all 23 CronJobs active and completing (verified 08:22 UTC); the root cause (Pi power) is only *claimed* fixed — all Pis moved
-> to separate supplies ~02:30 UTC, 24 h acceptance review due ~02:59 UTC 2026-10-13 (pending-tasks §1; per-node roles: `node-roles.md`).
+> **Status 2026-10-13 — recovered; power fix passed on pi0/pi2/pi3, pi1 still failing.** The 2026-10-09→10 outages are over: all 4 nodes Ready, DB Running,
+> all 23 CronJobs active and completing (re-verified 08:46 UTC); the root cause (Pi power) is only *claimed* fixed — all Pis moved
+> to separate supplies ~02:30 UTC, 24 h acceptance review run 2026-10-13 (pending-tasks §1; per-node roles: `node-roles.md`).
+> **Final 24 h power review (2026-10-13 03:51 UTC): pi0/pi2/pi3 PASS, pi1 FAIL (undervolts at near-idle) — acceptance not passed; swap pi1's PSU/cable** (ops manual §8 "Power acceptance trial").
 > Earlier healthy check 2026-10-09: all 4 nodes Ready · **23 CronJobs** (per `manifests/`; telegram-digest 08:00 IST) · Telegram alert channel
 > live (contact point + 3 rules) · **Telegram two-way listener live**
 > (Deployment telegram-bot: /status /vix /nifty /sensex /gold /fii /scores
-> /digest) · screener toolkit `local/screener:v9` ·
-> health monitor `local/pipeline-health:v4`.
+> /digest) · screener toolkit `local/screener:v11` ·
+> health monitor `local/pipeline-health:v5`.
 
 ## Reading order (new session? start here)
 

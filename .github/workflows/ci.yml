@@ -2,7 +2,7 @@
 name: ci
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/**', 'fix/**']
   pull_request:
 
 permissions:
@@ -29,6 +29,21 @@ jobs:
           tar xzf "gitleaks_${V}_linux_x64.tar.gz" gitleaks
           sudo mv gitleaks /usr/local/bin/
           gitleaks version
+      - name: Lint (syntax)
+        run: |
+          fail=0
+          for f in $(git ls-files '*.py'); do python3 -m py_compile "$f" || fail=1; done
+          for f in $(git ls-files '*.sh'); do bash -n "$f" || fail=1; done
+          python3 -c "import ast,sys; ast.parse(open('.githooks/pre-commit').read())" || fail=1
+          exit $fail
+      - name: Lint (ruff fatal set + shellcheck errors)
+        # Fatal class only: syntax errors and undefined names (the DQ-3 `failed` bug class).
+        # Unused imports (F401) are NOT enforced: they live in scripts baked into deployed images —
+        # clean them at each image's next rebuild so the repo never drifts from the live code.
+        run: |
+          pip install ruff==0.17.1 shellcheck-py==0.11.0.1
+          ruff check --select E9,F63,F7,F82 .
+          shellcheck -S error $(git ls-files '*.sh')
       - name: Docs agree with manifests
         run: python3 ops-tools/workloads.py --check
       - name: Unit tests
@@ -38,6 +53,8 @@ jobs:
           python3 tests/test_stocks.py
           python3 tests/test_multiuser.py
           python3 tests/test_stock_fundamentals_fixes.py
+          python3 tests/test_stock_prices.py
+          python3 tests/test_pull_backups.py
       - name: Shell tests
         run: |
           bash tests/test-precommit-hook.sh

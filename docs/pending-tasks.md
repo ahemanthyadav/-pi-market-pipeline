@@ -4,7 +4,13 @@
 > the linked docs — this file is the index + status. Maintained per AGENTS.md docs
 > discipline: mark items ✅ with a date (and where the completion is recorded) when
 > done; prune ✅ lines into the relevant doc's history at housekeeping time.
-> **Last reviewed: 2026-10-12 08:30 UTC** (recovery complete except the power acceptance review; see §1. Previously 2026-10-10: the 2026-10-09→10 outage —
+> **Last reviewed: 2026-10-18 07:50 UTC** (`screener:v11` live — corporate_actions recording, canary OK; first k3s control-plane backup;
+> site-wide power event 10-18 ~06:00 UTC explained — all 5 machines rebooted, 0 undervolt; pi1 formal 24 h window due 10-19 06:20 UTC;
+> DQ-3 proven via DB; 10-17 overclaims on DQ-2/AR-2/AR-5 corrected back to open). Previously **2026-10-14 06:49 UTC** (power item **closed as hardware-complete** — owner confirmed pi1 on its own
+> supply; live read 06:49 UTC: all four nodes PASS, `dmesg` undervoltage counts 0 on every Pi, pi2 heat WARN only;
+> **pi1's 24 h acceptance still open, due ≥ 2026-10-15 05:40 UTC** — see §1. Previously 2026-10-14 06:40 UTC:
+> `screener:v10` deployed incl. pi1 — clean under the import burst, DQ-1 split resync live, missed digest refired;
+> pi1 hung 02:02 UTC, power-cycled, now on its own supply — new 24 h trial in §1; previously 2026-10-13 04:55 UTC: final power review = pi1 FAIL; DQ-4 repaired, CTVA repaired, stale-feed noise fixed; earlier 2026-10-12 maintenance pass: scheduled runs verified, Grafana alerts retuned and applied, data-quality findings DQ-1/DQ-4/G-22, power review interim = pi1 FAIL; see §1. Previously 2026-10-10: the 2026-10-09→10 outage —
 > node-local stats logging deployed per ADR 0011; screener v8 fixes + first
 > full-quality run verified 2026-10-09; Grafana screener dashboard live).
 
@@ -19,8 +25,56 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 > stats-logger records from this file. They are back below (power item and `nodewatch` here, §2 before §4), brought up to date
 > from `a4b9567` + the 2026-10-11/12 sessions. Check `git show a4b9567:docs/pending-tasks.md` if anything else looks missing.
 
-- [ ] 🔶 **Fix the Pi power supplies — IN TEST, acceptance NOT passed** (owner reports all Pis moved to separate power
-  ~2026-10-12 02:30 UTC; before that pi1/pi2/pi3 shared one multiport block). **24 h review due ~02:59 UTC 2026-10-13.**
+- [x] ✅ 2026-10-18 **Maintenance pass (07:00–09:40 UTC) — done:** `screener:v11` (corporate_actions, see DQ-1) · `pipeline-health:v5`
+  (weekend-safe stock thresholds, `rbi` feed, installs from its lock; canary `HEALTH-OK fresh=14/14`) · Grafana stale-feed exclusion removed
+  (4 rules `health=ok`) · k3s control-plane backup made daily (`pull-k3s-backup.sh`, incl. tls/cred) + `pull-backups.py` daily with safe
+  rotation, both via workstation cron · CI: ruff fatal set + shellcheck errors · weekly price audit (2,471 comparisons, **0 mismatches**;
+  `out/price-audit-2026-10-18.csv`) · old screener v1–v9 removed on pi1/pi3 · tarball of every live image on the TX2 SSD.
+- [x] ✅ 2026-10-18 **INCIDENT (self-inflicted, recovered, no job failed): image wipe by `crictl rmi --prune`.** While pruning old screener tags,
+  `crictl rmi --prune` removed every image not used by a running container — all `local/*` on pi3 and 6 on pi1 (fdi-watch, fiidii, fx, nse,
+  rbi, yfinance); a timeout stopped it on pi1. ~09:00–09:27 UTC: pi3 cordoned within a minute (stock-metrics/screener/intraday ran on pi1),
+  images restored from TX2 tarballs + `ctr images export` on pi1 and pi2 (load peaked 6.9 → cooled), checksums at every hop, pinned test pods on
+  pi3, uncordoned; every Job in the window Succeeded. Rule added to ops manual §8 ("NEVER `crictl rmi --prune`"). **Also during recovery a
+  `pgrep -af` on pi2 printed the expanded `@@PW@@` (the Pi sudo password) into the session transcript** — owner informed; whether to rotate is the
+  owner's call. Lesson recorded in the same §8 entry.
+- [ ] 🤔 **Power resilience (owner, hardware):** the 2026-10-18 mains loss took all five machines down and `nodewatch` (pi0) with them, so nothing
+  alerted. Options: small UPS for pi0 + router (keeps the watcher and LAN up) or for the whole rack (TX2 + pi2 too — fewer hard power cuts on SSDs).
+- [ ] 🤔 **pi2 heat (owner, hardware):** soft-temp flag (`0x80000`/`0x80008`) recurs, max 69.3 °C in the 10-18 review — heatsink/airflow.
+- [ ] 🔶 **pi2 still holds old images** (screener v1–v8, nse v1–v3, pipeline-health v1–v4, yfinance v1–v3, fiidii v1) — it is cordoned and its disk is
+  4 % used, so no pressure; if ever pruned, remove named tags one by one (ops manual §8), in a quiet window, never `--prune`. Note: pi2's copies were the
+  only remaining source for fdi-watch/fiidii/fx/rbi during the incident. ✅ 2026-10-18: **every one of the 16 live images now has a tarball on the
+  TX2 SSD** (`/mnt/tx2-ssd/image-tarballs/` + `/mnt/tx2-ssd/sentiment-fetcher-v1.tar.gz`; checksums in `SHA256SUMS.all`) — the 9 that existed only on
+  Pis were exported from pi3 and verified, plus telegram-digest:v8 and headline-ner:v3. Keep this true at every rebuild (§6).
+- [x] ✅ 2026-10-14 **Fix the Pi power supplies — hardware fix COMPLETE** (owner: all Pis moved to separate power
+  ~2026-10-12 02:30 UTC; before that pi1/pi2/pi3 shared one multiport block; pi1 given its own supply 2026-10-14).
+  **The physical item is closed** — no swap test is needed any more. The 24 h acceptance on pi1 is still open below.
+  - [ ] 🔶 **pi1 acceptance pending** — the 24 h rule run 2026-10-13 03:51 UTC was a FAIL on the old supply (4 live
+    `0x50005` samples, 36 `dmesg` events — see below). New trial on the new supply:
+    `bash ops-tools/power-review.sh --since 2026-10-14T05:39:00Z`, **verdict due ≥ 2026-10-15 05:40 UTC**, needs real
+    load (let the CronJobs run). **Read 2026-10-14 06:49 UTC (70 min, all four nodes PASS):** pi1 `0x0` throughout,
+    0 live hits, max 50.5 °C, load 1.17, **0 `dmesg` undervoltage events since boot** (pi0/pi2/pi3 also 0). pi2 WARN
+    on heat only (`0x80008`, 60.1 °C). Positive, but 70 min is not the verdict.
+  - **pi1 hang + new supply, 2026-10-14:** pi1 hung ~02:02 UTC (last stats row 02:00 UTC at `0x50000`, load 0.3; no ping/SSH, kubelet silent; the
+    telegram-bot pod sat Pending ~3.5 h, nothing else affected). Owner power-cycled it and reports **pi1 now has its own supply** (exact swap time
+    and whether the cable changed: not recorded — owner to confirm). Up since 05:39 UTC: `0x0`, 0 `dmesg` undervoltage events, load ~0.4 (06:11 UTC —
+    idle, proves nothing). **New 24 h trial for pi1: `bash ops-tools/power-review.sh --since 2026-10-14T05:39:00Z`, due ≥ 2026-10-15 05:40 UTC** —
+    needs real load (let the CronJobs run; a bulk import to pi1 is a fair stress test only once a day of clean idle exists). pi0/pi2/pi3 keep their 10-13 PASS.
+    pi2 also rebooted ~02:01 UTC 10-14 (up 3.6 h at 05:35 UTC; `0x80000` heat flag only, 0 undervolt events). **Correlation found 2026-10-14 (stats CSVs):** pi1's last sample is 02:00 UTC and pi2's first
+    post-boot sample is 02:05 (uptime 202 s, load 3.1) — pi1 and pi2 failed within minutes of each other while pi0 and pi3 logged normally through it. Pre-10-12 those two shared a supply block, so a common
+    cause (shared mains strip/outlet, or pi2's restart load hitting pi1) is plausible but **unproven**; the cause of pi2's reboot is not recoverable — it has **no persistent journal** (`journalctl --list-boots` shows only the current boot).
+    Proposal (not applied, owner's call): enable persistent journald on pi1/pi2 so the next hang leaves a trace. Also: the 10-14 02:00 pi1/pi2 loss did not trigger a `nodewatch` alert in anything I read — check `/var/tmp/nodewatch.log` history/cron on pi0 (it is overwritten each run, so only the latest state is visible).
+  - **pi1 import stress test, 2026-10-14 06:19–06:21 UTC (new supply, ~40 min after boot):** the 116 MB `screener:v10` tarball push + `ctr import`
+    (68 s, load peaked 2.78 — the same burst that gave pi1 `0x50005` on 10-12) sampled every 4 s: **`0x0` throughout, 0 `dmesg` undervoltage events**; a yfinance canary pod on pi1 afterwards also left `0x0`/0 events.
+    First strong positive sign for the new supply — still not the verdict (needs the 24 h window above, incl. a quiet stretch and the nightly CronJobs).
+  - **Power review re-run 2026-10-18 06:44 UTC (`--since 2026-10-14T05:39:00Z`, ~1,160 samples/node):** pi0 PASS · pi2 PASS (heat WARN, 69.3 °C)
+    · **pi1 FAIL and pi3 FAIL on the gap rule only — 0 live hits each, `0x0` throughout.** Cause of the gap, verified 2026-10-18: a **site-wide power
+    event ~05:55–06:20 UTC 10-18** — ALL five machines rebooted (`uptime -s`: pi0 06:02, pi2 06:03, pi1 + pi3 together 06:17, TX2 at the same
+    time; pi0 is on its own supply, so this was mains/strip, not a Pi PSU). Since boot: `dmesg` undervoltage = **0 on every Pi**. pi1 + pi3 came
+    back ~15 min after pi0/pi2 (same minute as each other). **Owner confirmed 2026-10-18: a mains power loss.** `nodewatch` could not alert:
+    pi0 went down too (AR-12's single-watcher gap, now observed). **pi1 under load on the new supply: 0 live hits in ~1,160 samples (10-14→10-18)
+    and 25/25 `0x0` during the 2026-10-18 v11 import** — the supply fix looks good. Formal clean window: `power-review.sh --since
+    2026-10-18T06:20:00Z` — PASS at 07:14 UTC (all four); **verdict due ≥ 2026-10-19 06:20 UTC.** Note: the tool reads only the current
+    `stats.csv`, so a weekly logrotate (pi3 rotated at 07:00 UTC 10-18) shortens its view — check sample counts when reading a verdict.
   - **Evidence (2026-10-10/11):** pi2 live undervolt+throttle (`0xd0005`, 62 °C) and wedged ~16 h. A 5 V 2 A adapter still gave
     9 `Undervoltage detected` events in 5.5 min at near-idle load. pi1/pi2/pi3 dropped off together while pi0 stayed up; pi2 and
     pi3 logged events within ~0.5 s of each other; pi3 went from clean to ~80–110 events/h from ~11:40 UTC 10-11 (1,364 by
@@ -28,11 +82,28 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   - **Baseline after the rewire (2026-10-12 02:59 UTC, all four Pis up, nodes Ready):** pi0 `0x0`, 0 events · pi1 `0x50000`,
     1 event (power-on transient, none live) · pi2 `0x80000`, 0 events (58 °C; soft-temp flag since boot only; 246 MB avail) ·
     pi3 `0x0`, 0 events. **Since then:** pi1 logged undervolt events during bulk image imports (2 for the telegram v7 import, 3 for
-    the screener v9 import; node stayed Ready) — it is still sensitive to heavy SSD/IO bursts; avoid bulk transfers to pi1.
+    the screener v9 import; node stayed Ready) — it was sensitive to heavy SSD/IO bursts **on the old supply**.
+    **The "no bulk transfers to pi1" restriction is lifted on the new supply** (the 116 MB `screener:v10` push + 68 s import on
+    2026-10-14 was clean, `0x0`/0 events) — I would still keep it until the 24 h acceptance lands.
+  - **pi3 under the load that wedged it before (2026-10-12 08:30–08:36 UTC):** the first *scheduled* run of the fixed `pg-backup`
+    (`BACKUP-OK marketdata-2026-10-12.dump size=171766332 entries=15102`, `.sha256` sidecar, 6 min) wrote ~170 MB to pi3's SSD and
+    pi3 stayed `0x0` with 0 undervoltage events. On 10-11 the same write coincided with pi3 dropping off the network on the shared charger.
   - **Review = pass/fail:** run **`bash ops-tools/power-review.sh`** (new 2026-10-12; pulls the CSVs and applies the rule: no live
     `throttle_hex` bit `0x1/0x2/0x4`, no new since-boot undervolt bit, no sample gap > 15 min; heat is a WARN, not a power fail;
     exit 0 = PASS). Also compare `dmesg | grep -ci undervoltage` with the baseline. The CronJobs are already running
     (re-activated 10-12), so this is under real load. Record the verdict per node here and in ops manual §8.
+  - **Re-check 2026-10-12 08:41 UTC (`power-review.sh`, 69 samples/node): pi0 PASS · pi2 PASS · pi3 PASS · pi1 FAIL (same 2 samples; exit 1).**
+    Per-Pi `dmesg` undervoltage count since boot: **pi1 = 25** (up ~5.7 h; baseline 1 at 02:59; first 02:56 UTC power-on, last stamped 01:22
+    host-local ≈ 08:22 UTC if PDT — not verified), **pi0/pi2/pi3 = 0**. Live `get_throttled`: pi0 `0x0`, pi1 `0x50000`, pi2 `0x80000`, pi3 `0x0`;
+    pi1 load 0.24 at that moment, so its events are not only the import bursts. The remaining ~18 h of the window cannot rescue pi1
+    (the rule fails on any live hit); the physical swap test does not need to wait for 02:59 UTC.
+  - **FINAL 24 h REVIEW, 2026-10-12 02:59 → 10-13 03:51 UTC (299 samples/node, no gaps, no node wedged or rebooted): pi0 PASS · pi2 PASS · pi3 PASS · pi1 FAIL — acceptance NOT passed.**
+    pi1: 4 live `0x50005` samples (04:35, 04:50, 09:10 UTC on 10-12; **03:10 UTC on 10-13, at load 0.58**) and **36** `dmesg` undervoltage events since boot (pi0/pi2/pi3: **0** each; pi2 max 56 °C, 2.19 load;
+    pi3 max load 1.83 incl. the 170 MB backup writes). The dedicated supplies fixed pi0/pi2/pi3; pi1 is the open hardware item. Next = physical: swap pi1's PSU + cable (spare set), re-run
+    `bash ops-tools/power-review.sh --since <swap time>` for another 24 h. (The 10-13 pre-migration backup and the DQ-4 rewrite ran on TX2/pi3, not pi1.)
+  - **Update 09:46 UTC (82 samples/node): pi0/pi2/pi3 still PASS (pi3 max load 1.83, 0 events); pi1 FAIL with a third live sample `0x50005` at 09:10 UTC —
+    at load 0.41, no image transfer running** — and 27 `dmesg` events (was 25 at 08:41). pi1 undervolts at near-idle, so this is its supply/cable
+    (or the board), not workload: do the swap test now (spare PSU + cable first). `collect-node-stats.sh` no longer errors (`tail -1` on several files).
   - **Early read, 2026-10-12 02:59 → 08:25 UTC (5.4 h, 65 samples/node):** **pi0 PASS** (max 36 °C), **pi2 PASS** (max load 1.74,
     56 °C, 0 live hits), **pi3 PASS** (0 live hits) — but **pi1 FAIL: 2 samples read `0x50005` (undervolt + throttle live) at 04:35 and
     04:50 UTC**, during the screener-v9 and telegram-v7 image imports (CPU 58–73 %, load 3.35). So pi1 still undervolts under a burst
@@ -47,11 +118,39 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
     the boot path is **unverified on Pi 3 / 3B+** — test on pi3 or a spare first, never first on pi2. Optional: an inline USB power meter.
   - **Method:** the identity-free swap-test ladder (skill `node-power-health` §4): PSU+cable first, then USB-SATA adapter,
     board last. **Never swap boot SSDs between nodes** (hostname, static IP, k3s certs and cluster state travel with the disk).
+    *No longer needed for pi1 — the supply is replaced; kept as the ladder for a future fault.*
   - **Open (heat, not power):** pi2 touched the 60 °C soft-temp limit right after boot (`0x80008` live at 02:44 UTC, gone by
     02:52). If it recurs once the node is calm, it needs a heatsink/airflow.
   - **Later (decision, not part of this fix):** one shared regulated 5 V rail with fused branches — architecture review AR-10;
     needs an enclosed supply and careful mains-side wiring. Detail: `architecture-review-2026-10-10.md` AR-10; skill
     `node-power-health`; ADR 0011.
+- [x] ✅ 2026-10-14 **Work held back by pi1 — done (06:15–06:40 UTC):**
+  - **`screener:v10` built and deployed** (the "image rebuild/import" backlog; imports to pi1 had been avoided since the 10-12 undervolt events). Built on TX2 (55 s); scripts + Dockerfile
+    + lock verified byte-identical to the repo (per-file sha256 inside the image); `pip freeze` identical to v9 (only `stock_prices.py` changed); tarball sha256 `cb24473f…` checked at each hop;
+    imported on **pi3 (62 s)** then **pi1 (68 s, `0x0` throughout — see the power item)**; live diff of `stock-screener/cronjobs.yaml` = exactly 6 image lines, applied, live spec re-read = v10 on all six.
+    `backfills.yaml` bumped too (not applied — Jobs). The Dockerfile now `pip install -r requirements.lock` (AR-5 step 2 for this image).
+  - **DQ-1 code half — split detection (done):** `stock_prices.py` pulls `actions=True`; a non-zero `Stock Splits` in the 5-day window re-fetches and rewrites that symbol's full history (idempotent
+    DELETE+INSERT; cap 25 symbols/run). New `trade_ts()` stamps `00:00 UTC` on the trade date on **every** write path — the `BACKFILL=max` path used `Ticker.history()` (tz-aware local midnights) and would have
+    reintroduced DQ-4 (ADR 0013); now closed. `tests/test_stock_prices.py` (10 tests, mutation-checked, in CI). **Canary on pi1** (forced resync of CTVA + TCS.NS against the live DB): `SPLIT-RESYNC` ×2,
+    `PRICES-OK … splits_resynced=2`; CTVA 1856→1857 rows, TCS.NS 6004→6005 (just the new day), 0 non-midnight rows, 0 duplicate trade days, CTVA max close still 14.45. **First scheduled v10 run (stock-prices 06:30 UTC, on pi1): `PRICES-OK mode=daily fetched=997 warn=1 rows=4793 splits_resynced=0` in 8 m 43 s (the 1 warn = the known dead `DUMMYHEG.NS`); 10-12/10-13 = 998 rows each, 0 non-midnight rows, 0 duplicate (symbol, ts) in the last 10 days; pi1 `0x0`, 0 undervolt events after it.** **Not yet exercised on a real split** — the first one
+    in the universe is the live proof. **Still open for DQ-1:** `adj_close` + `corporate_actions` table (additive schema, needs a migration), dividends/total return.
+  - **Missed `telegram-digest` refired:** the 08:00 IST run (02:30 UTC) failed while pi1 was down; re-run from the CronJob 06:23 UTC → `DIGEST-DONE recipients=3 rc=0` (delivered ~4 h late). The 02:45 alerts run is not due until later today.
+  - **Not done, on purpose:** the other "natural rebuild" items (news `DEFAULT_FEEDS`, heartbeat v2, lock files for the other 15 images) — each is a separate image and a separate pi1 import; batch them with the next change to that image rather than rebuilding working fetchers.
+- [x] ✅ 2026-10-13 **Fix pass (03:50–04:55 UTC):** final power review (pi1 FAIL — see the power item); **DQ-4 repaired** and **CTVA (DQ-1) repaired** on the live DB (see §1 "Data correctness"); new tools
+  `ops-tools/audit-price-adjustments.py` and `ops-tools/sql/2026-10-13-stock-prices-normalise-ts.sql`; stale-feed alert no longer counts `stock_fundamentals` until 10-18; overnight health re-verified (all
+  23 CronJobs active; nse-fetcher 18:15, rbi 14:00, fiidii 21:00, telegram-digest 02:30 (`DIGEST-DONE recipients=3`) all Completed; the 10-12 Nifty close replaced the intraday bar). Left alone on purpose:
+  anything needing an image rebuild/import (pi1 is still the undervolting node), the physical/owner items, and the large roadmap work.
+- [x] ✅ 2026-10-12 **Maintenance pass (09:00–09:50 UTC) — what was verified, changed, found:**
+  - **First scheduled runs verified:** `stock-metrics` 09:00 Completed (3 m 27 s) · `stock-screener` 09:15 `SCREENER-OK scored=997 eligible=884 shortlisted=50`
+    (on pi3; no duplicate score rows; `stock_scores` now 10-12) · `stock-report` 09:30 `REPORT-OK reports=50 digest=yes` · **`telegram-alerts` 09:45 — its first
+    ever scheduled run — `ALERTS-OK 3 message(s) for 3 user(s) rc=0`** (owner + both member rows incl. the group chat: multi-user fan-out works). `pipeline-health`
+    08:45 Completed; `pg-backup` 08:30 Completed. `stock-prices` heartbeat is fresh; `stock_scores` turns fresh at the next daily health run (01:45 PDT).
+  - **Grafana alerts retuned and applied** (ConfigMap via `apply-grafana-provisioning.sh`, pod restarted on pi3; all 4 rules `health ok`): VIX 25 → **30**, FII −3000 → **−5000**,
+    and the **sentiment-drop rule — which was in the repo but had never been applied — is now live**. Evidence and re-tune plan: telegram-bot doc §3.3. Known noise: the
+    stale-feed rule is firing (counts `stock_fundamentals` + `stock_scores`) until the data catches up (see the Grafana item below).
+  - **Second backup copy refreshed:** `pull-backups.py` pulled `marketdata-2026-10-12.dump` (172 MB, sha256 ok) to `out/backups/`.
+  - **CI:** lint step (`py_compile` every tracked `.py`, `bash -n` every `.sh`, the Python-shebang pre-commit hook) and push triggers for `main`, `feat/**`, `fix/**`. First run on that push (#4): green.
+  - **New data-quality finding DQ-4** (mixed `stock_prices` timestamp conventions + 4,434 duplicate rows) and evidence for DQ-1 and G-22 — see §1 "Data correctness".
 - [x] ✅ 2026-10-11 **`nodewatch` deployed on pi0** — out-of-cluster dead-man's switch. Script in `/usr/local/bin`,
   `/etc/nodewatch.hosts` + `/etc/nodewatch.secrets` (mode 600, root), root cron `*/5` (log overwritten each run at
   `/var/tmp/nodewatch.log`); its own dedicated Telegram bot, separate from the in-cluster `telegram-bot`; delivery test HTTP 200.
@@ -81,8 +180,9 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   silent + owner notified once + stranger `/adduser` blocked; member `/watch` private; member cannot `/adduser`; removed member gets 0 replies; digest and
   alerts `main()` give each user only their own content. `tests/test_multiuser.py` 38 tests (allow-list and watchlist-scoping mutation-checked); added to CI.
   **The Secret's `chat-id` is the owner's PRIVATE chat again** (restored from `telegram-bot-prev-chat-id`; it had been pointed at a group, which made the whole
-  group the owner). 🔶 Still to do by the owner: have each person message `@Marketfredbot`, then `/adduser` them from the access notice and ask them to
-  `/start`. Open extension: per-user digest time and alert threshold. Side notes: the schema Job could not be re-run under its own name (delete guard on
+  group the owner). **Progress 2026-10-12 08:31/08:32 UTC: the owner ran `/adduser` twice** — `bot_users` now has 2 active rows, both named `sailu`, one
+  private chat and one *group* chat (a group shares one watchlist — consider `/rmuser` on it if separate lists are wanted); `watchlist` is still
+  empty. Not verified: that each has sent `/start` (the log shows one `/start` answered). Any further people: same flow, then `/start`. Open extension: per-user digest time and alert threshold. Side notes: the schema Job could not be re-run under its own name (delete guard on
   `timescaledb…`) — ran as `schema-multiuser-09`; `timescaledb-schema-09` (broken first attempt, suspended) and `telegram-bot-prev-chat-id` (rollback copy of the
   old owner id) remain in the namespace.
 - [x] ✅ **2026-10-12 Screener v9 rolled out (DQ-2 + DQ-3 fixes).** Image content verified byte-identical to the repo scripts (sha256 per
@@ -95,8 +195,8 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   figures with full years. `stock_fundamentals` DQ-3 (NameError) is unit-tested only; **its first real validation is the Sat 2026-10-17
   06:00 PDT full pass** (watch for `FUNDAMENTALS-OK` with a `failed=` count and a Completed Job). US price data ended 10-08 after the outage; **recovered — verified 2026-10-12 08:25 UTC:
   S&P 500 through Fri 10-09 (506 symbols), Nifty 500 through 10-12 (494)** (Monday's US close lands in tonight's run).
-  `stock_fundamentals` is still stale (last 10-04) until the Sat 10-17 pass; the heartbeat rows read at 03:14 UTC showed
-  `stock_prices`/`stock_scores` not fresh at that moment — `pipeline-health` re-runs 08:45 UTC. Previously: History of the 2026-10-10 second wedge:** Sequence: v9 built on
+  `stock_fundamentals` is still stale (last 10-04) until the Sat 10-17 pass. **`pipeline-health` ran 08:45 UTC (Completed, 22 s): `stock_prices` is now
+  fresh; the only stale feeds are `stock_scores` (last 10-09 — the 09:15 UTC `stock-screener` run should fix it) and `stock_fundamentals` (last 10-04, until 10-17).** Previously: History of the 2026-10-10 second wedge:** Sequence: v9 built on
   TX2 and imported on pi3 (63 s), then pi1's tarball push/import → API `ServiceUnavailable`, pi1 `ctr` EOF; pi1/pi2 SSH
   banner resets with ping alive, pi3 off the network; pi2 + pi3 later came back (~17:41 UTC, "up 0 min"); **pi1 still
   NotReady with no ping at 17:50 UTC — needs a physical power check.** Cause unproven (a 116 MB push + import on
@@ -130,8 +230,7 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   un-suspended (staggered), missed runs refired (fiidii, rbi, news, sentiment, ner, universe-refresh, health) — details in the 10-12 entry
   below. The root cause (undervoltage) is only *claimed* fixed until the 24 h acceptance in the power item passes.
 - [x] ✅ 2026-10-12 **Telegram v6 running** — bot pod Running on pi1 (`local/telegram-digest:v6`), `COMMANDS['nifty']('/nifty')` returns the
-  card (22,531.65, "12 Oct close"), `telegram-digest` ran in-window and sent. 🔶 The "12 Oct close" is likely a live intraday bar from the
-  04:00 UTC yfinance canary; the `nse-fetcher` run at 11:15 PDT overwrites it (DELETE+INSERT) — spot-check tomorrow.
+  card (22,531.65, "12 Oct close"), `telegram-digest` ran in-window and sent. ✅ Spot-checked 2026-10-13: the `nse-fetcher` run overwrote the intraday bar — `^NSEI` 10-12 is now 22,363.35 (was 22,531.65).
 - [x] ✅ 2026-10-12 **News feeds repaired** — diagnosed: Moneycontrol (both feeds) 302-redirect to a login-consent wall for every user-agent, Reuters
   (`feeds.reuters.com`) no longer resolves. Fixed with a `FEEDS` env override in `manifests/ingestion/news/cronjob.yaml` (no image rebuild): kept
   ET + Business Standard, added LiveMint, Hindu BusinessLine (India) and CNBC, MarketWatch (global). Canary: 6/6 feeds parse, 160 headlines, 127 new
@@ -152,9 +251,12 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   the live DB. `tests/test_index_fetchers.py` (4 tests).
 - [ ] 🔶 `NIFTYMIDCAP150.NS` has only 2019 → today on Yahoo, so its reading
   rests on two years of comparisons; a longer series needs NSE's own archive.
-- [ ] 🔶 pi2 keeps rebooting under shared-charger power (six+ times on
-  2026-10-10, each taking API + cluster DNS + the bot down). Dedicated 5.1 V
-  supply for pi2 is the fix; nothing in software will hold until then.
+- [x] ✅ 2026-10-14 **pi2 reboots under shared-charger power — closed with the power fix.** Six+ reboots on
+  2026-10-10 (each took API + cluster DNS + the bot down); the cause was the shared multiport block, and pi2 is on a
+  dedicated supply since ~2026-10-12 02:30 UTC — it PASSed the 24 h review (10-12 02:59 → 10-13 03:51, 0 events).
+  Caveat still open: pi2 rebooted ~02:00 UTC 10-14 with the cause not established (`0x80000` heat flag only, 0
+  undervoltage events), and it is the one node with a heat WARN (`0x80008`, 60.1 °C at 06:49 UTC) — watch for a
+  heatsink/airflow.
 - [x] ✅ 2026-10-10 **Telegram v4 live** (same day as v3): table layout,
   `/index`, YTD everywhere, valuation repriced to the latest close,
   `/multibagger`, confidence score on every recommendation. 85 unit tests;
@@ -184,11 +286,13 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   2026-10-10 08:00 IST. Rollout gotchas recorded as finds F29–F32.
   Detail: findings Tier 1 #6, §3; ADR 0009; `manifests/telegram/`.
 - [ ] 🔶 **Grafana alerting tuning** — Telegram contact point + policy tree +
-  3 rules (stale feed, VIX spike, FII outflow) deployed AND live-fire-validated
-  2026-10-09 (FII rule fired on real data: −12,944 Rs cr). Remaining:
-  sentiment-drop rule; threshold tuning (VIX 25 / FII −3000 are first guesses —
-  FII fired at −12.9K, consider −5000+ if too chatty).
-  Detail: findings Tier 1 #1; architecture §12.4; ADR 0009.
+  rules deployed AND live-fire-validated 2026-10-09 (FII rule fired on real data: −12,944 Rs cr).
+  **2026-10-12: retuned and applied — VIX 30, FII −5000, sentiment-drop rule now live (4 rules, health ok).** Remaining: re-tune FII/sentiment at ~60 days of
+  history (only 8 FII days and ~2 weeks of sentiment exist) — **the only remaining part.**
+  **Stale-feed noise — FIXED 2026-10-18:** the self-expiring `stock_fundamentals` clause is removed from the rule (the 10-17 pass proved out:
+  heartbeat fresh, last_data 10-17), applied via `apply-grafana-provisioning.sh`, Grafana restarted on pi3, all 4 rules `health=ok`, stale-feed
+  `inactive`. Root cause of the weekend noise found and fixed in `pipeline-health:v5` (stock_prices/stock_scores were 48 h → paged every Sunday;
+  now 96 h like the other price feeds — the policy written in the script's own header). Detail: findings Tier 1 #1; architecture §12.4; ADR 0009.
 - [x] ✅ **Telegram two-way interface** — deployed + validated 2026-10-09:
   listener Deployment `telegram-bot` (pi1, image v2, long-poll getUpdates —
   CGNAT/F10 rules out webhooks), single-user allow-list, backlog drain on
@@ -221,15 +325,16 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 - [ ] 🔶 Per-job heartbeat v2 + fetcher-internal upstream guards — lands with
   the next NATURAL image rebuilds (don't rebuild 9 working images just for
   this). NEW jobs start on the v2 pattern directly (rbi-fetcher already writes
-  its own 'rbi' row; the health job's FEEDS list adopts new feeds at its next
-  natural rebuild). Detail: roadmap §3.1/§3.2.
+  its own 'rbi' row). ✅ 2026-10-18 `pipeline-health:v5` adopted `rbi` into its FEEDS (checks `max(ts)` of the
+  `IN_*` interest-rate rows, 96 h) — a dead rbi job is now visible (its self-row alone could never go stale).
+  `job_runs` table + `manifests/_common/mdjob.py` are ready for per-job records. Detail: roadmap §3.1/§3.2.
 - [ ] 🔶 `news_sentiment`/`raw_headlines` unique constraints (need ON CONFLICT
   in scorer/fetcher first). Detail: ops manual §12.5; roadmap §3.4.
 
 ### Architecture review follow-ups (2026-10-10 — recommendations, none applied)
 
 Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §5 phases.
-- [ ] 🔶 **AR-1 (Phase 0)** CronJob safeguards — **applied 2026-10-12 02:5x UTC to all 23 CronJobs (since un-suspended — live and protecting them)** (22 applied by
+- [x] ✅ **AR-1 (Phase 0)** CronJob safeguards — **applied 2026-10-12 02:5x UTC to all 23 CronJobs (since un-suspended — live and protecting them)** (22 applied by
   this session after a `kubectl diff` review showing only the 4 safeguard fields; `pg-backup` was already on the new spec).
   Live values verified (`concurrencyPolicy Forbid`, `startingDeadlineSeconds`, `activeDeadlineSeconds`, TTL 604800); values +
   rationale in ops manual §3. Effect on resume: only runs due inside each job's start window fire — no 23-job catch-up storm.
@@ -237,33 +342,55 @@ Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §
   **Checked 2026-10-12 08:25 UTC:** live values are in place (`Forbid`, start 3600 s; active deadlines headline-ner 1800, stock-screener 3600,
   stock-report 1200, telegram-alerts 600). `headline-ner` ran on schedule at 07:45 UTC and Completed inside its window; the others have
   only run as canaries — their scheduled slots are 09:15 / 09:30 / 09:45 UTC (telegram-alerts has **never** been scheduled yet).
-  Verify those three after 09:50 UTC today: `kubectl -n market-data get jobs` and the OK markers.
-- [ ] 🔶 **AR-2/AR-3 (Phase 1)** shared job module (DB connect+retry, `write_window()`,
-  logging, `main()` wrapper) and a durable `job_runs` table (start/end/rows/status/error).
-- [ ] 🔶 **AR-5 (Phase 1→2)** ✅ step 1 done 2026-10-12: a `requirements.lock` for every Python image (13 new frozen from the running images + the 3
-  existing; only the upstream timescale image has none). Remaining: make the Dockerfiles consume them at the next natural rebuilds, then
-  consolidate ~16 images to ~3 by dependency profile (ADR candidate; touches ADR 0004).
+  **DONE 2026-10-12 09:50 UTC — the deadlines held:** screener 23 s (limit 3600), report 12 s (1200), `telegram-alerts` 14 s (600), `stock-metrics` 3 m 27 s, all Complete
+  with their OK markers (details in the maintenance-pass item above). Only `stock-fundamentals` (Sat 10-17) is still to be seen under its deadline.
+  Earlier note: verify those three after 09:50 UTC today: `kubectl -n market-data get jobs` and the OK markers.
+  **2026-10-12 08:46 UTC:** none of the three is due yet (09:15 / 09:30 / 09:45 UTC); `pipeline-health` ran on schedule at 08:45 and Completed, and `pg-backup`
+  ran on schedule at 08:30 — `lastScheduleTime` for `stock-metrics` (due 09:00), `stock-screener`, `stock-report`, `telegram-alerts` still 10-10 / empty.
+- [ ] 🔶 **AR-2/AR-3 (Phase 1)** — **groundwork only (2026-10-18):** `job_runs` table live (`06d-job-runs.sql`, SCHEMA-OK);
+  helper module `manifests/_common/mdjob.py` (`connect()`, `write_window()` with one reconnect-retry, `job_run()` context
+  manager that records rows/status/error and never fails the job on bookkeeping errors). Named `mdjob`, not `joblib`, so it
+  cannot shadow the PyPI package. **No image uses it yet** — adopt per image at its next natural rebuild (copy into the build
+  context), then the Grafana stale-feed rule can read `job_runs`. Untested against a real DB: add a test when the first image adopts it.
+- [ ] 🔶 **AR-5 (Phase 1→2)** ✅ step 1 done 2026-10-12: a `requirements.lock` for every Python image (16/16, verified 2026-10-17).
+  Step 2: the screener (v10/v11) and `pipeline-health` (v5, 2026-10-18 — freeze == lock) Dockerfiles install from their locks; the other 14 still use inline `pip install` —
+  switch each at its next natural rebuild. Step 3: consolidate ~16 images to ~3 by dependency profile (ADR candidate; touches ADR 0004) — not started.
 - [ ] 🔶 **AR-6/AR-7 (Phase 2)** repo layout (`src/ images/ deploy/ db/`) + kustomize base so
   safeguards live in one place; parity-checked, no rebuild for pure moves.
 - [ ] 🔶 **AR-8 (Phase 1→2)** read-only DB roles for Grafana/bot, writer role for jobs;
   fixture tests for pure job logic (`tests/test_stocks.py` is the model).
 - [ ] 🔶 **AR-9 (Phase 2)** GitHub Actions CI **written 2026-10-12** (`.github/workflows/ci.yml`: docs/manifest drift check, all unit + shell tests,
-  manifest sanity, gitleaks; no secrets; verified step-by-step in a clean venv) — **has not run on GitHub yet (needs a push)**. Remaining: lint, and a
-  branch/worktree per session so WIP is never committed by the wrong session.
+  manifest sanity, gitleaks; no secrets; verified step-by-step in a clean venv) — **has run on GitHub: run #1 failed (nodewatch test needed the local hosts file — fixed in `f3e203d`), #2 and #4 (the push of 2026-10-12, lint included) are green — docs/manifest drift, all unit + shell tests, manifest sanity and the full-history gitleaks scan**. Lint
+  (syntax: `py_compile` + `bash -n`) added 2026-10-12 and the workflow now also runs on `feat/**` / `fix/**` pushes. ✅ 2026-10-18: real linters added —
+  `ruff==0.17.1` on the fatal set `E9,F63,F7,F82` (syntax + undefined names, the DQ-3 bug class) and `shellcheck -S error`; both clean locally.
+  Not enforced yet: F401/F841 (6 unused imports in fetchers baked into live images — clean each at its next rebuild: fdi-watch `os`, fx-fetcher
+  `pandas`, stock_fundamentals `json`, telegram bot.py `timedelta`/`timezone`/`IST`). `tests/test_pull_backups.py` added to CI. Not yet run on GitHub
+  (nothing pushed). Remaining: a branch/worktree per session so WIP is never committed by the wrong session.
 - [ ] 🔶 **AR-4 (Phase 3)** DB `Guaranteed` QoS + readiness probe, bot liveness (StatefulSet
   change restarts the single DB — quiet window only).
-- [ ] 🤔 **AR-10 (Phase 3, decisions/hardware)** control-plane `state.db` backup, stronger
+- [ ] 🤔 **AR-10 (Phase 3, decisions/hardware)** ~~control-plane `state.db` backup~~ ✅ first copy 2026-10-18 (below), stronger
   control-plane host, DB-host/GPU-host separation, off-site backups, schedule timezone
   (decide before 2026-11-01, ADR 0002 revisit).
+  - ✅ 2026-10-18 **control-plane backup, one-off:** on pi2 (load 0.44) Python's `sqlite3` online-backup API copied `state.db` (pi2 has no
+    `sqlite3` CLI; the API gives a consistent copy while k3s runs), `PRAGMA integrity_check` = ok, 2,169 kine rows; plus the server `token`.
+    Archive pulled to `out/backups/k3s/k3s-cp-backup-2026-10-18.tar.gz` (gitignored, mode 600 — **holds the cluster join token**), sha256
+    `851c663e…` identical on both ends, removed from pi2 `/tmp`. ✅ **Recurring since 2026-10-18:** `ops-tools/pull-k3s-backup.sh` (adds
+    `server/tls` + `server/cred` so a rebuilt pi2 keeps the cluster CA; load gate: skips if pi2 load1 > 3; keeps 14), workstation cron 03:30 local;
+    restore steps in ops manual §9. 🔶 **Restore never rehearsed** — drill it on a spare SSD before relying on it. Cron needs the workstation on at 03:30.
+  - Off-site copy: **needs an owner decision** — no cloud tool or remote is configured on the workstation (no rclone/restic/aws/b2). Pick a
+    destination + encryption (e.g. `restic` to B2/S3, or rclone crypt); dumps hold `bot_users` chat ids and the k3s archive holds the join token.
 - [ ] 🔶 **AR-11 (Phase 0)** fix `pg-backup` — **applied + canary-validated 2026-10-11 ~23:40 UTC (not by this session — applied
   by the owner or another session; I only found it)**: live spec carries the new script; pi3 holds `marketdata-2026-10-11.dump`
   (171 MB) + `.sha256` (`sha256sum -c` OK 2026-10-12), the 0-byte 10-10 file and the 10-03 dump are gone. The CronJob is still
-  un-suspended 2026-10-12 with the rest. **Restore drill DONE 2026-10-12 (off-cluster, no load on the DB):** the 171 MB 10-11 dump restored into a
-  local `timescale/timescaledb:2.30.1-pg16` container in **30 s, 0 errors** (12 hypertables, 3,703 chunks; serial `pg_restore` after
-  `timescaledb_pre_restore()` — `-j2` fails on the catalog foreign keys); 12 of 13 tables match the live DB row-for-row (6,340,928 `stock_prices`,
-  292,313 `index_prices`, …); the 13th, `universe_constituents` (1001 vs 998), differs by exactly the 3 rows `universe-refresh` added after the dump.
-  **Second copy:** `ops-tools/pull-backups.py` pulls the newest verified dump(s) to the workstation, sha256-checked against the sidecar, exit 2 if the
-  newest verified dump is > 36 h old (tested: stale path, and a corrupted local copy is detected and re-pulled). Remaining: off-site copy, and an
+  un-suspended 2026-10-12 with the rest. **Restore drill DONE 2026-10-12 (off-cluster) and re-run 2026-10-17 (in-cluster):** the 171 MB 10-11 dump restored into a
+  local `timescale/timescaledb:2.30.1-pg16` container in **30 s, 0 errors**; re-run 2026-10-17 in-cluster via `restore-drill-job.yaml`
+  in **289 s (≈5 min)**, RESTORE-DRILL-OK, index_prices row counts match (live=292,577 = drill=292,577). RTO now ≈5 min at current size.
+  **Second copy:** `ops-tools/pull-backups.py` run 2026-10-17: pulled marketdata-2026-10-17.dump (173 MB, sha256 ok) and
+  marketdata-2026-10-16.dump (172 MB, sha256 ok) to workstation; newest verified dump 22.2 h old (within 36 h limit).
+  ✅ 2026-10-18: daily at 03:00 local from workstation cron (`pull-backups.py --prune-local 7` → `out/logs/pull-backups.log`); new opt-in
+  `--prune-local N` rotates only dumps dated ≥ 2026-10-18 whose sidecar verifies (older/hand-kept copies such as the 10-13 pre-migration dump are
+  never touched; `tests/test_pull_backups.py`, 3 tests). Workstation `/home` is 94 % full — that is why rotation exists.
+  Remaining: off-site copy (owner decision), and an
   in-cluster staleness alert (the Grafana `stale-feed` rule only counts `fresh=false` rows from the health job's own FEEDS, so a self-written row
   cannot go stale — needs a rule change or a health-job rebuild; run `pull-backups.py` from cron meanwhile). `tests/test-pg-backup.sh` 21/21.
 - [x] ✅ **AR-12 (Phase 1)** — re-verified 2026-10-12 04:30 UTC: all five hosts logging every 5 min, `nodewatch` cron present on pi0. Repair/verify the 5-min stats logger (one sample on pi0/pi1/pi3; **all five hosts fixed 2026-10-11**: each
@@ -290,53 +417,54 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
 
 ### Data correctness — prerequisite for EV-0 and every ML backtest (found 2026-10-10)
 
-- [ ] 🔶 **P0 · DQ-1 (G-1) corporate actions / adjusted prices.** Verified: `stock_prices` keeps only OHLCV from yfinance with
-  `auto_adjust=False` — Yahoo's raw `Close` is split-adjusted but **not dividend-adjusted**, `Adj Close` is dropped, and
-  there is no splits/dividends/corporate-actions table. The daily job refreshes only the last 5 days, so a split or
-  spin-off *after* a symbol's backfill leaves a discontinuity in its older rows. Evidence it matters: 3 symbols show
-  > 40 % single-day moves in the last 60 days (CTVA −84 % on 2026-10-01, HEGAM.NS −63 % on 2026-09-06, MRNA +177 % on
-  2026-08-19 — causes **not verified**: spin-off, bonus/demerger or bad bars). Returns, momentum and volatility are
-  wrong across such events. Fix (additive): `adj_close` column + `corporate_actions` table; re-backfill a symbol when an
-  action is detected; flag > 40 % moves (ML-1); then run EV-0 on adjusted series. Total-return (dividend) effects are
-  currently omitted from every return metric.
-- [ ] 🔶 **P0 · DQ-2 fundamentals period + point-in-time errors** (verified 2026-10-10, live DB; design + DDL in
-  `data-foundations-schema-draft-2026-10-10.md`). (a) `edgar_facts()` ignores period length, so quarterly rows hold
-  year-to-date values (MSFT net income 27.75 → 66.21 → 97.98 → 133.75 bn across Sep/Dec/Mar/Jun) and
-  `annual_series()` can compare 12-month with 6-month figures for non-December fiscal years; (b) `filing_published_at`
-  is the *latest* re-filing (MSFT FY2024 shows 2026-07-29), so history is not point-in-time. Plan: new append-only
-  `financial_facts` table keyed by duration + first-filing date. Measure the effect on live scores (non-December-FY
-  companies) before switching readers. Blocks EV-0 on fundamentals and EV-9…EV-15.
-  **Measured 2026-10-10** (emulating `annual_series`, 477 S&P symbols with EDGAR revenue): median "3-year revenue
-  CAGR" = **−17.8 %** vs like-for-like YoY **+8.8 %**; 400 of 477 understated by > 10 pp, 351 sign-flipped, because the
-  newest entry per calendar year is a half-year YTD figure compared with a full year. `growth_score` (20 % of the
-  composite), EPS growth and `fcf_yield` are affected; percentile ranking hides part of it for companies at the same
-  point in their reporting cycle, but it distorts ranks between companies at different points. Fix before trusting any
-  growth/FCF ranking, not only before EV-0.
-  **Status 2026-10-12: interim fix DEPLOYED in `screener:v9` (canaried on pi1; S&P 500 top-50 overlap 25/50 — see §1).** (2026-10-10: coded) `stock_screener.py`
-  (`annual_series`, `latest_fundamentals`) and `stock_report.py` now read flow metrics (revenue, net income, operating
-  income, EPS, FCF) from full-year yfinance rows only — on live data the median 3-y revenue CAGR becomes +8.5 % (was
-  −17.8 %), no symbol loses coverage (every EDGAR symbol also has yfinance rows). Cost: US flow figures are the last
-  fiscal year, up to ~12 months old, until `financial_facts` gives true TTM. Tests: `tests/test_stock_fundamentals_fixes.py`.
-  Remaining: `/rebuild` as `screener:v9` → canary `stock-screener` → diff top-50 before/after → note in digest.
-  **Same flaw, not fixed:** Telegram `stocks.py` `series()` (picks the newest-`ts` source, i.e. EDGAR YTD for US) — own image.
-- [ ] 🔶 **P0 · DQ-3 weekly fundamentals job is effectively every-other-week + resets first-seen dates.**
-  `stock_fundamentals.py:228` uses undefined `failed`. Evidence it is live in v8: the 2026-10-04 full pass left the
-  cursor un-cleared (last update 10:39:13 UTC, the last symbol's write); the 2026-10-10 13:00 UTC run logged only
-  "pass already complete — cursor cleared" and finished in 20 s with **no data refreshed** (`pe` still one `ts`,
-  2026-10-04). The cursor is now NULL, so **2026-10-17 06:00 PDT does a full pass, then hits the NameError again**
-  (Job fails after writing everything; the week after is another no-op). Also each full pass resets yfinance statement
-  rows' `filing_published_at` to the fetch date (EV-2). Image v8 not inspected (not in TX2 Docker; repo file is the
-  best evidence). Fix in the next image, `/rebuild`; if v9 won't land before 10-17, accept the one failing Job.
-  **Status 2026-10-12: DEPLOYED in `screener:v9` (see the v9 item in §1); first live proof = the 10-17 weekly run.** (2026-10-10: coded) `failed` now initialised and counted (also printed in
-  `FUNDAMENTALS-OK`); `upsert()` keeps the earliest `filing_published_at` (`LEAST`) so re-fetches stop resetting
-  first-seen dates. Covered by `tests/test_stock_fundamentals_fixes.py` (7 tests pass).
+- [ ] 🔶 **P0 · DQ-1 (G-1) corporate actions / adjusted prices.** Background: `stock_prices` kept only OHLCV with `auto_adjust=False`;
+  Yahoo's raw `Close` is split-adjusted but not dividend-adjusted, and a split after a symbol's backfill left older rows on the old scale.
+  **CTVA proven 2026-10-12** (spin-off recorded as `Stock Splits = 6.66`); MRNA +177 % and HEGAM.NS −63 % are real moves, not adjustment errors.
+  **Audit + repair 2026-10-13:** `ops-tools/audit-price-adjustments.py` — 2,474 comparisons, exactly one mismatch (CTVA, ratio 6.665), repaired live.
+  **2026-10-14 (`screener:v10`):** split detection + full-history re-backfill in the daily job.
+  **2026-10-17/18 — corporate actions LIVE in `screener:v11`:** schema `06b-corporate-actions.sql` (`stock_prices.adj_close` column +
+  `corporate_actions` table: symbol, ts, action_type, ratio, amount, source; PK symbol+ts+action_type) applied, SCHEMA-OK. `stock_prices.py`
+  records splits (`ratio`) and dividends (`amount`) via `action_events()`; only splits trigger a resync; a failed actions write is a WARN, not a
+  symbol failure. 13 tests (`tests/test_stock_prices.py`, 3 new). v11 built on TX2 (8 files sha256-identical to the repo), tarball `d14bf219…`
+  checked at each hop, imported pi3 (64 s) then pi1 (62 s, 25/25 throttle samples `0x0`); live diff = 6 image lines. **Canary 2026-10-18 on pi1:**
+  `PRICES-OK fetched=997 warn=1 rows=4985 splits_resynced=0`; 18 dividends recorded (18 symbols, 10-13→10-16); 0 duplicate trade days; 0
+  non-midnight rows. **Not yet exercised on a real split** (unit-tested only). **Remaining:** (1) `adj_close` is still NULL on purpose — per the
+  data-foundations draft §2/§3.1 it must be OUR total-return series computed from `close` + `corporate_actions`, NOT Yahoo's `Adj Close`
+  (rewritten backwards on every dividend, stale in rows the 5-day job skips); (2) one-off `corporate_actions` history backfill (per-symbol,
+  `period=max`); (3) `price_anomalies` writer (>40 % jumps, restatements); (4) keep running the weekly audit until (1)–(3) land.
+  Note: the live `corporate_actions` shape differs from the draft's (`action_type/ratio/amount` vs `action/value/detected_at`, no `source` in PK) —
+  fine for one source; revisit if a second source is added.
+- [x] ✅ 2026-10-13 **P0 · DQ-4 `stock_prices` timestamp conventions + 4,434 duplicate rows — REPAIRED.** Found 2026-10-12: pre-10-02 history was stamped with exchange-local
+  midnight (US `04:00`/`05:00` UTC, NSE `18:30` UTC of the *previous* day — 99.7 % of the 6.34 M rows) while newer rows are `00:00` UTC on the trade date; the overlap left 4,434 duplicate
+  symbol-days (987 symbols, 09-28 → 10-02) and made every old NSE `ts::date` one day early (e.g. HEGAM.NS's 09-07 bar stored 09-06). **Fix (approved by the owner's "fix all that can be done"):**
+  `ops-tools/sql/2026-10-13-stock-prices-normalise-ts.sql` — step 1 deleted the 4,434 duplicates, step 2 rewrote 6,320,102 rows (987 symbols, per-symbol transactions, each verified inserted == deleted)
+  to `00:00` UTC of the trade date (`date_trunc('day', ts + 6 h)`). **Process:** fresh verified dump first (`marketdata-2026-10-13.dump`, 04:06 UTC, pulled to `out/backups/`); rehearsed on a local
+  restore of the 10-12 dump (5.5 min, counts and dates verified); live run 04:08→04:43 UTC on the TX2 DB (~35 min, DB pod peaked 1.75 GiB of 2, no failures, nodes stayed Ready), then autovacuum
+  cleaned up for ~10 min (a `count(*)` during that time was slow — cancelled). **Verified live:** 6,338,993 rows = 6,343,427 − 4,434; **0** non-midnight rows; 0 duplicate trade days; HEGAM.NS 09-07 = 272.20
+  (matches Yahoo). **Decision recorded as ADR 0013.** **Step 3 (writer change) turned out unnecessary:** the current daily writer already produces `00:00` UTC rows (every row since 10-05 is), so the convention cannot drift back. Readers
+  (`stock_metrics` row-count lookbacks) are now consistent; tomorrow's `stock-metrics` run is the first to score on the repaired series. Note: the Nifty 500 bar for "today" is a partial intraday bar until the
+  next run overwrites it — harmless. Rollback if ever needed: restore from the pre-migration dump (no inverse UPDATE exists).
+- [ ] 🔶 **P0 · DQ-2 fundamentals period + point-in-time errors.** (a) `edgar_facts()` ignores period length → quarterly rows hold YTD values
+  (MSFT net income 27.75 → 66.21 → 97.98 → 133.75 bn); measured 2026-10-10: median 3-y revenue CAGR −17.8 % vs like-for-like +8.8 %, 351/477 sign-flipped.
+  (b) `filing_published_at` is the latest re-filing, so history is not point-in-time. **Interim fix live since `screener:v9`** (flow metrics from
+  full-year yfinance rows only; median CAGR +8.5 %). **2026-10-17: schema only** — `06c-data-foundations.sql` created `financial_facts`
+  (duration-keyed, first-filing `filed`), `universe_membership_snapshots`, `price_anomalies`, `factor_returns`; all empty, SCHEMA-OK.
+  **Remaining (the actual fix):** `stock_fundamentals.py` writer for `financial_facts` (draft §3.2), canary on MSFT/a Dec-FY name/an NSE name,
+  backfill, then switch screener readers to duration-aware TTM and diff the top-50. Same flaw unfixed in Telegram `stocks.py` `series()`.
+- [x] ✅ 2026-10-17 **P0 · DQ-3 weekly fundamentals job — PROVEN LIVE.** Fix shipped in v9 (`failed` initialised; `upsert()` keeps the earliest
+  `filing_published_at`). The Sat 2026-10-17 run (`stock-fundamentals-29870700`, 13:00→14:40 UTC, Complete) is the first real pass on it.
+  Its pod log was lost (likely in the 10-18 site-wide power event), so the proof is DB-side: `job_state.stock_fundamentals` cursor = NULL
+  at 14:40:55 UTC (the clear that used to NameError) and `pe`/`pb` now hold 2 distinct snapshot dates (10-04, 10-17) — fundamentals refreshed.
 - [ ] 🔶 **P1 · G-20** factor returns (US Ken French library, India IIM-A library — URLs/terms **not verified**) into
   `factor_returns`; extend EV-0 §5 test 4 to "beyond the standard factors".
 - [ ] 🔶 **P2 · G-21** extra signals testable from data on hand: net payout yield (Boudoukh et al. 2007), distress score,
   Amihud illiquidity (2002), max daily return / idiosyncratic volatility (Bali et al. 2011), industry momentum
   (Moskowitz & Grinblatt 1999) — citations from memory, verify; each must pass EV §5.
-- [ ] 🔶 **P2 · G-22** 12 of 503 S&P symbols have no EDGAR rows (e.g. AAPL) — check the `cik` gap in
-  `universe_constituents`.
+- [ ] 🔶 **P2 · G-22** S&P symbols without EDGAR rows — **root cause found 2026-10-12: not a `cik` gap.** All 503 active S&P rows have a CIK; 10 lack EDGAR
+  rows: `A, AAPL, ABBV, ABNB, ABT, ACGL, ACN` (the first 7 alphabetically — they missed the first full pass) and `SKYD, TWLO, VYLR` (added by `universe-refresh` after it). SEC
+  `companyfacts` answers HTTP 200 with data for 9 of the 10 (e.g. AAPL 441 annual/quarterly facts); only `VYLR` has none (new spin-off). The weekly job re-processes the whole
+  universe, so **the Sat 10-17 pass should fill them — verify then** (active S&P symbols with EDGAR rows should rise from 493 to 502); if not, run a
+  `BACKFILL=1` canary for those symbols.
 
 ### Evidence-based signals (plan 2026-10-10 — `evidence-based-signals-roadmap.md`)
 
@@ -392,7 +520,8 @@ practice · ⚪ unproven here · ⚠️ citation not verified.
   check) and the tailnet nameserver set in the admin console. Detail: ops manual §12.6.
 - [ ] 🔶 Remove the dead router UDP 51820 port-forward (WireGuard leftover) — owner, router-side. Detail: roadmap §11.
 - [ ] 🔶 **Find out who messaged the bot** — the old `telegram-bot` pod's log showed a chat NOT on the allow-list sending `/status`
-  (ignored; the allow-list works). Worth knowing who it was.
+  (ignored; the allow-list works). Worth knowing who it was. 2026-10-12 08:46 UTC: the current pod's log shows a group chat (`/top`, `/status`,
+  `/gold`) and a private chat (`/start`) being ignored just before the two `/adduser` calls — probably the person now added as `sailu`; owner to confirm, then close.
 - [x] ✅ 2026-10-12 pi2 cordon dated: taint `node.kubernetes.io/unschedulable` `timeAdded` = 2026-10-10 06:11:25 UTC (during the outage
   recovery). Reason inferred from timing, not recorded — owner may confirm; **keep it cordoned** (1 GB control plane).
 
@@ -416,6 +545,8 @@ practice · ⚪ unproven here · ⚠️ citation not verified.
 ## 5. Recurring (never "done" — calendar items)
 
 - [ ] 🔄 Daily: `/health` checklist (ops manual §7). Automatic: 23 CronJobs.
+- [ ] 🔄 Weekly (until the daily split detection ships — DQ-1): `PSQL_CMD=… python3 ops-tools/audit-price-adjustments.py audit`; repair any mismatch with `emit-repair <SYM>`
+  (reviewed SQL, one transaction per symbol). Last run 2026-10-13: only CTVA, repaired.
 - [ ] 🔄 Monthly (1st): fdi-watch logs DPIIT links → 5-min manual INSERT.
   Detail: ops manual §11.
 - [ ] 🔄 Quarterly: timed restore drill (`restore-drill-job.yaml`), after any

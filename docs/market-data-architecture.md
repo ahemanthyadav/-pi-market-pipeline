@@ -1,8 +1,9 @@
 # Market Data Pipeline — System Architecture
 
 > **Status:** live in production on the home k3s cluster. Reconciled with `manifests/` 2026-10-10
-> (23 CronJobs; `ops-tools/workloads.py --check` keeps the tables honest). Live state NOT re-verified that
-> day — the cluster was degraded/unreachable (see ops manual §8 and pending-tasks).
+> (23 CronJobs; `ops-tools/workloads.py --check` keeps the tables honest). **Live state re-verified
+> 2026-10-17: all 4 k8s nodes Ready (pi2 control-plane cordoned), all 23 CronJobs active, TimescaleDB,
+> Grafana, and Telegram bot all Running.** (see ops manual §8 and pending-tasks for known gaps).
 > Doc map: this file = **architecture** (what the system is);
 > `market-data-pipeline-plan.md` = design history + build log;
 > `market-data-pipeline-operations-manual.md` = runbooks + copy-paste commands;
@@ -317,7 +318,7 @@ whole DB via `pg_dump`.*
 | `raw_headlines` | id, headline, source, ts, scored flag | plain staging table |
 | `intraday_prices` | ticker, ts, o/h/l/c, volume | hypertable (hourly candles: gold/silver/oil/DXY) |
 | `ticker_names` | ticker (PK), name | reference table (46 names — dashboard labels + queries) |
-| `pipeline_heartbeat` | feed (PK), last_check, last_data_ts, fresh, rows_total, max_age_hours | health table (written by `pipeline-health` CronJob 01:45; **13 feeds** since the screener deploy — image v4) |
+| `pipeline_heartbeat` | feed (PK), last_check, last_data_ts, fresh, rows_total, max_age_hours | health table (written by `pipeline-health` CronJob 01:45; **14 feeds** since image v5, 2026-10-18 — rbi added; stock_prices/stock_scores 96 h so weekends do not page) |
 | `universe_constituents` | universe+symbol (PK), name, sector, isin, cik, exchange, currency, active, membership dates | security master (998: 503 SP500 + 495 NIFTY500) |
 | `stock_prices` | symbol, ts, o/h/l/c, volume | hypertable — max-history daily stock OHLCV |
 | `stock_fundamentals` | symbol+ts+metric+source (PK), value, filing_published_at | long/narrow point-in-time facts (EDGAR ~2006→ / yfinance NSE ~4y) |
@@ -338,20 +339,32 @@ scorers gain ON CONFLICT clauses at their next image rebuild).
 Schema lives in ConfigMap `timescaledb-schema` (`01-schema.sql`, all DDL `IF NOT EXISTS`,
 safe to re-run via the `timescaledb-schema` one-shot Job).
 
-### 4.3 Live volume (verified 2026-10-03)
+### 4.3 Live volume (verified 2026-10-17)
 
 | Table | Rows |
 |---|---|
-| index_prices | 9,076 (28 tickers + 8 NSE + 1y backfills + futures) |
-| technical_indicators | 1,107 |
-| news_sentiment / raw_headlines | 251 / 251 |
-| fx_rates | 402 (10 pairs; hourly since the intraday deploy) |
-| intraday_prices | 161 (hourly GC/SI/CL/DXY, 2026-10-03) |
-| ticker_names | 46 (reference) |
-| bond_yields | 18 |
-| capital_flows | 6 |
-| interest_rates | 1 (DFF) |
+| index_prices | 292,577 (28 tickers + 8 NSE + 1y backfills + futures) |
+| technical_indicators | 4,266 |
+| news_sentiment / raw_headlines | 1,461 / 1,461 |
+| fx_rates | 4,562 (10 pairs; hourly since the intraday deploy) |
+| intraday_prices | 1,099 (hourly GC/SI/CL/DXY) |
+| ticker_names | 1,049 (reference) |
+| bond_yields | 138 |
+| capital_flows | 26 |
+| interest_rates | 66 (7 RBI policy rates + DFF) |
 | commodity_prices | 0 |
+| universe_constituents | 1,001 (998 security master + 3 refresh drift) |
+| stock_prices | 6,343,487 |
+| stock_fundamentals | 220,083 |
+| stock_metrics_daily | 103,739 |
+| stock_scores | 8,992 |
+| stock_reports | 595 |
+| screening_runs | 19 |
+| job_state | 4 |
+| watchlist | 0 |
+| bot_users | 2 |
+| headline_entities | 897 |
+| headline_events | 453 |
 
 ### 4.4 Backup & durability
 
@@ -510,7 +523,7 @@ erDiagram
         string cursor
     }
     PIPELINE_HEARTBEAT {
-        string feed PK "freshness, 13 feeds + rbi self-row"
+        string feed PK "freshness, 14 feeds (rbi checked by health since v5)"
         timestamptz last_check
         bool fresh
         int rows_total
@@ -555,14 +568,14 @@ layer (JOINs on ticker/symbol), not in DDL.*
 | telegram-digest | 0 8 * * * (Asia/Kolkata) | local/telegram-digest:v8 (pinned pi1) | Telegram digest (read-only) |
 | telegram-alerts | 45 2 * * * (node-local) | local/telegram-digest:v8, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only; silent when nothing changed) |
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | pi3 SSD dumps |
-| pipeline-health | 45 1 * * * | local/pipeline-health:v4 | pipeline_heartbeat (13 feeds) |
+| pipeline-health | 45 1 * * * | local/pipeline-health:v5 | pipeline_heartbeat (14 feeds incl. rbi; stock prices/scores 96 h since v5) |
 | intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
-| universe-refresh | 0 9 * * 0 | local/screener:v9 | universe_constituents + ticker_names (998) |
-| stock-prices | 30 23 * * * | local/screener:v9 | stock_prices (5d window) |
-| stock-fundamentals | 0 6 * * 6 | local/screener:v9 | stock_fundamentals (EDGAR US + yfinance NSE) |
-| stock-metrics | 0 2 * * * | local/screener:v9 | stock_metrics_daily |
-| stock-screener | 15 2 * * * | local/screener:v9 | stock_scores + screening_runs |
-| stock-report | 30 2 * * * | local/screener:v9 | stock_reports (top-25/universe + digest) |
+| universe-refresh | 0 9 * * 0 | local/screener:v11 | universe_constituents + ticker_names (998) |
+| stock-prices | 30 23 * * * | local/screener:v11 | stock_prices (5d window) |
+| stock-fundamentals | 0 6 * * 6 | local/screener:v11 | stock_fundamentals (EDGAR US + yfinance NSE) |
+| stock-metrics | 0 2 * * * | local/screener:v11 | stock_metrics_daily |
+| stock-screener | 15 2 * * * | local/screener:v11 | stock_scores + screening_runs |
+| stock-report | 30 2 * * * | local/screener:v11 | stock_reports (top-25/universe + digest) |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only → manual INSERT |
 
 **Schedules are node-local PDT, not UTC** (verified 2026-10-04 — the "02:00-02:30"
@@ -759,12 +772,12 @@ sequenceDiagram
     participant TP as Telegram contact point
     participant PHN as owner's phone
 
-    HB->>PH: upsert freshness per feed — 13 feeds (max age + row counts)
+    HB->>PH: upsert freshness per feed — 14 feeds (max age + row counts)
     RB->>PH: self-row 'rbi' (heartbeat v2 pattern — new jobs write their own row)
     PH->>GR: rules query freshness, VIX level, FII flows
-    GR->>TP: rule fires — stale feed, VIX above 25, or FII below -3000 Rs cr
+    GR->>TP: rule fires — stale feed, VIX above 30, FII below -5000 Rs cr, or 7-day sentiment below -0.15
     TP->>PHN: alert message to allow-listed chat (notification policy tree)
-    Note over GR,PHN: deployed 2026-10-09 (ADR 0009); thresholds are first guesses —<br/>sentiment-drop rule + tuning still pending (§12)
+    Note over GR,PHN: deployed 2026-10-09 (ADR 0009); thresholds retuned 2026-10-12 (VIX 30, FII -5000, sentiment rule applied) —<br/>re-tune FII/sentiment once ~60 days of data exist (§12)
 ```
 
 ---

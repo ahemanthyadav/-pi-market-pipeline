@@ -130,7 +130,7 @@ data:
             labels:
               severity: warning
           - uid: vix-spike
-            title: VIX above 25
+            title: VIX above 30
             condition: B
             for: 0m
             noDataState: OK
@@ -159,7 +159,7 @@ data:
                   conditions:
                     - evaluator:
                         params:
-                          - 25
+                          - 30
                         type: gt
                       operator:
                         type: and
@@ -180,7 +180,7 @@ data:
                   type: threshold
             annotations:
               summary: "VIX: {{ $values.B }}"
-              description: "VIX close above 25 (threshold tunable in this file — watch a few weeks, then adjust)."
+              description: "VIX close above 30 (raised from 25 on 2026-10-12: since 2016 VIX closed above 25 on 14 % of days, above 30 on 5.7 %, above 35 on 2.3 % — 25 was too routine to alert on)."
             labels:
               severity: warning
           - uid: fii-outflow
@@ -213,7 +213,7 @@ data:
                   conditions:
                     - evaluator:
                         params:
-                          - -3000
+                          - -5000
                         type: lt
                       operator:
                         type: and
@@ -234,13 +234,13 @@ data:
                   type: threshold
             annotations:
               summary: "FII net: {{ $values.B }} Rs cr"
-              description: "Latest FII net below -3000 Rs cr (threshold tunable in this file)."
+              description: "Latest FII net below -5000 Rs cr (raised from -3000 on 2026-10-12: 7 of the 8 days recorded so far were below -3000, 5 of 8 below -5000 — only 8 days of history exist, so re-tune once ~60 days accumulate)."
             labels:
               severity: warning
           # Sentiment-drop rule — finds Tier 1 #1's last candidate, added
           # 2026-10-09. Same 7-day AVG(sentiment_score) the digest reports
           # (digest.py), so alert and digest can never disagree on the number.
-          # Threshold -0.15 is a first guess like VIX 25 / FII -3000 — tune
+          # Threshold -0.15 is a first guess like the original VIX 25 / FII -3000 (now 30 / -5000) — tune
           # from real firings per telegram-bot doc §3.3.
           - uid: sentiment-drop
             title: Sentiment drop

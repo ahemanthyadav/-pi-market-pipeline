@@ -2,8 +2,8 @@
 
 > **Purpose:** one place that answers "what does each machine do, what breaks if it dies, and what must I
 > never do to it". Detail stays in the linked docs; this file is the index per node.
-> **Last verified: 2026-10-11** (live `kubectl` + SSH to pi0; pi1/pi2/pi3/TX2 host-level facts are from the ops
-> manual and earlier sessions, marked where not re-checked today).
+> **Last verified: 2026-10-18** (live `kubectl`, per-Pi `uptime`/`dmesg`/`vcgencmd`, all 4 nodes Ready, all 23 CronJobs active;
+> TX2 fixed-config facts are from the ops manual and were not re-checked today).
 > No IP addresses here (AGENTS.md rule 8): node names only; real values live in the gitignored `.hosts.env`.
 
 ## 1. At a glance
@@ -11,7 +11,7 @@
 | Node | Hardware | In k3s? | Primary job | Pinned workloads | If it dies |
 |---|---|---|---|---|---|
 | **pi0** | Pi 1 B+, 512 MB, SD | **No** | LAN DNS (Pi-hole + unbound), out-of-cluster watcher | none (not a k8s node) | LAN ad-block DNS gone; the dead-man's switch goes silent |
-| **pi1** | Pi 3 B, 1 GB, 233 GB SSD | Worker | Telegram bot host; general ingestion pool | `telegram-bot`, `telegram-digest`, `telegram-alerts` | Bot stops answering; digest/alerts not sent; unpinned jobs land on pi3 only |
+| **pi1** | Pi 3 B, 1 GB, 233 GB SSD | Worker | Telegram bot host; general ingestion pool | `telegram-bot`, `telegram-digest`, `telegram-alerts` | Bot stops answering; digest/alerts not sent; unpinned jobs land on pi3 only. Power supply replaced 2026-10-14; 24h acceptance pending (due ≥ 2026-10-15 05:40 UTC). |
 | **pi2** | Pi 3 B+, 1 GB | **Control plane** | k3s server (API, scheduler, datastore, CoreDNS, Traefik) | none (**cordoned**) | Whole cluster loses its API; nothing new schedules (see §4) |
 | **pi3** | Pi 3 B, 1 GB, SSD | Worker | Grafana, backups, general ingestion pool | `grafana`, `pg-backup`, `restore-drill` (Job) | No dashboards, no nightly dump; unpinned jobs land on pi1 only |
 | **tx2** (`ahytx2-desktop`) | Jetson TX2, 7.7 GB, eMMC + 224 GB SSD | Worker (GPU, tainted) | **The database**, NLP jobs, image build host | `timescaledb`, `sentiment-scorer`, `headline-ner` | **Every pipeline write fails** (DB down); data is safe on the Retain PV |
@@ -28,7 +28,7 @@
     It is the only alert path that does not live inside the cluster it watches.
 - **Not responsible for:** anything in k3s. It does not run an agent.
 - **Watch:** 512 MB RAM — keep it lean (no extra daemons). Past throttle flags `0x50000` seen before 2026-10-11;
-  `0x0` since the reboot. Power: shares the multiport charger (tracker §1).
+  `0x0` since the reboot; 0 undervoltage events in `dmesg` at 08:41 UTC 2026-10-12 (up ~6 h). Power: on its own supply since ~02:30 UTC 2026-10-12 (was the shared multiport charger; tracker §1).
 - **Open:** DNS over the tailnet (Pi-hole `listeningMode` is `LOCAL`), dedicated PSU, router UDP 51820 forward.
 
 ### pi1 — Telegram + ingestion worker
@@ -36,12 +36,14 @@
   allow-list — ADR 0012), CronJobs `telegram-digest` (08:00 IST — the only job with an explicit timeZone) and `telegram-alerts` (02:45).
   Pinned so image imports are needed on one node only.
 - **Unpinned jobs:** eligible for any of the 18 unpinned CronJobs (§3.1) — **only if the image is imported on pi1** (no registry).
-  The earlier image gap is closed: `yfinance-fetcher:v5`, `nse-fetcher:v4` and `screener:v9` are imported on **both** pi1 and
-  pi3 (verified with `ctr images ls` 2026-10-12 08:22 UTC) — and since then most floating jobs run here (§3.1).
+  `screener:v11` + `pipeline-health:v5` imported on pi1 and pi3 2026-10-18 (v10/v4 kept for rollback; pi2 skipped — cordoned). After the
+  10-18 prune incident pi1 holds all 14 images its jobs need (incl. telegram-digest:v8), pi3 all 13 floating ones — verified against the manifests.
+  The earlier image gap is closed: `yfinance-fetcher:v5`, `nse-fetcher:v4` and `screener:v10` (v9 kept) are imported on **both** pi1 and
+  pi3 (verified with `ctr images ls` 2026-10-14 06:20 UTC) — and since then most floating jobs run here (§3.1).
 - **Host jobs:** node-stats logger — root cron added 2026-10-11 (the crontab was empty; AR-12).
-- **Power (2026-10-12):** the only Pi that **failed** the early power review — live undervolt + throttle (`0x50005`) at 04:35 and
-  04:50 UTC under image-import load (CPU 58–73 %), even after the move to separate supplies; pi0/pi2/pi3 passed. Suspect its own
-  supply/cable. No bulk imports/transfers to it until the swap-test ladder is done (tracker §1).
+- **Power (2026-10-14):** pi1 was the only Pi failing the power review (live undervolt + throttle `0x50005`, 36 dmesg events). Supply replaced 2026-10-14 (~02:30 UTC). Import stress test
+  2026-10-14 06:19–06:21 UTC (116 MB screener:v10 tarball push + ctr import, load peaked 2.78): **`0x0` throughout, 0 dmesg undervoltage events**. 24 h acceptance trial pending
+  — run `bash ops-tools/power-review.sh --since 2026-10-14T05:39:00Z`, verdict due ≥ 2026-10-15 05:40 UTC. Until acceptance: no bulk imports to pi1, treat as fragile worker.
 - **Also holds:** a leftover `screener:v9` tarball in the SSH user's home (tracker §1). Planned second copy of DB dumps (AR-11) — not done.
 - **Watch:** accumulates undervolt events; was NotReady during the 2026-10-10 wedge. Agent runs with
   `--disable-apiserver-lb` (direct to the control plane).
@@ -55,8 +57,9 @@
   timing, not recorded; confirm with the owner. Keep it cordoned: 1 GB RAM, and it has wedged under load twice.
 - **Rules (AGENTS.md rule 2):** never restart more than one agent at a time; if load > 3 sustained, follow ops manual §8
   cool-down first. This node's health gates everything else.
-- **Power:** the node that showed live undervolt + throttle (`0xd0005`) and wedged ~16 h on 2026-10-09→10. Its dedicated
-  PSU/cable is the first item of the power fix.
+- **Power:** the node that showed live undervolt + throttle (`0xd0005`) and wedged ~16 h on 2026-10-09→10. On its own supply
+  since ~02:30 UTC 2026-10-12; review 02:59→08:41 UTC: PASS (0 live hits, max 56 °C, max load 1.74, 0 `dmesg` undervoltage events).
+  Heat flag `0x80000` (soft-temp since boot) only — watch for a heatsink need.
 - **Host jobs:** node-stats logger — root cron added 2026-10-11 (crontab was empty; AR-12). Throttle flags `0xd0000` on
   2026-10-11 (undervolt, throttle and soft-temp limit since boot, none live); 133 MB RAM available, 77 MB swap used.
 - **Watch:** desktop session idling on the control plane (ADR 0011 finding); SSH auth can be slow under load —
@@ -65,13 +68,15 @@
 ### pi3 — Grafana + backups + ingestion worker
 - **Pinned:** `grafana` Deployment (tailnet-only; dashboards + the Telegram alert rules), CronJob `pg-backup`
   (01:30; dumps to a hostPath on pi3's SSD), the `restore-drill` Job (backups live on pi3's SSD).
-- **Unpinned jobs:** in practice runs most of them today — it holds the newest images (`screener:v9`, `yfinance-fetcher:v5`,
+- **Unpinned jobs:** in practice runs most of them today — it holds the newest images (`screener:v11` + v10 for rollback — v1–v9 removed 2026-10-18; all images re-imported after the 10-18 prune incident, ops manual §8; `yfinance-fetcher:v5`,
   `nse-fetcher:v4`); the live pods on 2026-10-11 (intraday, rbi, stock-fundamentals, schema Job) all ran here.
-- **Responsibility:** the **only** copy of the DB dumps. The newest dump (`marketdata-2026-10-10.dump`) is 0 bytes; copy
-  the good ones off-node (tracker §1, AR-11).
+- **Responsibility:** the node-side copy of the DB dumps. The fixed `pg-backup` ran on schedule 2026-10-12 08:30 UTC
+  (`marketdata-2026-10-12.dump`, 171,766,332 bytes, `.sha256` sidecar, ~6 min). A second copy is pulled to the workstation with
+  `ops-tools/pull-backups.py`; an off-site copy is still open (tracker §1, AR-11).
 - **Host jobs:** node-stats logger — was broken (empty `stats.csv`, empty crontab); root cron added 2026-10-11 (AR-12).
   Throttle flags `0x50000` (since boot, none live) on 2026-10-11.
-- **Power:** its own supply; clean `0x0` for ~18 h after the 10-10 reboot, then undervolt events returned (tracker §1).
+- **Power:** its own supply since ~02:30 UTC 2026-10-12; review PASS — `0x0`, 0 `dmesg` undervoltage events, and it held through the
+  first scheduled 170 MB `pg-backup` write at 08:30 UTC (the trigger that coincided with its network drop on 10-11) (tracker §1).
 
 ### tx2 — database, NLP, build host
 - **Pinned:** `timescaledb-0` StatefulSet (PV `timescaledb-tx2-ssd` on `sda4`, **Retain** — never delete casually),
@@ -95,7 +100,7 @@ Two kinds of scheduled work exist: **Kubernetes CronJobs** (23, all in namespace
 (ops manual §3); "last scheduled" below is the controller's `lastScheduleTime` in UTC. Suspended 2026-10-10 ~17:44 UTC,
 **all 23 active again since 2026-10-12** (staggered un-suspend 03:04–03:27 UTC; `nse-fetcher` was the last and is active now —
 verified 08:22 UTC, no CronJob has `spec.suspend: true`). Jobs dated 10-09/10-10 below simply have not come due yet today
-(their PDT slot falls later in the UTC day). Refreshed 2026-10-12 08:25 UTC.
+(their PDT slot falls later in the UTC day). Refreshed 2026-10-12 09:50 UTC.
 
 ### 3.1 Kubernetes CronJobs — which node runs each
 
@@ -112,9 +117,8 @@ its image (tracker §3).
 | **pi2** | none | cordoned control plane |
 | **pi0** | none | not a k3s node |
 
-Pinned jobs, last scheduled (UTC): sentiment-scorer 10-12 07:15 · headline-ner 10-12 07:45 · pg-backup 10-10 08:30 (next due
-10-12 08:30) · telegram-digest 10-12 02:30 · **telegram-alerts: never scheduled yet** (`lastScheduleTime` empty — only its canary
-Job ran; first scheduled run is due 10-12 09:45 UTC).
+Pinned jobs, last scheduled (UTC): sentiment-scorer 10-12 07:15 · headline-ner 10-12 07:45 · pg-backup 10-12 08:30 (Completed,
+`BACKUP-OK`) · telegram-digest 10-12 02:30 · **telegram-alerts 10-12 09:45 — its first scheduled run, `ALERTS-OK 3 message(s) for 3 user(s)`** (pi1; Completed in 14 s).
 
 **Floating jobs (18).** "Seen on" = the node of the retained pods (including refire/canary/validation runs). Since the
 re-activation almost everything has landed on **pi1**, not pi3 — so pi1 now carries most of the daily load (and is the node that
@@ -129,10 +133,10 @@ logged undervolt events during bulk imports; tracker §1).
 | stock-prices | `30 23 * * *` | 10-12 06:30 | pi1 |
 | news-fetcher | `45 23 * * *` | 10-12 06:45 | pi1, pi3 |
 | ta-compute | `30 0 * * *` | 10-12 07:30 | pi1 |
-| pipeline-health | `45 1 * * *` | 10-10 08:45 (due 10-12 08:45) | pi1 |
-| stock-metrics | `0 2 * * *` | 10-10 09:00 (due 10-12 09:00) | unknown |
-| stock-screener | `15 2 * * *` | 10-10 09:15 (due 10-12 09:15) | pi1 (canary) |
-| stock-report | `30 2 * * *` | 10-10 09:30 (due 10-12 09:30) | pi1 (canary) |
+| pipeline-health | `45 1 * * *` | 10-12 08:45 (Completed, 22 s) | pi1 |
+| stock-metrics | `0 2 * * *` | 10-12 09:00 (Completed, 3 m 27 s) | see pods |
+| stock-screener | `15 2 * * *` | 10-12 09:15 (`SCREENER-OK`, 23 s) | pi3 (scheduled), pi1 (canary) |
+| stock-report | `30 2 * * *` | 10-12 09:30 (`REPORT-OK`, 12 s) | pi1 |
 | rbi-fetcher | `0 7 * * *` | 10-10 14:00 (due 10-12 14:00) | pi1 |
 | nse-fetcher | `15 11 * * *` | 10-09 18:15 (due 10-12 18:15) | pi1 (validation run) |
 | fiidii-fetcher | `0 14 * * *` | 10-09 21:00 (due 10-12 21:00) | pi1 |
@@ -170,14 +174,17 @@ scheduled); fixed that day on all five (ADR 0011 amendment).
   point of failure across all of them (tracker §1).
 - **No registry:** an image missing on a node gives `ErrImageNeverPull`; keep the "which node has which image" list true.
 
-## 5. Current state (2026-10-11 live check)
+## 5. Current state (2026-10-18 live check)
 
-- Nodes: pi1, pi3, tx2 Ready; pi2 Ready but **cordoned**. (The tracker had pi1 NotReady — it has since come back.)
-- **CronJobs (08:22 UTC 2026-10-12): all 23 active, none suspended.** All jobs since the re-activation Completed; no failed or
-  pending pods. `nse-fetcher:v4` is imported on both pi1 and pi3, so floating jobs can run on either.
+- **Site-wide power event ~05:55–06:20 UTC 2026-10-18:** all five machines rebooted (pi0 + pi2 ~06:02, pi1 + pi3 together ~06:17, TX2 same
+  window). **Owner confirmed: mains power loss.** 0 undervoltage events on any Pi since boot — not a Pi supply fault. `nodewatch` (on pi0) went down with everything else, so
+  nothing alerted. Everything recovered on its own; DB restarted once.
+- Nodes (2026-10-18): pi1, pi2, pi3, tx2 all **Ready**; pi2 **cordoned** (SchedulingDisabled); pi0 up (not a k8s node).
+- **CronJobs: all 23 active, none suspended.** No failed or pending pods.
 - Running: `timescaledb-0` (tx2), `telegram-bot` (pi1), `grafana` (pi3).
-- Host-level on 2026-10-11 (all five nodes now run the 5-min stats logger): throttle `0x0` pi0, `0x50000` pi1/pi3,
-  `0xd0000` pi2, n/a TX2 — none live. Not re-verified today: the TX2 fixed config, the Telegram v6 command check.
+- Host-level: throttle `0x0` pi0/pi3, `0x80000` pi2 (heat flag since boot, no undervolt), pi1 `0x0` on new supply — 24 h acceptance pending.
+- Telegram bot on `telegram-digest:v8` (ADR 0012).
+- Not re-verified today: the TX2 fixed config.
 
 ## 6. Keeping this file true
 

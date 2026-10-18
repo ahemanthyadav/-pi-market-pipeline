@@ -6,6 +6,8 @@
 #   k3s ctr -n k8s.io images import pipeline-health-v1.tar.gz  # on each Pi
 FROM python:3.12-slim
 WORKDIR /app
-RUN pip install --no-cache-dir "psycopg[binary]"
+# requirements.lock (AR-5): exact set frozen from v4; v5 (2026-10-18) is the first build from it.
+COPY requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock
 COPY pipeline-health.py .
 CMD ["python", "pipeline-health.py"]

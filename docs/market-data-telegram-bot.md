@@ -3,9 +3,10 @@
 > **Purpose:** everything about the Marketfredbot Telegram channel — how the
 > deployed digest + alert pipeline is wired, how to operate and change it, and
 > the tiered menu of two-way/next-step upgrades with their real constraints.
-> **Last verified: 2026-10-10** (v6 applied; bot pod Pending while pi1 is down — §1a and the tracker; index
-> cards validated against the live DB with 40 years of history; commands not
-> yet checked from the phone).
+> **Last verified: 2026-10-12 08:46 UTC** (live: Deployment + both CronJobs on `local/telegram-digest:v8` — multi-user, ADR 0012;
+> bot Running on pi1; `bot_users` holds 2 member rows added by the owner at 08:31/08:32 UTC — one private chat, one group chat, same
+> name; `watchlist` still empty; `telegram-alerts` first scheduled run 09:45 UTC OK (`ALERTS-OK 3 message(s) for 3 user(s)` — owner + both member rows). Index cards validated
+> against the live DB with 40 years of history; commands not yet checked from the phone).
 > **v2 verification:** (digest live-fire-delivered; alert chain
 > validated end-to-end with a real FII firing; two-way listener deployed and
 > command-validated from the phone — /status /nifty /digest /scores answered).
@@ -193,13 +194,14 @@ chat id from the Secret — never plain `kubectl apply -f`) →
 **wait ~60 s before deleting the pod** (F32: a pod recreated too fast can
 mount the previous ConfigMap revision and crash-loop on the old error).
 Alerting is **all-or-nothing per file** — one bad rule takes the contact point
-down and crash-loops Grafana (F29–F31). Current thresholds (first guesses):
+down and crash-loops Grafana (F29–F31). Current thresholds (retuned 2026-10-12 from the data on hand; live):
 
 | Rule | Trigger | Tuning note |
 |---|---|---|
 | Stale pipeline feed | `pipeline_heartbeat` fresh=false count > 0 | solid as-is |
-| VIX above 25 | `^VIX` close > 25 | watch real volatility first |
-| Large FII outflow | latest FII net < −3000 Rs cr | **fired legitimately at −12,944** on day one; raise to −5000+ if too chatty |
+| VIX above 30 | `^VIX` close > 30 | raised from 25: since 2016 VIX closed > 25 on 14 % of days, > 30 on 5.7 %, > 35 on 2.3 % |
+| Large FII outflow | latest FII net < −5000 Rs cr | raised from −3000 (7 of the 8 recorded days were below it; fired at −12,944 on day one). Only 8 days of history — **re-tune at ~60 days** |
+| Sentiment drop | 7-day mean `sentiment_score` < −0.15 | added to the live config 2026-10-12 (it was in the repo but never applied); daily means so far: min −0.146, avg 0.02, sd 0.12 over ~2 weeks (source mix changed 10-12) — re-tune from real firings |
 
 ### 3.4 Validate the alert chain end-to-end (no test endpoint exists, F31)
 Channel sanity check first — token + chat id + pi0 egress DNS in one shot
@@ -341,5 +343,8 @@ screener and FX are shared read-only. Members cannot run `/adduser|/rmuser|/user
 shares one watchlist among its members — prefer private chats. The DB superuser can still read every watchlist (AR-8).
 **Failure behaviour:** a member who blocked the bot only logs a WARN in the digest/alert Jobs; the Jobs fail only when the
 owner's send fails or every send fails. If `bot_users` is missing the bot runs owner-only.
+**Live state (2026-10-12 08:46 UTC):** 2 member rows, both named `sailu` — one private chat, one group chat (the group would share one
+watchlist). Both were added by the owner at 08:31/08:32 UTC; whether each has sent `/start` is not verified (the log shows one `/start`
+answered). Consider `/rmuser` on the group row if separate watchlists are wanted.
 **Owner id:** the Secret `telegram-bot` key `chat-id` is the owner and must be a *private* chat id (positive). A previous
 workaround pointed it at a group (negative id) — that makes the whole group the owner; don't.
