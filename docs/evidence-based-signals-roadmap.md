@@ -162,7 +162,7 @@ percentile of 63-day median dollar volume, costs 0.4 % / 0.2 % per trade. Univer
 3. `pos_52w` adds nothing once the other inputs are controlled (FM t −2.5 / −2.7): first candidate to drop in v2.
 4. Total return (`adj_close`) vs price-only `close`: differences are small for price signals (e.g. NIFTY 12-1 IC 0.045 vs
    0.043) — DQ-1 matters more for return/volatility *levels* than for these ranks.
-5. Per §5 nothing enters the composite from this run; the composite is unchanged. Re-run after EV-1, and per-universe
+5. Per §5 nothing enters the composite from this run; the composite is unchanged (ADR 0018). Re-run after EV-1, and per-universe
    rules (criterion 2 "or the exception is explained") are an owner decision for composite v2.
 
 ## 6. Deliberately not adding

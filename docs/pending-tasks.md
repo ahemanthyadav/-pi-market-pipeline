@@ -30,7 +30,7 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   (4 rules `health=ok`) · k3s control-plane backup made daily (`pull-k3s-backup.sh`, incl. tls/cred) + `pull-backups.py` daily with safe
   rotation, both via workstation cron · CI: ruff fatal set + shellcheck errors · weekly price audit (2,471 comparisons, **0 mismatches**;
   `out/price-audit-2026-10-18.csv`) · old screener v1–v9 removed on pi1/pi3 · tarball of every live image on the TX2 SSD.
-- [x] ✅ 2026-10-18 **Engineering pass (plan: `engineering-plan-2026-10-18.md`), 09:50–13:10 UTC:** AR-4 DB Guaranteed QoS + probe (17 s
+- [x] ✅ 2026-10-18 **Engineering pass (plan: `engineering-plan-2026-10-18.md`; decisions ADR 0014–0020), 09:50–13:10 UTC:** AR-4 DB Guaranteed QoS + probe (17 s
   downtime) · **chunk merge** (stock_prices 3,382 → 107, index_prices 300 → 84 chunks, rows identical, after a verified pre-merge dump;
   per-symbol query planning 34 s → 34 ms — the reason v12's first canary was 2× slower) · `screener:v12`/`v13` (DQ-1 done, DQ-2 done +
   flipped live, G-2a, price anomalies) · corporate-actions + fundamentals full backfills · EV-0 built and run · AR-8 reader roles · news
@@ -42,7 +42,7 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   pi3, uncordoned; every Job in the window Succeeded. Rule added to ops manual §8 ("NEVER `crictl rmi --prune`"). **Also during recovery a
   `pgrep -af` on pi2 printed the expanded `@@PW@@` (the Pi sudo password) into the session transcript** — owner informed; whether to rotate is the
   owner's call. Lesson recorded in the same §8 entry.
-- [x] ✅ 2026-10-18 **Power resilience — DECIDED: no UPS** (owner). Accepted: a mains loss takes every node and the pi0 watcher down together;
+- [x] ✅ 2026-10-18 **Power resilience — DECIDED: no UPS** (ADR 0019) (owner). Accepted: a mains loss takes every node and the pi0 watcher down together;
   recovery is automatic (verified on the 10-18 outage). Not to be re-proposed.
 - [x] ✅ 2026-10-18 **Cluster dedup — RETIRED, not redesigned** (owner delegated the call). Measured: 1–2 GB of user data per Pi on 229 GB SSDs,
   TX2 SSD 12 % used — nothing to deduplicate; the design targeted non-existent drives. Note: `piCluster/cluster/RETIRED.md`.
@@ -364,12 +364,12 @@ Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §
 - [ ] 🔶 **AR-5 (Phase 1→2)** ✅ step 1 done 2026-10-12: a `requirements.lock` for every Python image (16/16, verified 2026-10-17).
   Step 2: the screener (v10/v11) and `pipeline-health` (v5, 2026-10-18 — freeze == lock) Dockerfiles install from their locks; the other 14 still use inline `pip install` —
   switch each at its next natural rebuild. Step 3: consolidate ~16 images to ~3 by dependency profile (ADR candidate; touches ADR 0004) — not started.
-- [x] ✅ 2026-10-18 **AR-6/AR-7 — intent delivered, file move declined.** The goal ("safeguards live in one place") is now enforced by
+- [x] ✅ 2026-10-18 **AR-6/AR-7 — intent delivered, file move declined.** (ADR 0020) The goal ("safeguards live in one place") is now enforced by
   `tests/test_manifest_safeguards.py` in CI: all 23 CronJobs must carry Forbid / starting + active deadlines / TTL / history ≤ 3/1 / backoffLimit,
   `Never` pull for `local/*`, resource limits, no inline password/token env. The `src/ images/ deploy/ db/` move + `kubectl apply -k` was NOT done:
   it renames every path the runbooks, CI, `workloads.py` and two months of docs use and changes the owner's apply workflow, for no runtime benefit.
   Revisit only if image consolidation (AR-5 step 3) makes a restructure happen anyway.
-- [x] ✅ 2026-10-18 **AR-8 — reader roles live.** `10-roles.sql` creates `grafana_ro` (SELECT on all tables + future ones via default
+- [x] ✅ 2026-10-18 **AR-8 — reader roles live.** (ADR 0017) `10-roles.sql` creates `grafana_ro` (SELECT on all tables + future ones via default
   privileges, `default_transaction_read_only = on`) and `telegram_app` (SELECT all + INSERT/UPDATE/DELETE on `watchlist`, `bot_users` only).
   Passwords generated straight into Secrets `grafana-db-ro` / `telegram-db` (never printed; set via stdin). Verified: grafana_ro reads, every write
   fails; telegram_app writes only its two tables. Grafana datasource + `telegram-bot` Deployment + `telegram-digest`/`telegram-alerts` CronJobs
@@ -436,7 +436,7 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
 
 ### Data correctness — prerequisite for EV-0 and every ML backtest (found 2026-10-10)
 
-- [x] ✅ 2026-10-18 **P0 · DQ-1 (G-1) corporate actions / adjusted prices — DONE.** History: CTVA proven 2026-10-12 and repaired 10-13
+- [x] ✅ 2026-10-18 **P0 · DQ-1 (G-1) corporate actions / adjusted prices — DONE.** (ADR 0014) History: CTVA proven 2026-10-12 and repaired 10-13
   (`audit-price-adjustments.py`); split detection + resync in v10 (10-14); `corporate_actions` recording in v11 (10-17).
   **Completed 2026-10-18 in `screener:v12`/`v13`:** (1) **own total-return `adj_close`** (`adj_series()`: close × Π(1 − div/prev close) over later
   dividends; never Yahoo's Adj Close) recomputed per symbol after full-history writes or a dividend in the daily window; (2) **full actions
@@ -456,7 +456,7 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   (matches Yahoo). **Decision recorded as ADR 0013.** **Step 3 (writer change) turned out unnecessary:** the current daily writer already produces `00:00` UTC rows (every row since 10-05 is), so the convention cannot drift back. Readers
   (`stock_metrics` row-count lookbacks) are now consistent; tomorrow's `stock-metrics` run is the first to score on the repaired series. Note: the Nifty 500 bar for "today" is a partial intraday bar until the
   next run overwrites it — harmless. Rollback if ever needed: restore from the pre-migration dump (no inverse UPDATE exists).
-- [x] ✅ 2026-10-18 **P0 · DQ-2 fundamentals period + point-in-time — DONE (screener reads it live).** Problem (2026-10-10): EDGAR YTD
+- [x] ✅ 2026-10-18 **P0 · DQ-2 fundamentals period + point-in-time — DONE (screener reads it live).** (ADR 0015) Problem (2026-10-10): EDGAR YTD
   quarters collapsed onto one key (median 3-y revenue CAGR −17.8 % vs +8.8 %) and `filing_published_at` was the latest re-filing.
   **Fix:** `financial_facts` writer in `stock_fundamentals.py` (v12): every 10-K/10-Q value keyed by duration and first filing date, repeated
   comparatives dropped (MSFT check: FY2024 NI $88.1 bn first filed 2024-07-30, not 2026; 2,189 raw entries → 829 facts); yfinance values with
@@ -486,7 +486,7 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
 
 ### Evidence-based signals (plan 2026-10-10 — `evidence-based-signals-roadmap.md`)
 
-- [x] ✅ 2026-10-18 **EV-0 signal test harness — built and run.** `ops-tools/ev0.py export|run` (6 synthetic-data tests in CI; export via the
+- [x] ✅ 2026-10-18 **EV-0 signal test harness — built and run.** (ADR 0018) `ops-tools/ev0.py export|run` (6 synthetic-data tests in CI; export via the
   read-only `grafana_ro` role): monthly Spearman IC + Newey-West t, halves, quintile spread net of 0.2/0.4 % costs, turnover, Fama-MacBeth
   with the composite's price inputs as controls. First run 2001–2026, 9 price signals × 2 universes × {adj_close, close}: **nothing passes §5
   (both universes required)**. NIFTY 500: 12-1 momentum IC 0.045, t 4.2, +13.5 %/yr net — strong; S&P 500 momentum ≈ 0 and low-vol/low-beta
@@ -576,6 +576,8 @@ practice · ⚪ unproven here · ⚠️ citation not verified.
 - [ ] 🔄 Weekly (until the daily split detection ships — DQ-1): `PSQL_CMD=… python3 ops-tools/audit-price-adjustments.py audit`; repair any mismatch with `emit-repair <SYM>`
   (reviewed SQL, one transaction per symbol). Last run 2026-10-13: only CTVA, repaired.
 - [ ] 🔄 Monthly (1st): fdi-watch logs DPIIT links → 5-min manual INSERT.
+- [ ] 🔄 Yearly (January): merge the previous year's weekly chunks of `stock_prices`/`index_prices` (ADR 0016;
+  `ops-tools/sql/2026-10-18-merge-weekly-chunks.sql`, verified dump first). Due 2027-01 for the 2026 chunks.
   Detail: ops manual §11.
 - [ ] 🔄 Quarterly: timed restore drill (`restore-drill-job.yaml`), after any
   schema/backup change too. Detail: ops manual §9.

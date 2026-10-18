@@ -297,10 +297,10 @@ whole DB via `pg_dump`.*
 - Resources (AR-4, 2026-10-18): requests = limits = 1 CPU / 2 Gi → QoS **Guaranteed** (evicted last on
   the TX2); `pg_isready` readiness probe, no liveness probe (a restart mid-vacuum would hurt). Leaves the
   sentiment job (~4 Gi window) headroom in 7.7 GB shared RAM. Memory cgroup verified present.
-- **Chunking (2026-10-18):** `stock_prices` and `index_prices` use 1-year chunks; their old weekly chunks
+- **Chunking (2026-10-18, ADR 0016):** `stock_prices` and `index_prices` use 1-year chunks; their old weekly chunks
   were merged per year with `merge_chunks()` (stock_prices 3,382 → 107; index_prices 300 → 84; rows
   unchanged). Before the merge, any open-ended per-symbol query spent 34 s just *planning*.
-- **Roles (AR-8, 2026-10-18):** `postgres` (pipeline jobs, schema Job), `grafana_ro` (Grafana: SELECT,
+- **Roles (AR-8, 2026-10-18, ADR 0017):** `postgres` (pipeline jobs, schema Job), `grafana_ro` (Grafana: SELECT,
   read-only sessions), `telegram_app` (bot + digest + alerts: SELECT, writes on `watchlist`/`bot_users`).
 - **Service `timescaledb` (headless):** `timescaledb.market-data.svc.cluster.local:5432`
   — StatefulSet identity + client endpoint in one.
@@ -334,9 +334,9 @@ whole DB via `pg_dump`.*
 | `stock_reports` | symbol+ts (PK), report_md | shortlist markdown reports + `__digest__` |
 | `screening_runs` / `job_state` | run log / resumable fetch cursors | plain tables |
 | `corporate_actions` | symbol+ts+action_type (PK), ratio (splits), amount (dividends), source | DQ-1, 2026-10-17; full history backfilled 2026-10-18 |
-| `stock_prices.adj_close` | column | OUR total-return close: close × Π(1 − div/prev close) over later dividends (v12) — never Yahoo's Adj Close |
+| `stock_prices.adj_close` | column | ADR 0014 — OUR total-return close: close × Π(1 − div/prev close) over later dividends (v12) — never Yahoo's Adj Close |
 | `price_anomalies` | symbol+ts+kind (PK), detail, ret, status | `jump_gt_40pct` / `history_restated`, written by the daily price job (v12) |
-| `financial_facts` | symbol+source+metric+period_end+duration_days+filed (PK), period_start, value, form, accession | DQ-2: point-in-time fundamentals, first release + restatements only (v12) |
+| `financial_facts` | symbol+source+metric+period_end+duration_days+filed (PK), period_start, value, form, accession | ADR 0015 — DQ-2: point-in-time fundamentals, first release + restatements only (v12) |
 | `universe_membership_snapshots` | universe+snapshot_date+symbol (PK), sector | G-2a weekly snapshot, from 2026-10-18 |
 | `factor_returns` / `job_runs` | — | created empty (G-20 loader / AR-2 adoption pending) |
 
@@ -658,7 +658,7 @@ One-shot Jobs (kept as manifests, run on demand): `backfill-yfinance-1y`, `backf
   maintains our own `adj_close`, flags anomalies and re-syncs restated history even without a
   split flag; fundamentals job writes `financial_facts`; universe refresh appends membership
   snapshots. Screener reader switch `FUND_SOURCE=yfinance|facts` (+ `DRY_RUN=1`) — see §12.
-- **EV-0** (`ops-tools/ev0.py`) is the measurement gate for every scoring change (evidence roadmap §5).
+- **EV-0** (`ops-tools/ev0.py`) is the measurement gate for every scoring change (evidence roadmap §5, ADR 0018).
 
 ### 5.8 Telegram layer (2026-10-09, ADR 0009)
 

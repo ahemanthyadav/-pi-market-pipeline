@@ -26,6 +26,10 @@
 | 10 | **AR-6/7** repo layout + kustomize base | pure refactor; do last, parity-checked | repo only |
 
 ## 1a. Outcome (2026-10-18, 13:10 UTC)
+
+Decisions recorded as ADRs: 0014 own adj_close · 0015 point-in-time fundamentals · 0016 chunk sizing ·
+0017 DB roles · 0018 signals gated by EV-0 · 0019 no UPS · 0020 repo layout stays.
+
 | # | Result |
 |---|---|
 | 1 AR-4 | ✅ Guaranteed QoS + readiness probe, 17 s downtime |
