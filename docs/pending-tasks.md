@@ -441,21 +441,25 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   NVIDIA rpm capped at 30/min, per-project keys (marketdata: free capabilities only, 10 req/min), own `litellm` DB. `ops/smoke.sh` → SMOKE-OK
   (failover, key scoping 403, rate limit 429); OpenAI SDK from the workstation via NodePort :30400 OK. Gotcha recorded: `model_info.tier` is
   reserved by LiteLLM. The gateway repo has **no GitHub remote yet** (owner: create the repo, then `git remote add origin … && git push`).
-- [x] ✅ 2026-10-18 **ML-7a daily market note — built, waiting for the provider key.** `manifests/llm/narrative.py` (CronJob `llm-narrative`,
+- [x] ✅ 2026-10-18 **ML-7a daily market note — built (live 2026-10-19, see below).** `manifests/llm/narrative.py` (CronJob `llm-narrative`,
   07:40 IST, runs on the pipeline-health image + ConfigMap — no build): facts JSON (public data only) → gateway `fast-json` → every number must
   appear in the facts (one retry naming bad numbers) → `llm_narratives` (status ok/invalid/unavailable). Digest `telegram-digest:v9+` shows it only
   when status = ok (`DIGEST_NARRATIVE=1`). Canary: path proven up to NVIDIA ("api_key must be set"). 11 tests.
-- [x] ✅ 2026-10-18 **Forgiving `/stock` `/news` `/watch` lookup** (ADR 0023, `telegram-digest:v10`): fuzzy spelling correction (no AI) →
+- [x] ✅ 2026-10-18 **Forgiving `/stock` `/news` `/watch` lookup** (ADR 0023, `telegram-digest:v10`, fixed in v13): fuzzy spelling correction (no AI) →
   AI only for nicknames, validated against the universe → `/watch` never writes on a guess. Live in the bot pod: "infosis" → INFY.NS,
   "microsft" → MSFT, "hdfc bnk" → HDFCBANK.NS; "facebook" falls back gracefully until the key exists. 10 resolver tests on a real-universe sample.
   Also in v9/v10: telegram image installs from a full frozen `requirements.lock` (AR-5), unused imports removed from `bot.py` (F401).
-- [ ] 🔶 **After you place the NVIDIA key** (`LLM_API_KEY=nvapi-…` in `.secrets.env`):
-  1. `../llm-gateway/ops/set-provider-key.sh nvidia-nim-api-key .secrets.env LLM_API_KEY` (copies it into the gateway, never printed)
-  2. `../llm-gateway/ops/smoke.sh --live` — one real call per capability
-  3. Bake-off: `SECRET_NAME=llm-bakeoff-key DURATION=3h ../llm-gateway/ops/new-project.sh marketdata-bakeoff market-data
-     fast-json,fast-json.2,fast-json.3,general,general.2 20 0 && ops-tools/apply-llm.sh && kubectl apply -f manifests/llm/bakeoff-job.yaml`
-     → read `RANKING`; reorder `../llm-gateway/config/litellm.yaml` (winner first) → `ops/deploy.sh`
-  4. watch the first `llm_narratives` rows and digests; ML-7b (shortlist notes) after ~2 clean weeks.
+- [x] ✅ 2026-10-19 **NVIDIA key placed; live.** `set-provider-key.sh` → `smoke.sh --live` SMOKE-OK (all 5 capabilities). Found live:
+  many catalogue models are "not found for account" → chains rebuilt from a probe (gateway README); the reasoning primary
+  returned EMPTY text at 400 tokens → `enable_thinking: false` on `fast-json` in the gateway + client headroom (narrative 1500).
+  **First real ML-7a note: status ok, attempt 1** (Nifty/Sensex/VIX/flows/rupee — numbers and flow directions verified by hand).
+  Symbol lookup fixed after live tests (ADR 0023 amendment, image v13): facebook → META, big blue → IBM, hul → HINDUNILVR.NS.
+- [ ] 🔶 **Bake-off** (orders the chains — gateway ADR 0002): `SECRET_NAME=llm-bakeoff-key DURATION=3h ../llm-gateway/ops/new-project.sh
+  marketdata-bakeoff market-data fast-json,fast-json.2,fast-json.3,general,general.2 20 0 && ops-tools/apply-llm.sh &&
+  kubectl apply -f manifests/llm/bakeoff-job.yaml` → read `RANKING`; reorder `../llm-gateway/config/litellm.yaml` → `ops/deploy.sh`.
+- [ ] 🔶 Watch the first ~2 weeks of `llm_narratives` and digests; then ML-7b (shortlist notes).
+- [ ] Known limit (ML-7a): the number check ignores sign — "outflow of 3,661" passes whether the fact is +3,661 or −3,661.
+  Add a direction check (rose/fell, inflow/outflow vs. the sign) if a wrong direction is ever seen.
 
 ### History backfills (found 2026-10-18 — coverage table: architecture §4.3a)
 

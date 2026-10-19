@@ -619,8 +619,8 @@ layer (JOINs on ticker/symbol), not in DDL.*
 | ta-compute | 30 0 * * * | local/ta-compute:v1 | technical_indicators |
 | headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (ADR 0010) |
 | rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (IN_* policy rates) + bond_yields (IN_GS_*) |
-| telegram-digest | 0 8 * * * (Asia/Kolkata) | local/telegram-digest:v10 (pinned pi1) | Telegram digest (read-only) |
-| telegram-alerts | 45 2 * * * (node-local) | local/telegram-digest:v10, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only; silent when nothing changed) |
+| telegram-digest | 0 8 * * * (Asia/Kolkata) | local/telegram-digest:v13 (pinned pi1) | Telegram digest (read-only) |
+| telegram-alerts | 45 2 * * * (node-local) | local/telegram-digest:v13, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only; silent when nothing changed) |
 | llm-narrative | 40 7 * * * (Asia/Kolkata) | local/pipeline-health:v5 | llm_narratives — ML-7a AI market note via the shared llm-gateway (ADR 0022); digest shows it only if every number checks out |
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | pi3 SSD dumps |
 | pipeline-health | 45 1 * * * | local/pipeline-health:v5 | pipeline_heartbeat (14 feeds incl. rbi; stock prices/scores 96 h since v5) |

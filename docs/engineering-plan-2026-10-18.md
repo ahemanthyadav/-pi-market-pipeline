@@ -43,7 +43,7 @@ Decisions recorded as ADRs: 0014 own adj_close · 0015 point-in-time fundamental
 | 8 AR-8 | ✅ grafana_ro, telegram_app live (pipeline-job writer role deferred, reasoned) |
 | 9 news constraints | ✅ live without a rebuild (writers already safe) |
 | 10 AR-6/7 | ◐ intent via CI safeguard test; path move declined (reasoned) |
-| 12 LLM gateway + ML-7a + symbol lookup (added same day) | ✅ built (gateway repo, ADR 0022/0023); real calls wait for the NVIDIA key |
+| 12 LLM gateway + ML-7a + symbol lookup (added same day) | ✅ built (gateway repo, ADR 0022/0023); live since 2026-10-19 (key placed, smoke OK, first note ok); bake-off pending |
 | 11 G-6 India fundamentals (added same day) | ✅ built (NSE filings, ADR 0021, v15); full backfill running ~19 h |
 
 ## 2. Explicitly not in this pass (gated by their own plans)

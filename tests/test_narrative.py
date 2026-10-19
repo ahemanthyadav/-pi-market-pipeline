@@ -34,6 +34,12 @@ class NumberCheck(unittest.TestCase):
         self.assertEqual(n.bad_numbers("Sentiment −0.08, rupee +0.15%.", FACTS), [])
 
 
+class Fences(unittest.TestCase):
+    def test_code_block_is_removed(self):
+        self.assertEqual(n.strip_fences('```json\n{"summary": "x"}\n```'), '{"summary": "x"}')
+        self.assertEqual(n.strip_fences('{"summary": "x"}'), '{"summary": "x"}')
+
+
 class Narrate(unittest.TestCase):
     def test_ok_first_try(self):
         st, s, model, attempts, _ = n.narrate(FACTS, lambda m: ("Nifty 50 fell 1.21%.", "m1"))

@@ -52,6 +52,10 @@ class Fuzzy(unittest.TestCase):
             self.assertIn("Did you mean", msg)
             self.assertIn(must_list, msg)
 
+    def test_short_text_is_never_auto_picked(self):
+        row, msg = resolver.suggest(q, "coke")            # live 2026-10-19: was auto-picked as OKE
+        self.assertIsNone(row)
+
     def test_nonsense_gives_no_match(self):
         self.assertEqual(resolver.suggest(q, "qwxzv"), (None, None))
 
@@ -71,14 +75,30 @@ class Ai(unittest.TestCase):
 
         def asker(prompt):
             calls.append(prompt)
-            return "META"
+            return "META", "Meta Platforms, Inc."
         self.assertEqual(resolver.suggest(q, "facebook", asker)[0][0], "META")
         resolver.suggest(q, "Facebook", asker)
         self.assertEqual(len(calls), 1)                  # same text (normalised) -> cached
 
     def test_ai_answer_must_be_a_real_universe_symbol(self):
-        self.assertIsNone(resolver.ai_pick("x", [], ROWS, lambda p: "NOTREAL"))
-        self.assertEqual(resolver.ai_pick("eternal", [], ROWS, lambda p: "ETERNAL")[0], "ETERNAL.NS")  # .NS added
+        self.assertIsNone(resolver.ai_pick("x", [], ROWS, lambda p: ("NOTREAL", "Not Real Corp")))
+        self.assertEqual(resolver.ai_pick("eternal", [], ROWS, lambda p: ("ETERNAL", "Eternal Ltd"))[0], "ETERNAL.NS")
+
+    def test_ticker_and_company_must_agree(self):
+        # live 2026-10-19: "big blue" -> SBILIFE.NS was a real symbol but the wrong company
+        self.assertIsNone(resolver.ai_pick("big blue", [], ROWS, lambda p: ("AAPL", "International Business Machines")))
+        resolver._ai_cache.clear()
+        self.assertEqual(resolver.ai_pick("big blue", [], ROWS,
+                                          lambda p: ("IBM", "International Business Machines Corporation"))[0], "IBM")
+
+    def test_stale_ticker_resolved_through_company_name(self):
+        self.assertEqual(resolver.ai_pick("facebook", [], ROWS, lambda p: ("FB", "Meta Platforms"))[0], "META")
+        self.assertIsNone(resolver.ai_pick("zomato", [], ROWS, lambda p: ("ZOMATO.NS", "Zomato Limited")))
+
+    def test_prompt_has_no_hints(self):
+        seen = []
+        resolver.ai_pick("aple", [(0.9, ROWS[0])], ROWS, lambda p: seen.append(p) or (None, None))
+        self.assertNotIn(ROWS[0][1], seen[0])
 
     def test_gateway_down_falls_back_to_suggestions(self):
         def down(prompt):
@@ -93,7 +113,7 @@ class Ai(unittest.TestCase):
 
     def test_only_the_typed_text_is_sent(self):
         seen = []
-        resolver.ai_pick("big blue", [], ROWS, lambda p: seen.append(p) or "IBM")
+        resolver.ai_pick("big blue", [], ROWS, lambda p: seen.append(p) or ("IBM", "IBM"))
         self.assertIn('"big blue"', seen[0])
         self.assertNotIn("chat", seen[0].lower())
 

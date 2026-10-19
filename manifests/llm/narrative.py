@@ -99,10 +99,20 @@ def bad_numbers(text, facts):
     return bad
 
 
+def strip_fences(text):
+    """Some models wrap JSON in a ```json … ``` block (gemma-4, measured 2026-10-18)."""
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.split("\n", 1)[1] if "\n" in t else ""
+        t = t.rsplit("```", 1)[0]
+    return t.strip()
+
+
 def ask(messages, model=None):
     """One call to the gateway. Returns (summary, model) or raises RuntimeError('unavailable: …')."""
+    # max_tokens 1500: reasoning models spend tokens thinking first; 400 returned empty content (2026-10-19)
     body = {"model": model or os.environ.get("LLM_CAPABILITY", "fast-json"), "messages": messages,
-            "temperature": 0.2, "max_tokens": 400, "response_format": {"type": "json_object"}}
+            "temperature": 0.2, "max_tokens": 1500, "response_format": {"type": "json_object"}}
     req = urllib.request.Request(os.environ["LLM_BASE_URL"].rstrip("/") + "/chat/completions",
                                  data=json.dumps(body).encode(),
                                  headers={"Authorization": "Bearer " + os.environ["LLM_API_KEY"],
@@ -113,7 +123,7 @@ def ask(messages, model=None):
     except (urllib.error.URLError, TimeoutError, ValueError) as exc:
         detail = exc.read().decode()[:200] if isinstance(exc, urllib.error.HTTPError) else str(exc)
         raise RuntimeError(f"unavailable: {detail}") from exc
-    raw = data["choices"][0]["message"]["content"] or ""
+    raw = strip_fences(data["choices"][0]["message"]["content"] or "")
     try:
         summary = json.loads(raw)["summary"].strip()
     except (ValueError, KeyError, TypeError, AttributeError):
@@ -137,7 +147,8 @@ def narrate(facts, asker=ask):
         msgs += [{"role": "assistant", "content": json.dumps({"summary": summary})},
                  {"role": "user", "content": f"These numbers are not in the facts: {', '.join(bad) or 'too long/empty'}. "
                                              "Rewrite using only numbers from the facts JSON, copied exactly."}]
-    return "invalid", None, model, attempts, f"numbers not in facts: {', '.join(bad)[:200]}"
+    why = f"numbers not in facts: {', '.join(bad)[:200]}" if bad else f"empty or too long ({len(summary or '')} chars)"
+    return "invalid", None, model, attempts, why
 
 
 def main() -> int:

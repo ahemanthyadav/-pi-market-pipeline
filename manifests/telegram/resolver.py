@@ -6,8 +6,8 @@ Called only when the exact/name lookup in stocks.resolve() finds nothing. Three 
    symbol (".NS" stripped) and company name ("Ltd.", "Inc." … stripped). A clear winner is used
    directly ("relaince" -> RELIANCE.NS); close calls become a "Did you mean" list.
 2. **AI** (only if fuzzy cannot decide, and only when enabled): the typed text alone — never the
-   chat id — goes to the shared llm-gateway (`fast-json`) with the fuzzy candidates as hints. The
-   answer is accepted only if it is a real symbol in our universe; anything else is ignored.
+   chat id, no hints — goes to the shared llm-gateway (`general`). It must name a ticker AND a company that
+   agree with our universe (see ai_pick); anything else is ignored.
    Nicknames like "facebook" -> META or "big blue" -> IBM are what this layer is for.
 3. Gateway down / disabled / no answer -> the fuzzy suggestions (or "no match") as before.
 
@@ -23,6 +23,7 @@ from difflib import SequenceMatcher
 AUTO = 0.84          # fuzzy score needed to pick without asking
 MARGIN = 0.06        # ... and lead over the runner-up
 SUGGEST = 0.55       # below this a candidate is not worth suggesting
+MIN_AUTO_LEN = 5     # shorter queries are never auto-picked by fuzzy
 SUFFIX = re.compile(r"\b(ltd|limited|inc|corp|corporation|co|company|plc|the|class [abc]|\(class [abc]\))\b\.?", re.I)
 _universe = {"rows": None, "at": 0.0}
 _ai_cache = {}
@@ -66,45 +67,70 @@ def fuzzy(rows, query, k=5):
     return [(s, r) for s, r in ranked[:k] if s >= SUGGEST]
 
 
+def initials(text):
+    return "".join(w[0] for w in norm(text))
+
+
+def agrees(company, row):
+    """Does the AI's company name fit this universe row? (name similarity, or initials: IBM)"""
+    if not company:
+        return False
+    names = {" ".join(norm(row[1])), row[0].upper().removesuffix(".NS").lower()}
+    return score(company, row[0], row[1]) >= 0.6 or initials(company) in names
+
+
 def ai_pick(query, candidates, rows, asker=None):
-    """Ask the gateway for the ticker; return a universe row or None. Never raises."""
+    """Ask the gateway which company was meant; return a universe row or None. Never raises.
+
+    No fuzzy hints in the prompt (2026-10-19: hints steered the model to wrong rows — "zomato" -> a hint).
+    Two signals must agree with OUR data: the ticker exists and its name fits the AI's company name, or the
+    AI's company name alone is an unambiguous fuzzy match (handles stale/foreign tickers: HUL, ZOMATO.NS)."""
     if os.environ.get("BOT_AI_RESOLVE") != "1" or not os.environ.get("LLM_API_KEY"):
         return None
     key = " ".join(norm(query))
     if key in _ai_cache:
-        sym = _ai_cache[key]
+        sym, company = _ai_cache[key]
     else:
-        hints = ", ".join(f"{r[0]} ({r[1]})" for _s, r in candidates) or "none"
-        prompt = (f'A user of a stock bot typed: "{query}". Which listed company do they mean? The bot covers '
-                  f"the S&P 500 (plain tickers like AAPL, BRK-B) and the NIFTY 500 (NSE tickers ending in .NS). "
-                  f"Fuzzy-match hints from the bot's list: {hints}. Reply as JSON {{\"symbol\": \"TICKER\"}} using the "
-                  f"exact ticker format above, or {{\"symbol\": null}} if it is not a company in those indices.")
+        prompt = (f'A user of a stock bot typed: "{query}". Which listed company do they most likely mean? The bot '
+                  "covers the S&P 500 (tickers like AAPL, BRK-B) and the NIFTY 500 (NSE tickers ending in .NS). Use "
+                  "the CURRENT ticker (companies get renamed). Reply as JSON "
+                  '{"symbol": "TICKER", "company": "official company name"}, or '
+                  '{"symbol": null, "company": null} if unsure.')
         try:
-            sym = (asker or _ask)(prompt)
+            sym, company = (asker or _ask)(prompt)
         except Exception:  # noqa: BLE001 — the bot must answer even if the gateway is down
             return None
-        _ai_cache[key] = sym
-    if not sym:
-        return None
-    by_symbol = {r[0].upper(): r for r in rows}
-    s = str(sym).strip().upper()
-    return by_symbol.get(s) or by_symbol.get(s + ".NS")      # only a real universe symbol counts
+        _ai_cache[key] = (sym, company)
+    if sym:
+        by_symbol = {r[0].upper(): r for r in rows}
+        s = str(sym).strip().upper()
+        row = by_symbol.get(s) or by_symbol.get(s + ".NS")
+        if row and agrees(company, row):
+            return row
+    if company:
+        cands = fuzzy(rows, company, 2)
+        if cands and cands[0][0] >= AUTO and cands[0][0] - (cands[1][0] if len(cands) > 1 else 0) >= MARGIN:
+            return cands[0][1]
+    return None
 
 
 def _ask(prompt):
+    """-> (symbol, company) from the gateway's `general` capability (fast-json misnamed nicknames)."""
     import requests
-    r = requests.post(os.environ["LLM_BASE_URL"].rstrip("/") + "/chat/completions", timeout=12,
+    r = requests.post(os.environ["LLM_BASE_URL"].rstrip("/") + "/chat/completions", timeout=20,
                       headers={"Authorization": "Bearer " + os.environ["LLM_API_KEY"]},
-                      json={"model": "fast-json", "temperature": 0, "max_tokens": 40,
-                            "response_format": {"type": "json_object"},
+                      json={"model": os.environ.get("BOT_AI_MODEL", "general"), "temperature": 0,
+                            "max_tokens": 800, "response_format": {"type": "json_object"},
                             "messages": [{"role": "user", "content": prompt}]})
     r.raise_for_status()
-    content = r.json()["choices"][0]["message"]["content"] or "{}"
+    content = (r.json()["choices"][0]["message"]["content"] or "{}").strip()
+    if content.startswith("```"):                 # gemma-4 wraps JSON in a code block
+        content = content.split("\n", 1)[-1].rsplit("```", 1)[0]
     try:
-        return json.loads(content).get("symbol")
+        d = json.loads(content)
+        return d.get("symbol"), d.get("company")
     except (ValueError, AttributeError):
-        m = re.search(r"[A-Z][A-Z0-9&\-]{0,14}(?:\.NS)?", content)
-        return m.group(0) if m else None
+        return None, None
 
 
 def suggest(q, query, asker=None):
@@ -113,7 +139,8 @@ def suggest(q, query, asker=None):
     cands = fuzzy(rows, query)
     top = cands[0][0] if cands else 0.0
     second = cands[1][0] if len(cands) > 1 else 0.0
-    if cands and top >= AUTO and top - second >= MARGIN:
+    # short text is never auto-picked by fuzzy: "coke" scored 0.86 against OKE (Oneok), live 2026-10-19
+    if cands and top >= AUTO and top - second >= MARGIN and len("".join(norm(query))) >= MIN_AUTO_LEN:
         return cands[0][1], "fuzzy"
     hit = ai_pick(query, cands, rows, asker)
     if hit:
