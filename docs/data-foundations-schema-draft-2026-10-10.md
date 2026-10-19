@@ -1,6 +1,11 @@
 # Data foundations — schema + writer draft (G-1, G-2a, EV-2, EV-9, factor returns)
 
-> **Status: DRAFT, written 2026-10-10. Nothing here is applied.** No ConfigMap, manifest,
+> **Status 2026-10-18: largely APPLIED** — §2 tables live (`06b`/`06c` schema keys; the live `corporate_actions`
+> uses `action_type/ratio/amount`, PK without `source`), §3.1 (own adj_close, anomalies, restatement resync,
+> actions backfill) and §3.2 (financial_facts writer, first-filing `filed`, LEAST on yfinance dates) shipped in
+> `screener:v12`; G-2a snapshots live. India: `financial_facts` sources `nse_cons`/`nse_sa` from NSE filings (ADR 0021, v15). Still open: EV-9 statement lines (§3.3), factor-return loader, and flipping
+> the screener to `FUND_SOURCE=facts` after the top-50 diff. Tracker: `pending-tasks.md` DQ-1/DQ-2.
+> **Original status: DRAFT, written 2026-10-10. Nothing here is applied.** No ConfigMap, manifest,
 > script or tracker has been edited. Read-only queries against the live DB were used to
 > verify the findings in §1. Follows the `migration` skill: additive only, idempotent DDL,
 > ConfigMap workflow, written rollback.

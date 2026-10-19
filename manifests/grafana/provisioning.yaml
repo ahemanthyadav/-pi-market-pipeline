@@ -15,9 +15,9 @@ data:
         access: proxy
         url: timescaledb:5432
         database: postgres
-        user: postgres
+        user: grafana_ro          # AR-8: SELECT-only, read-only sessions (schema 10-roles.sql)
         secureJsonData:
-          password: $POSTGRES_PASSWORD
+          password: $GRAFANA_DB_PASSWORD
         jsonData:
           database: postgres
           sslmode: disable

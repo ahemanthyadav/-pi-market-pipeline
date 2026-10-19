@@ -7,7 +7,7 @@
 
 Checked: (a) any docs table row whose first cell is a CronJob name must carry the
 manifest's schedule and image tag; (b) any "<N> CronJobs" phrase must equal the
-manifest count. Read-only; needs no cluster.
+manifest count (except in HISTORY_DOCS, which are dated logs). Read-only; needs no cluster.
 """
 import re
 import sys
@@ -16,6 +16,9 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
+# Docs that are dated logs: their CronJob *counts* describe the day written and are not
+# re-checked (their schedule/image table rows still are). Added 2026-10-18 when 23 -> 24.
+HISTORY_DOCS = {"pending-tasks.md"}
 
 
 def load():
@@ -68,6 +71,8 @@ def check(cronjobs):
                         problems.append((doc.name, i, f"{name}: image '{img.group(1)}' != manifest '{m['image']}'"))
             for mm in re.finditer(r"\b(\d+)\s+(?:live\s+)?CronJobs?\b", line):
                 if "cronjobs.yaml" in line:  # a per-file count, not the cluster total
+                    continue
+                if doc.name in HISTORY_DOCS:  # dated log: "all 23 CronJobs suspended on 10-10" stays true
                     continue
                 if int(mm.group(1)) != len(cronjobs) and int(mm.group(1)) > 3:
                     problems.append((doc.name, i, f"count says {mm.group(1)} CronJobs, manifests have {len(cronjobs)}"))

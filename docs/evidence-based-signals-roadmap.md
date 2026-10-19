@@ -120,6 +120,9 @@ Equal weights. Sector-relative ranking (already planned as v2 scoring) applies o
 
 ## 5. Acceptance test for any signal (EV-0, written before testing)
 
+> **Implemented 2026-10-18** as `ops-tools/ev0.py` (tests: `tests/test_ev0.py`). Criterion 4 uses price controls
+> only until point-in-time value/quality history exists for both universes. Results: §5a.
+
 A signal joins the composite only if, on this database:
 
 1. Its monthly information coefficient has **t > 3** over the full history;
@@ -131,6 +134,36 @@ A signal joins the composite only if, on this database:
    significant when the existing five are controlled for.
 
 Signals that fail stay out, and the result is recorded here so they are not retried.
+
+## 5a. EV-0 results — first run 2026-10-18 (`out/ev0/report-2026-10-18.md`)
+
+Monthly, 2001-01 → 2026-09 (290 NIFTY / 309 S&P months), next-month total return, liquidity floor = month's 20th
+percentile of 63-day median dollar volume, costs 0.4 % / 0.2 % per trade. Universe = today's constituents.
+
+| signal | NIFTY 500 IC (NW t) · net/yr | S&P 500 IC (NW t) · net/yr | §5 verdict |
+|---|---|---|---|
+| **ret_12_1 (EV-3)** | **0.045 (4.2) · +13.5 %** | 0.006 (0.6) · −1.0 % | FAIL — passes on NIFTY alone (t>3, both halves, net>0, FM t 4.8) |
+| ret_12m (in composite) | 0.040 (3.5) · +11.6 % | 0.004 (0.4) · −1.2 % | FAIL (S&P) |
+| ret_6m (in composite) | 0.028 (2.9) · +6.6 % | −0.006 (−0.7) | FAIL |
+| pos_52w (in composite) | 0.026 (2.5) · −3.0 % | −0.013 (−1.3) | FAIL — FM t negative in both after controls |
+| sma200_ratio (in composite) | 0.025 (2.4) · +5.9 % | −0.009 (−0.9) | FAIL |
+| low_vol (in composite) | 0.015 (1.3) | −0.025 (−1.9) | FAIL |
+| near_high (EV-4) | 0.027 (2.4) | −0.020 (−1.8) | FAIL |
+| low_beta (EV-5) | 0.026 (1.9) | −0.019 (−1.3) | FAIL |
+| rev_1m (reversal) | 0.009 (1.2) · −16.9 % | 0.015 (1.7) · −5.7 % | FAIL — 78 % turnover, costs consume it (as §6 predicted) |
+
+**Reading, not decisions:**
+1. **India: 12-1 momentum is real on this data** and beats the plain 12-month return the composite uses (skipping the last
+   month helps, as Jegadeesh 1990 predicts). It is the strongest candidate for composite v2 (EV-17) — for NIFTY 500.
+2. **S&P 500 results are not interpretable yet.** Low-vol and low-beta come out *negative*, the opposite of the literature:
+   today's constituents include firms that were small, volatile winners years before they joined the index, so "volatile
+   then, high return later" is built into the sample. **EV-1 (historical membership) is now the blocking item** for any US
+   price signal. `universe_membership_snapshots` only starts accruing from 2026-10-18.
+3. `pos_52w` adds nothing once the other inputs are controlled (FM t −2.5 / −2.7): first candidate to drop in v2.
+4. Total return (`adj_close`) vs price-only `close`: differences are small for price signals (e.g. NIFTY 12-1 IC 0.045 vs
+   0.043) — DQ-1 matters more for return/volatility *levels* than for these ranks.
+5. Per §5 nothing enters the composite from this run; the composite is unchanged (ADR 0018). Re-run after EV-1, and per-universe
+   rules (criterion 2 "or the exception is explained") are an owner decision for composite v2.
 
 ## 6. Deliberately not adding
 

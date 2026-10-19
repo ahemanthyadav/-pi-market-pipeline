@@ -1,8 +1,9 @@
 # Market Data Pipeline — System Architecture
 
-> **Status:** live in production on the home k3s cluster. Reconciled with `manifests/` 2026-10-10
-> (23 CronJobs; `ops-tools/workloads.py --check` keeps the tables honest). **Live state re-verified
-> 2026-10-17: all 4 k8s nodes Ready (pi2 control-plane cordoned), all 23 CronJobs active, TimescaleDB,
+> **Status:** live in production on the home k3s cluster. Updated 2026-10-18 (screener v12, health v5, roles,
+> chunk merge, data foundations — plan: `engineering-plan-2026-10-18.md`). Reconciled with `manifests/` 2026-10-10
+> (24 CronJobs since 2026-10-18; `ops-tools/workloads.py --check` keeps the tables honest). **Live state re-verified
+> 2026-10-17: all 4 k8s nodes Ready (pi2 control-plane cordoned), every CronJob then deployed (23) active, TimescaleDB,
 > Grafana, and Telegram bot all Running.** (see ops manual §8 and pending-tasks for known gaps).
 > Doc map: this file = **architecture** (what the system is);
 > `market-data-pipeline-plan.md` = design history + build log;
@@ -77,7 +78,7 @@ flowchart LR
     end
 
     subgraph K8S["k3s cluster · namespace market-data · Tailscale-only perimeter"]
-        JOBS["23 CronJobs + 2 Deployments<br/>(fetchers · scorers · screener chain · telegram)"]
+        JOBS["24 CronJobs + 2 Deployments<br/>(fetchers · scorers · screener chain · telegram)"]
         TSDB[("TimescaleDB 2.30.1-pg16<br/>single instance · TX2 sda4 SSD")]
         GRAF["Grafana 12 (pi3)<br/>6 dashboards · 3 alert rules"]
         TGB["Telegram digest CronJob +<br/>two-way listener Deployment (pi1)"]
@@ -254,7 +255,7 @@ whole DB via `pg_dump`.*
 |---|---|---|
 | Orchestration | k3s (server v1.36.4+k3s1; TX2 agent pinned v1.35.3+k3s1) | Whole cluster |
 | DNS | Pi-hole v6.4.3 + unbound | pi0 |
-| Scheduling | k3s CronJobs (23 live); no workflow engine by design (pi2 RAM) | Pi workers / TX2 |
+| Scheduling | k3s CronJobs (24 live); no workflow engine by design (pi2 RAM) | Pi workers / TX2 |
 | Storage | TimescaleDB 2.30.1-pg16 (Postgres 16.15) | TX2, sda4 SSD |
 | Ingestion | Python 3.12-slim images: `yfinance`, `pandas`, `psycopg[binary]`, `feedparser`, `fredapi` | Pi workers |
 | Sentiment/NLP | FinBERT on CPU (TX2 inference needs no GPU at this volume) | TX2 only |
@@ -293,8 +294,14 @@ whole DB via `pg_dump`.*
 - Pinned to TX2: `nodeSelector kubernetes.io/hostname=ahytx2-desktop` + toleration for
   the `gpu=true:NoSchedule` taint. `PGDATA` subdir convention; telemetry off
   (`TIMESCALEDB_TELEMETRY=off`).
-- Resources: request 1 Gi / 250m, limit 2 Gi / 1 CPU — leaves the sentiment job (~4 Gi
-  window) comfortable headroom in 7.7 GB shared RAM. Memory cgroup verified present.
+- Resources (AR-4, 2026-10-18): requests = limits = 1 CPU / 2 Gi → QoS **Guaranteed** (evicted last on
+  the TX2); `pg_isready` readiness probe, no liveness probe (a restart mid-vacuum would hurt). Leaves the
+  sentiment job (~4 Gi window) headroom in 7.7 GB shared RAM. Memory cgroup verified present.
+- **Chunking (2026-10-18, ADR 0016):** `stock_prices` and `index_prices` use 1-year chunks; their old weekly chunks
+  were merged per year with `merge_chunks()` (stock_prices 3,382 → 107; index_prices 300 → 84; rows
+  unchanged). Before the merge, any open-ended per-symbol query spent 34 s just *planning*.
+- **Roles (AR-8, 2026-10-18, ADR 0017):** `postgres` (pipeline jobs, schema Job), `grafana_ro` (Grafana: SELECT,
+  read-only sessions), `telegram_app` (bot + digest + alerts: SELECT, writes on `watchlist`/`bot_users`).
 - **Service `timescaledb` (headless):** `timescaledb.market-data.svc.cluster.local:5432`
   — StatefulSet identity + client endpoint in one.
   **Server tuning (2026-10-04):** `max_locks_per_transaction=256` (was 64 — exhausted
@@ -326,20 +333,25 @@ whole DB via `pg_dump`.*
 | `stock_scores` | symbol+ts (PK), universe, factor scores, composite, rank, coverage, eligible | hypertable — daily balanced screen |
 | `stock_reports` | symbol+ts (PK), report_md | shortlist markdown reports + `__digest__` |
 | `screening_runs` / `job_state` | run log / resumable fetch cursors | plain tables |
+| `corporate_actions` | symbol+ts+action_type (PK), ratio (splits), amount (dividends), source | DQ-1, 2026-10-17; full history backfilled 2026-10-18 |
+| `stock_prices.adj_close` | column | ADR 0014 — OUR total-return close: close × Π(1 − div/prev close) over later dividends (v12) — never Yahoo's Adj Close |
+| `price_anomalies` | symbol+ts+kind (PK), detail, ret, status | `jump_gt_40pct` / `history_restated`, written by the daily price job (v12) |
+| `financial_facts` | symbol+source+metric+period_end+duration_days+filed (PK), period_start, value, form, accession | ADR 0015 — DQ-2: point-in-time fundamentals, first release + restatements only (v12) |
+| `universe_membership_snapshots` | universe+snapshot_date+symbol (PK), sector | G-2a weekly snapshot, from 2026-10-18 |
+| `factor_returns` / `job_runs` | — | created empty (G-20 loader / AR-2 adoption pending) |
 
 **Unique indexes (2026-10-03):** every natural key is enforced —
 `(ticker, ts)` index_prices · `(pair, ts)` fx_rates · `(instrument, ts)` bond_yields ·
 `(rate_name, ts)` interest_rates · `(ticker, ts, indicator_name)` technical_indicators ·
 `(flow_type, segment, ts)` capital_flows · `(commodity, ts)` commodity_prices ·
-`(ticker, ts)` intraday_prices.
-`news_sentiment` + `raw_headlines` intentionally excluded (INSERT-only writers —
-constraint would turn benign crash-recovery reruns into job failures until the
-scorers gain ON CONFLICT clauses at their next image rebuild).
+`(ticker, ts)` intraday_prices · `(md5(headline), source, UTC day)` raw_headlines ·
+`(md5(headline), source, ts)` news_sentiment (2026-10-18 — keys mirror the writers; the scorer commits
+inserts + `scored` flags in one transaction, so re-runs cannot collide).
 
-Schema lives in ConfigMap `timescaledb-schema` (`01-schema.sql`, all DDL `IF NOT EXISTS`,
+Schema lives in ConfigMap `timescaledb-schema` (`01-schema.sql` … `11-news-constraints.sql`, all DDL `IF NOT EXISTS`,
 safe to re-run via the `timescaledb-schema` one-shot Job).
 
-### 4.3 Live volume (verified 2026-10-17)
+### 4.3 Live volume (verified 2026-10-17; data-foundations rows 2026-10-18)
 
 | Table | Rows |
 |---|---|
@@ -365,6 +377,48 @@ safe to re-run via the `timescaledb-schema` one-shot Job).
 | bot_users | 2 |
 | headline_entities | 897 |
 | headline_events | 453 |
+| corporate_actions (10-18) | 60,927 (58,896 dividends + 2,031 splits, full history) |
+| financial_facts (10-18) | 332,680 (305,422 EDGAR / 502 US cos · 27,258 yfinance) |
+| universe_membership_snapshots (10-18) | 998 (first weekly snapshot) |
+| price_anomalies (10-18) | 0 so far (detector live since v12) |
+| raw_headlines / news_sentiment (10-18) | 1,545 / 1,545 |
+
+### 4.3a Historical coverage — how far back each table goes (verified 2026-10-18)
+
+Long history exists for **prices, corporate actions and US fundamentals**; most other feeds start when they went
+live (2026-09-29). Query used: `min(ts)/max(ts)/count(*)/count(DISTINCT key)` per table, as `grafana_ro`.
+
+**Long history**
+
+| Data | From | Detail |
+|---|---|---|
+| `stock_prices` — S&P 500 | 1962 | median first bar 1992; 386/503 ≥ 20 years, 17 < 5 years |
+| `stock_prices` — NIFTY 500 | 1991 | median first bar 2007; 207/494 ≥ 20 years, 97 < 5 years (recent listings) |
+| `index_prices` (38 tickers) | 1985 | ^GSPC ^IXIC ^FTSE ^N225 ^GSPTSE DXY 1985 · ^HSI 1986 · ^GDAXI ^RUT ^STI 1987 · ^FCHI ^SSMI ^VIX 1990 · ^MXX 1991 · ^AEX ^AXJO ^DJI ^RUI 1992 · ^BVSP ^IBEX 1993 · ^KS11 1996 · ^BSESN SSE SZSE FTSEMIB ^TWII 1997 · GC/SI/CL futures 2000 · NIFTY Smallcap 250 + ^CRSLDX 2005 · ^NSEI ^NSEBANK ^CNXIT ^STOXX50E 2007 · ^INDIAVIX 2008 · ^CNXPHARMA 2011 · **NIFTY Midcap 150 2019** (Yahoo's limit) |
+| `corporate_actions` | 1962 | 58,896 dividends + 2,031 splits, 913 symbols (full Yahoo history) |
+| `stock_prices.adj_close` | as `stock_prices` | every row (0 NULL) |
+| `financial_facts` — EDGAR (US) | 2006 | 502 companies, first-filing dates (ADR 0015) |
+| `financial_facts` — NSE results filings (India, G-6) | **2005** | every quarterly + annual result since 2005 (or listing), filing-date point-in-time, consolidated preferred (ADR 0021) — **backfill running from 2026-10-18 (~19 h)**; canary TCS / HDFCBANK / DIXON verified |
+| `stock_fundamentals` / `financial_facts` — yfinance (India) | 2021 | ~4 annual statements per company (Yahoo's limit) — now the fallback |
+
+**Short history — live since the pipeline started**
+
+| Data | From | Backfillable? |
+|---|---|---|
+| `fx_rates` (10 pairs) | 2025-12-15 (backfill) | **yes** — Yahoo has decades |
+| `bond_yields` (15 instruments) | 2026-09-29 | **US yes** (Yahoo ^TNX/^FVX/^TYX/^IRX, FRED DGS*); India: RBI widget is current-only |
+| `interest_rates` (8) | 2026-10-01 | **DFF yes** (FRED from 1954); RBI policy rates: current-only feed |
+| `technical_indicators` (38 tickers) | 2026-09-29 | **yes** — computable from `index_prices` history |
+| `capital_flows` (FII/DII) | 2026-09-29 | partly — NSE archive depth unverified |
+| `raw_headlines` / `news_sentiment` / `headline_*` | 2026-09-29 | no — RSS serves current items only |
+| `stock_metrics_daily`, `stock_scores`, `stock_reports` | 2026-10-01/04 | metrics yes (from prices); historical scores only meaningful with point-in-time fundamentals (US) and EV-1 membership |
+| `intraday_prices` (4) | 2026-10-01 | limited — Yahoo keeps hourly bars ~2 years |
+| `universe_membership_snapshots` | 2026-10-18 | no — the past needs EV-1 (historical index changes) |
+| `commodity_prices` | empty by design | futures live in `index_prices` |
+
+Consequence for research: EV-0 can test price signals over 25 years (both universes) and US fundamentals from 2006;
+India fundamentals history comes from NSE filings (G-6) once the backfill completes; EV-0 can then test fundamentals in both universes. Backfill plan: pending-tasks
+"History backfills".
 
 ### 4.4 Backup & durability
 
@@ -570,12 +624,13 @@ layer (JOINs on ticker/symbol), not in DDL.*
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | pi3 SSD dumps |
 | pipeline-health | 45 1 * * * | local/pipeline-health:v5 | pipeline_heartbeat (14 feeds incl. rbi; stock prices/scores 96 h since v5) |
 | intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
-| universe-refresh | 0 9 * * 0 | local/screener:v11 | universe_constituents + ticker_names (998) |
-| stock-prices | 30 23 * * * | local/screener:v11 | stock_prices (5d window) |
-| stock-fundamentals | 0 6 * * 6 | local/screener:v11 | stock_fundamentals (EDGAR US + yfinance NSE) |
-| stock-metrics | 0 2 * * * | local/screener:v11 | stock_metrics_daily |
-| stock-screener | 15 2 * * * | local/screener:v11 | stock_scores + screening_runs |
-| stock-report | 30 2 * * * | local/screener:v11 | stock_reports (top-25/universe + digest) |
+| universe-refresh | 0 9 * * 0 | local/screener:v15 | universe_constituents + ticker_names (998) |
+| stock-prices | 30 23 * * * | local/screener:v15 | stock_prices (5d window) |
+| stock-fundamentals | 0 6 * * 6 | local/screener:v15 | stock_fundamentals (EDGAR US + yfinance NSE) |
+| stock-metrics | 0 2 * * * | local/screener:v15 | stock_metrics_daily |
+| stock-screener | 15 2 * * * | local/screener:v15 | stock_scores + screening_runs |
+| stock-report | 30 2 * * * | local/screener:v15 | stock_reports (top-25/universe + digest) |
+| nse-fundamentals | 0 10 * * 0 | local/screener:v15 | financial_facts `nse_cons`/`nse_sa` — India results filings (G-6, ADR 0021); **suspended until the first backfill completes** |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only → manual INSERT |
 
 **Schedules are node-local PDT, not UTC** (verified 2026-10-04 — the "02:00-02:30"
@@ -635,8 +690,13 @@ One-shot Jobs (kept as manifests, run on demand): `backfill-yfinance-1y`, `backf
 - **Reports:** deterministic markdown per shortlist symbol + combined `__digest__`
   (stock_reports), news block joined from the existing FinBERT `news_sentiment`.
   LLM narration = pluggable future hook (roadmap Tier 3).
-- Health: 3 new feeds in `pipeline_heartbeat` (stock_prices 48h, stock_fundamentals
-  192h, stock_scores 48h) — image v4 with `max_parallel_workers_per_gather=0`.
+- Health: 3 feeds in `pipeline_heartbeat` (stock_prices 96h, stock_fundamentals
+  192h, stock_scores 96h since health v5) — `max_parallel_workers_per_gather=0`.
+- **Data foundations (`screener:v12`, 2026-10-18):** daily price job records corporate actions,
+  maintains our own `adj_close`, flags anomalies and re-syncs restated history even without a
+  split flag; fundamentals job writes `financial_facts`; universe refresh appends membership
+  snapshots. Screener reader switch `FUND_SOURCE=yfinance|facts` (+ `DRY_RUN=1`) — see §12.
+- **EV-0** (`ops-tools/ev0.py`) is the measurement gate for every scoring change (evidence roadmap §5, ADR 0018).
 
 ### 5.8 Telegram layer (2026-10-09, ADR 0009)
 
@@ -834,6 +894,11 @@ on the admin box).
   (all via env/`secretKeyRef`) — safe to rebuild freely.
 - Everything is tailnet-only; CGNAT means no inbound ports exist by construction. Never
   expose Grafana publicly without auth + TLS work first.
+- Least-privilege DB access (AR-8): Grafana and the Telegram workloads no longer use the
+  superuser — Secrets `grafana-db-ro`, `telegram-db`; roles defined in `10-roles.sql`.
+- Second copies: daily DB dump + k3s control-plane archive (`state.db`, token, `server/tls`,
+  `server/cred` — holds the cluster CA keys) pulled to the workstation by cron, mode 600.
+  Off-site copy: owner decision pending.
 
 ---
 
@@ -992,8 +1057,7 @@ Also on the admin box: `~/.kube/pi-cluster.yaml` (kubeconfig, server `<pi2-ip>`)
 7. ~~Secrets in docs/scripts~~ ✅ 2026-10-10: values moved to the gitignored
    `.secrets.env`; docs/tools carry none. Credential rotation is not a priority.
 8. FDI/TIC flows still manual/deferred.
-9. `news_sentiment`/`raw_headlines` unique constraints deferred to the next scorer/
-   fetcher image rebuild (need ON CONFLICT; INSERT-only writers today).
+9. ~~`news_sentiment`/`raw_headlines` unique constraints~~ ✅ 2026-10-18 (`11-news-constraints.sql`).
 10. Structural recommendations (CronJob restart-storm safeguards, shared job module, `job_runs`,
     image consolidation, repo layout, DB roles, CI, control-plane/DB-host topology):
     `architecture-review-2026-10-10.md` (AR-1…AR-12; tracker: pending-tasks §3).

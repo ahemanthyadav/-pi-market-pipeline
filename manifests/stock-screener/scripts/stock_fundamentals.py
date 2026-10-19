@@ -8,12 +8,15 @@ Per symbol (resumable via job_state cursor):
 - All symbols: yfinance info live ratios (pe, pb, ev_ebitda, roe,
   operating_margin, market_cap) stamped ts=fetch date (last-write-wins).
 
+financial_facts (DQ-2, since v12): every EDGAR 10-K/10-Q value keyed by duration and
+first filing date (edgar_fact_rows), and yfinance statement values with filed = first day
+we observed them (write_yf_facts). stock_fundamentals stays the "latest" view.
+
 Weekly cadence; BACKFILL=1 processes the whole universe from the cursor
 (canary via CANARY_LIMIT). Point-in-time: yfinance legs carry
 filing_published_at = fetch date (our DB could not know earlier).
 SEC courtesy: declared User-Agent + 0.4s spacing (10 req/s policy).
 """
-import json
 import os
 import sys
 import time
@@ -72,6 +75,90 @@ def upsert(cur, symbol, ts, metric, value, source, published):
     return 1
 
 
+FLOW = {"total_revenue", "net_income", "operating_income", "eps", "ocf", "capex", "fcf"}
+
+
+def _days(a, b):
+    from datetime import date
+    return (date.fromisoformat(b) - date.fromisoformat(a)).days
+
+
+def edgar_fact_rows(facts):
+    """DQ-2, pure: companyfacts 'us-gaap' dict -> financial_facts rows
+    (metric, period_end, period_start, duration_days, value, filed, form, accn).
+
+    Keyed by DURATION (3/6/9/12-month YTD periods no longer collapse onto one end date)
+    and by FILING DATE. Per (metric, end, duration) only the first release and genuine
+    restatements are kept: a later filing that repeats the same value as a comparative is
+    dropped, so `filed` is when the number first became knowable. Instant facts (balance
+    sheet: no start) get duration 0 — the column is part of the primary key. For a metric
+    with several tags the first tag in EDGAR_MAP wins per key."""
+    by_key = {}
+    for metric, tags in EDGAR_MAP.items():
+        seen = set()
+        for tag in tags:
+            mine = set()
+            for unit, entries in ((facts.get(tag) or {}).get("units", {})).items():
+                if unit not in ("USD", "USD/shares"):
+                    continue
+                for e in entries:
+                    if e.get("form") not in ("10-K", "10-Q") or not e.get("end") \
+                            or not e.get("filed") or e.get("val") is None:
+                        continue
+                    start = e.get("start")
+                    dur = _days(start, e["end"]) if start else 0
+                    key = (metric, e["end"], dur)
+                    if key in seen:
+                        continue  # an earlier tag already owns this key
+                    mine.add(key)
+                    by_key.setdefault(key, []).append(
+                        (e["filed"], e.get("accn") or "", float(e["val"]), start, e["form"]))
+            seen |= mine
+    rows = []
+    for (metric, end, dur), entries in by_key.items():
+        last_val, last_filed = None, None
+        for filed, accn, val, start, form in sorted(entries):
+            if filed == last_filed:
+                continue  # same-day duplicates: keep the first
+            if last_val is not None and abs(val - last_val) <= 1e-9 * max(1.0, abs(last_val)):
+                continue  # repeated comparative, not new information
+            rows.append((metric, end, start, dur, val, filed, form, accn or None))
+            last_val, last_filed = val, filed
+    return rows
+
+
+def write_facts(cur, symbol, source, rows):
+    """Insert-only; the primary key includes `filed`, so re-runs add nothing (ADR 0005)."""
+    n = 0
+    for metric, end, start, dur, val, filed, form, accn in rows:
+        cur.execute("INSERT INTO financial_facts (symbol, source, metric, period_end, "
+                    "period_start, duration_days, value, filed, form, accession) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                    (symbol, source, metric, end, start, dur, val, filed, form, accn))
+        n += cur.rowcount or 0
+    return n
+
+
+def write_yf_facts(cur, symbol, facts, observed):
+    """yfinance has no filing dates: `filed` = the day WE first observed a value (EV-2).
+    A row is added only when the value differs from the latest one we hold for that
+    (metric, period_end, duration) — weekly re-fetches add nothing unless Yahoo restates."""
+    if not facts:
+        return 0
+    cur.execute("SELECT DISTINCT ON (metric, period_end, duration_days) metric, period_end, "
+                "duration_days, value FROM financial_facts WHERE symbol=%s AND source='yfinance' "
+                "ORDER BY metric, period_end, duration_days, filed DESC", (symbol,))
+    latest = {(m, str(e), d): v for m, e, d, v in cur.fetchall()}
+    rows = []
+    for metric, end, val in facts:
+        dur = 365 if metric in FLOW else 0
+        prev = latest.get((metric, end, dur))
+        if prev is not None and abs(val - prev) <= 1e-9 * max(1.0, abs(prev)):
+            continue
+        rows.append((metric, end, None, dur, val, observed, None, None))
+    return write_facts(cur, symbol, "yfinance", rows)
+
+
 def edgar_facts(cik, symbol, cur):
     """Ingest FULL EDGAR history: one row per (metric, period end) — the version
     with the latest 'filed' date wins (restatements supersede, v1 semantics).
@@ -80,6 +167,7 @@ def edgar_facts(cik, symbol, cur):
     r = requests.get(EDGAR.format(cik.zfill(10)), headers=UA, timeout=60)
     r.raise_for_status()
     facts = r.json().get("facts", {}).get("us-gaap", {})
+    write_facts(cur, symbol, "edgar", edgar_fact_rows(facts))  # DQ-2 point-in-time store
     best = {}  # (metric, end) -> (val, filed)
     for metric, tags in EDGAR_MAP.items():
         for tag in tags:
@@ -115,6 +203,7 @@ def yf_statements(symbol, cur, fetch_date):
     tk = yf.Ticker(symbol)
     rows = 0
     frames = []
+    facts = []  # (metric, period_end 'YYYY-MM-DD', value) -> financial_facts
     try:
         for getter, attrs in (("get_income_stmt", ("income_stmt",)),
                                ("get_balance_sheet", ("balance_sheet",)),
@@ -139,7 +228,9 @@ def yf_statements(symbol, cur, fetch_date):
                 v = frame.loc[hit, col]
                 if v is not None and v == v:
                     rows += upsert(cur, symbol, col, metric, v, "yfinance", fetch_date)
+                    facts.append((metric, str(getattr(col, "date", lambda: col)())[:10], float(v)))
             break
+    write_yf_facts(cur, symbol, facts, fetch_date[:10])
     return rows
 
 

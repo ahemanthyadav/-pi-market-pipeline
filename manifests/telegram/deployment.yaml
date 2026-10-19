@@ -38,11 +38,11 @@ spec:
             - name: PGHOST
               value: timescaledb.market-data.svc.cluster.local
             - name: PGUSER
-              value: postgres
+              value: telegram_app   # AR-8 (Secret telegram-db)
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: timescaledb-auth
+                  name: telegram-db
                   key: password
             - name: PGDATABASE
               value: postgres

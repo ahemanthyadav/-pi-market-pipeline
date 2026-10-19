@@ -40,4 +40,8 @@ All recorded (2026-10-04) — `0004` no registry · `0005` DELETE+INSERT
 idempotency · `0006` index_prices pure-daily vs intraday split · `0007`
 sentiment on CPU FinBERT despite the GPU node · `0008` no Longhorn/Loki.
 Earlier: `0001` max_locks=256 · `0002` PDT schedules stay · `0003`
-per-symbol backfills. New long-shelf-life decisions get the next number.
+per-symbol backfills. Later: `0009`–`0013` (Telegram, gazetteer NER, node stats, multi-user, trade-date
+timestamps); 2026-10-18: `0014` own adj_close · `0015` point-in-time fundamentals · `0016` chunk sizing ·
+`0017` DB roles · `0018` signals gated by EV-0 · `0019` no UPS · `0020` repo layout stays ·
+`0021` India fundamentals from NSE filings · `0022` LLM via hosted API, no local GPU.
+New long-shelf-life decisions get the next number.

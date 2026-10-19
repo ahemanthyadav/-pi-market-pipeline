@@ -18,7 +18,15 @@ older rows keep the pre-split scale. The daily pull asks for actions and, when a
 shows a non-zero 'Stock Splits' in the 5-day window, re-fetches that symbol's full
 history and rewrites it (same idempotent DELETE+INSERT per (symbol, ts)). Capped at
 SPLIT_RESYNC_MAX symbols per run (a Yahoo glitch must not turn into a mass backfill).
-Dividends (total return) are still not modelled.
+
+Since v12 (2026-10-18):
+- adj_close = OUR total-return close (adj_series(): close x dividend factors), recomputed
+  for a symbol after any full-history write or when a dividend is in the window; new rows
+  start at adj_close = close. Full dividend history: corporate_actions_backfill.py.
+- price_anomalies: before overwriting, the window is compared with the DB — a >40 % 1-day
+  move is recorded ('jump_gt_40pct'); a stored historical close that Yahoo now reports
+  >0.5 % differently is 'history_restated' and the symbol joins the resync pass even
+  without a split flag (the two newest bars are exempt: partial 'today' bars).
 
 Connection discipline (lesson 2026-10-04: a read-phase transaction held open
 across long downloads gets dropped by the pod→DB path):
@@ -60,6 +68,108 @@ def action_events(df):
     return events
 
 
+ANOMALY_JUMP = 0.40    # |1-day return| above this -> price_anomalies 'jump_gt_40pct'
+RESTATE_TOL = 0.005    # stored vs fetched close differ by more -> 'history_restated'
+PROTECT_LAST = 2       # newest bars may legitimately change (partial "today" bar)
+
+
+def adj_series(bars, divs):
+    """Own total-return close (DQ-1; data-foundations draft §3.1), pure function.
+
+    bars: [(ts, close)] ascending; divs: [(ex_ts, amount)].
+    adj(t) = close(t) * prod over dividends with ex-date d > t of (1 - div_d / c_d),
+    c_d = close of the last bar before d. Splits need no factor: Yahoo's raw Close
+    and its dividend amounts are both already split-adjusted. A dividend with no
+    earlier bar, or one >= that close (bad data), is skipped."""
+    from bisect import bisect_left
+    stamps = [b[0] for b in bars]
+    fac = [1.0] * len(bars)
+    for d, amt in divs:
+        i = bisect_left(stamps, d) - 1
+        if i < 0 or not amt or amt <= 0:
+            continue
+        c = bars[i][1]
+        if c and c > amt:
+            fac[i] *= 1.0 - amt / c
+    out, mult = [None] * len(bars), 1.0
+    for j in range(len(bars) - 1, -1, -1):
+        mult *= fac[j]
+        out[j] = None if bars[j][1] is None else bars[j][1] * mult
+    return out
+
+
+def recompute_adj_close(conn, symbol):
+    """Recompute adj_close for a whole symbol from close + corporate_actions.
+    One UPDATE; rows whose value is unchanged are not rewritten. Returns rows changed."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT ts, close FROM stock_prices WHERE symbol=%s ORDER BY ts", (symbol,))
+        bars = cur.fetchall()
+        cur.execute("SELECT ts, amount FROM corporate_actions WHERE symbol=%s "
+                    "AND action_type='dividend' ORDER BY ts", (symbol,))
+        divs = cur.fetchall()
+    if not bars:
+        return 0
+    adj = adj_series(bars, divs)
+    with conn.transaction():
+        with conn.cursor() as cur:
+            cur.execute("UPDATE stock_prices p SET adj_close = v.a "
+                        "FROM unnest(%s::timestamptz[], %s::float8[]) AS v(ts, a) "
+                        "WHERE p.symbol = %s AND p.ts = v.ts "
+                        "AND p.adj_close IS DISTINCT FROM v.a",
+                        ([b[0] for b in bars], adj, symbol))
+            return cur.rowcount or 0
+
+
+def find_anomalies(stored, prev_close, fetched):
+    """Pure. stored: {ts: close} already in the DB for the window; prev_close: last stored
+    close before the window; fetched: [(ts, close)] ascending from Yahoo.
+    Returns [(ts, kind, detail, ret)]."""
+    out = []
+    prev = prev_close
+    last_protected = len(fetched) - PROTECT_LAST
+    for k, (ts, c) in enumerate(fetched):
+        if c is None:
+            continue
+        old = stored.get(ts)
+        if old and k < last_protected and abs(c / old - 1) > RESTATE_TOL:
+            out.append((ts, "history_restated", f"stored {old:g} -> yahoo {c:g}", c / old - 1))
+        if prev and prev > 0:
+            ret = c / prev - 1
+            if abs(ret) > ANOMALY_JUMP:
+                out.append((ts, "jump_gt_40pct", f"prev close {prev:g}", ret))
+        prev = c
+    return out
+
+
+def detect_anomalies(conn, symbol, df):
+    """Compare a fetched window with what the DB holds BEFORE it is overwritten."""
+    fetched = [(trade_ts(ts), None if pd.isna(bar.get("Close")) else float(bar.get("Close")))
+               for ts, bar in df.iterrows()]
+    if not fetched:
+        return []
+    start = fetched[0][0]
+    with conn.cursor() as cur:
+        cur.execute("SELECT ts, close FROM stock_prices WHERE symbol=%s AND ts >= %s",
+                    (symbol, start))
+        stored = {r[0]: r[1] for r in cur.fetchall()}
+        # Bounded on purpose: an open-ended `ts < start` makes the planner open every
+        # chunk of the hypertable (34 s planning measured on 3,382 chunks, 2026-10-18).
+        cur.execute("SELECT close FROM stock_prices WHERE symbol=%s AND ts < %s "
+                    "AND ts >= %s::timestamptz - interval '45 days' "
+                    "ORDER BY ts DESC LIMIT 1", (symbol, start, start))
+        row = cur.fetchone()
+    return find_anomalies(stored, row[0] if row else None, fetched)
+
+
+def write_anomalies(conn, symbol, items):
+    with conn.transaction():
+        with conn.cursor() as cur:
+            for ts, kind, detail, ret in items:
+                cur.execute("INSERT INTO price_anomalies (symbol, ts, kind, detail, ret) "
+                            "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (symbol, ts, kind) DO NOTHING",
+                            (symbol, ts, kind, detail, float(ret)))
+
+
 def connect():
     conn = psycopg.connect(
         host=os.environ.get("PGHOST", "timescaledb.market-data.svc.cluster.local"),
@@ -95,10 +205,14 @@ def write_symbol(conn, symbol, df, job):
                 bar_ts = trade_ts(ts)
                 cur.execute("DELETE FROM stock_prices WHERE symbol=%s AND ts=%s",
                             (symbol, bar_ts))
+                # adj_close starts equal to close: correct for the newest bars (no later
+                # dividend exists yet). recompute_adj_close() runs after any write that
+                # can change older factors (full history, or a dividend in the window).
+                # Never Yahoo's 'Adj Close' (rewritten backwards, stale in old rows).
                 cur.execute("INSERT INTO stock_prices (symbol, ts, open, high, low, "
-                            "close, volume) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                            "close, adj_close, volume) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
                             (symbol, bar_ts, num("Open"), num("High"),
-                             num("Low"), num("Close"),
+                             num("Low"), num("Close"), num("Close"),
                              None if vol is None or pd.isna(vol) else int(vol)))
                 written += 1
             cur.execute("INSERT INTO job_state (job_name, last_key, updated_at) "
@@ -169,7 +283,17 @@ def main() -> int:
     print(f"mode={mode} period={period} symbols={len(symbols)} chunk={chunk_n}",
           flush=True)
     done, failed, total_rows = 0, 0, 0
-    split_syms = {}
+    resync = {}          # symbol -> description, for the full-history rewrite pass
+    n_anom = n_adj = 0
+
+    def safe(label, sym, fn, *args):
+        """Side work after the prices are committed: a failure is a WARN, never a lost symbol."""
+        try:
+            return fn(*args)
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARN {sym} {label} failed: {exc}", flush=True)
+            return None
+
     if mode == "max":
         for n, sym in enumerate(symbols, 1):
             try:
@@ -183,6 +307,7 @@ def main() -> int:
                                                  df.dropna(subset=["Close"]), job)
                     total_rows += rows
                     done += 1
+                    n_adj += safe("adj_close", sym, recompute_adj_close, conn, sym) or 0
             except Exception as exc:  # noqa: BLE001
                 print(f"WARN {sym} failed: {exc}", flush=True)
                 failed += 1
@@ -205,19 +330,24 @@ def main() -> int:
                         print(f"WARN no data {sym}", flush=True)
                         failed += 1
                         continue
+                    anomalies = safe("anomaly check", sym, detect_anomalies, conn, sym, df) or []
                     rows, conn = write_resilient(conn, sym, df, job)
                     total_rows += rows
                     done += 1
                     events = split_events(df)
                     if events:
-                        split_syms[sym] = events
+                        resync[sym] = ",".join(f"{d.date()}x{r:g}" for d, r in events)
+                    elif any(a[1] == "history_restated" for a in anomalies):
+                        resync[sym] = "restated"
                     actions = action_events(df)
                     if actions:
-                        try:
-                            write_corporate_actions(conn, sym, actions)
-                        except Exception as exc:  # noqa: BLE001 — prices already committed
-                            print(f"WARN {sym} corporate_actions write failed: {exc}",
-                                  flush=True)
+                        safe("corporate_actions write", sym, write_corporate_actions,
+                             conn, sym, actions)
+                    if any(a[1] == "dividend" for a in actions) and sym not in resync:
+                        n_adj += safe("adj_close", sym, recompute_adj_close, conn, sym) or 0
+                    if anomalies:
+                        safe("anomaly write", sym, write_anomalies, conn, sym, anomalies)
+                        n_anom += len(anomalies)
                 except Exception as exc:  # noqa: BLE001
                     print(f"WARN {sym} failed: {exc}", flush=True)
                     failed += 1
@@ -225,13 +355,12 @@ def main() -> int:
                   f"{done} ok, {failed} warn, {total_rows} rows", flush=True)
             time.sleep(3)
     resynced = 0
-    if split_syms:
+    if resync:
         cap = int(os.environ.get("SPLIT_RESYNC_MAX", "25"))
-        if len(split_syms) > cap:
-            print(f"WARN {len(split_syms)} symbols show splits (> {cap}); resyncing "
+        if len(resync) > cap:
+            print(f"WARN {len(resync)} symbols show splits (> {cap}); resyncing "
                   f"the first {cap} only — review the rest", flush=True)
-        for sym, events in sorted(split_syms.items())[:cap]:
-            desc = ",".join(f"{d.date()}x{r:g}" for d, r in events)
+        for sym, desc in sorted(resync.items())[:cap]:
             try:
                 full = yf.Ticker(sym).history(period="max", interval="1d",
                                               auto_adjust=False)
@@ -242,6 +371,7 @@ def main() -> int:
                                              "stock_prices_split")
                 resynced += 1
                 print(f"SPLIT-RESYNC {sym} {desc} rows={rows}", flush=True)
+                n_adj += safe("adj_close", sym, recompute_adj_close, conn, sym) or 0
             except Exception as exc:  # noqa: BLE001
                 print(f"WARN split resync {sym} ({desc}) failed: {exc}", flush=True)
             time.sleep(0.8)
@@ -250,7 +380,7 @@ def main() -> int:
             cur.execute("UPDATE job_state SET last_key=NULL WHERE job_name=%s", (job,))
     conn.close()
     print(f"PRICES-OK mode={mode} fetched={done} warn={failed} rows={total_rows} "
-          f"splits_resynced={resynced}", flush=True)
+          f"splits_resynced={resynced} anomalies={n_anom} adj_updated={n_adj}", flush=True)
     return 0 if done else 1
 
 

@@ -5,15 +5,11 @@
 > commodities, yields, rates, news, FinBERT sentiment, FII/DII flows, technicals,
 > and a 998-stock fundamental screener (Nifty 500 + S&P 500) — into TimescaleDB,
 > with Grafana dashboards, Tailscale-only access, and no container registry.
-> **Status 2026-10-13 — recovered; power fix passed on pi0/pi2/pi3, pi1 still failing.** The 2026-10-09→10 outages are over: all 4 nodes Ready, DB Running,
-> all 23 CronJobs active and completing (re-verified 08:46 UTC); the root cause (Pi power) is only *claimed* fixed — all Pis moved
-> to separate supplies ~02:30 UTC, 24 h acceptance review run 2026-10-13 (pending-tasks §1; per-node roles: `node-roles.md`).
-> **Final 24 h power review (2026-10-13 03:51 UTC): pi0/pi2/pi3 PASS, pi1 FAIL (undervolts at near-idle) — acceptance not passed; swap pi1's PSU/cable** (ops manual §8 "Power acceptance trial").
-> Earlier healthy check 2026-10-09: all 4 nodes Ready · **23 CronJobs** (per `manifests/`; telegram-digest 08:00 IST) · Telegram alert channel
-> live (contact point + 3 rules) · **Telegram two-way listener live**
-> (Deployment telegram-bot: /status /vix /nifty /sensex /gold /fii /scores
-> /digest) · screener toolkit `local/screener:v11` ·
-> health monitor `local/pipeline-health:v5`.
+> **Status 2026-10-18 — healthy; data-foundations pass done.** 4 nodes Ready (pi2 cordoned control plane), 24 CronJobs (nse-fundamentals suspended until its first backfill completes), the others
+> active, DB `Guaranteed` QoS with readiness probe. Images: screener toolkit `local/screener:v15`, health monitor
+> `local/pipeline-health:v5`. Least-privilege DB roles for Grafana and the Telegram bot. Daily second copies of the DB dump
+> and the k3s control-plane datastore on the workstation. A mains power loss on 10-18 rebooted everything — recovered on
+> its own; no UPS by decision. Work order and reasoning: `engineering-plan-2026-10-18.md`; open items: `pending-tasks.md`.
 
 ## Reading order (new session? start here)
 
@@ -40,6 +36,7 @@
 | **`evidence-based-signals-roadmap.md`** | Which screener/bot signals have research backing, which do not, the replacement for each weak one, and the build order (EV-0…EV-18) with a written acceptance test | Before adding or re-weighting any factor, screen or score | A signal is tested (record pass/fail in §5), added, or dropped |
 | **`ml-roadmap-2026-10-10.md`** | The ML/LLM plan beyond ranking signals: ML-0…ML-8, **each labelled by research backing 🟢🟡🔵⚪** (experiment infra, anomaly detection, news embeddings, vol forecasts, regime, peer clusters, hard-gated GBM ranker, **LLM via hosted API**), guardrails, phasing, data/deploy pattern, risks, ADR candidates | Planning any model or LLM work; before touching the digest/bot narrative | When an ML item is built, rejected, or gated differently (update the tracker in the same session) |
 | **`prediction-validation-and-training-2026-10-10.md`** | Pipeline so every daily prediction is logged write-once, resolved against outcomes on adjusted prices, scored against baselines and monitored; plus the offline train → gate → shadow → promote path for components that learn. Inventory of what is predicted today, schema, daily jobs, per-kind validation rules, acceptance tests (PV-0…PV-3, TP-0…TP-2) | Adding or changing any score, forecast or model; judging whether a prediction works | When a prediction kind is added/retired or a threshold decision (ADR) lands |
+| **`engineering-plan-2026-10-18.md`** | Order and reasoning for the 2026-10-18 engineering pass (AR-4, DQ-1/DQ-2 data foundations, chunk merge, EV-0, AR-8, news constraints, AR-6/7 decision) and what is deliberately deferred | Before starting large work; to see why something was not done | When the order changes or an item is decided |
 | **`architecture-review-2026-10-10.md`** | Architect's review of the repo/system structure: strengths to keep, 12 findings (AR-1…AR-12) with evidence, target repo layout, phased plan, ADR candidates, how to re-measure | Planning structural/refactor work; before adding jobs or touching manifests | When an AR item is applied or rejected (update the tracker in the same session) |
 
 ## Roles in one line each
