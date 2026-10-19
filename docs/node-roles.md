@@ -36,6 +36,7 @@
   allow-list — ADR 0012), CronJobs `telegram-digest` (08:00 IST — the only job with an explicit timeZone) and `telegram-alerts` (02:45).
   Pinned so image imports are needed on one node only.
 - **Unpinned jobs:** eligible for any of the 18 unpinned CronJobs (§3.1) — **only if the image is imported on pi1** (no registry).
+  `telegram-digest:v13` (2026-10-19: AI digest note + forgiving symbol lookup) on pi1 only (pinned).
   `screener:v15` (2026-10-18: data foundations, facts reader, NSE fundamentals) + `pipeline-health:v5` imported on pi1 and pi3 (v10–v14 + health v4 kept for rollback — remove old tags one by one, never `--prune`; pi2 skipped — cordoned). The NSE backfill Job runs on pi1/pi3 (network-bound, ~19 h). After the
   10-18 prune incident pi1 holds all 14 images its jobs need (incl. telegram-digest:v8), pi3 all 13 floating ones — verified against the manifests.
   The earlier image gap is closed: `yfinance-fetcher:v5`, `nse-fetcher:v4` and `screener:v10` (v9 kept) are imported on **both** pi1 and
@@ -79,6 +80,7 @@
   first scheduled 170 MB `pg-backup` write at 08:30 UTC (the trigger that coincided with its network drop on 10-11) (tracker §1).
 
 ### tx2 — database, NLP, build host
+- **llm-gateway (2026-10-18):** the shared LLM gateway pod (namespace `llm`, ~650 MiB, its own `litellm` DB on the same TimescaleDB) — see `../llm-gateway`.
 - **DB pod (2026-10-18):** QoS `Guaranteed` (1 CPU / 2 Gi requests = limits) + readiness probe (AR-4) — the kubelet
   evicts sentiment/NER pods before the database under memory pressure. Holds the image tarball store for every live image.
 - **Pinned:** `timescaledb-0` StatefulSet (PV `timescaledb-tx2-ssd` on `sda4`, **Retain** — never delete casually),

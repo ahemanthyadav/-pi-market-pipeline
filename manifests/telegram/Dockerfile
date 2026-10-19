@@ -6,10 +6,12 @@
 # multi-user layer (owner + bot_users members, per-user fan-out — ADR 0012).
 # Same build/distribute pattern (native TX2 docker build, tarball import —
 # pinned node pi1 only, see cronjob.yaml/deployment.yaml):
-#   docker build -t local/telegram-digest:v8 .
-#   docker save local/telegram-digest:v8 | gzip > telegram-digest-v8.tar.gz
+#   docker build -t local/telegram-digest:v13 .
+#   docker save local/telegram-digest:v13 | gzip > telegram-digest-v9.tar.gz
 FROM python:3.12-slim
 WORKDIR /app
-RUN pip install --no-cache-dir "psycopg[binary]" requests
-COPY digest.py bot.py alerts.py stocks.py users.py ./
+# requirements.lock (AR-5): installed from the lock since v9 (2026-10-18).
+COPY requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock
+COPY digest.py bot.py alerts.py stocks.py users.py resolver.py ./
 CMD ["python", "digest.py"]

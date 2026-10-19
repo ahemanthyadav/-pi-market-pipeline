@@ -59,6 +59,9 @@ jobs:
           python3 tests/test_ev0.py
           python3 tests/test_manifest_safeguards.py
           python3 tests/test_nse_fundamentals.py
+          python3 tests/test_narrative.py
+          python3 tests/test_digest_narrative.py
+          python3 tests/test_resolver.py
       - name: Shell tests
         run: |
           bash tests/test-precommit-hook.sh

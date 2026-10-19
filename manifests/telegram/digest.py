@@ -9,6 +9,9 @@ The same Secret also backs the Grafana Telegram contact point
 (manifests/grafana/alerting.yaml), so the bot is both the digest and the alert
 channel; the token/chat ID stay deployment config, never code.
 
+Since v9 (2026-10-18): an optional AI summary section from llm_narratives (ML-7a) when
+DIGEST_NARRATIVE=1 and today's note passed the number check; otherwise the digest is unchanged.
+
 Env: PGHOST, PGUSER, PGPASSWORD, PGDATABASE, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (the owner;
 other users come from the bot_users table — ADR 0012). One personalised message per user.
 Exit 0 only when the Bot API accepts the message (CronJob failure signal).
@@ -93,6 +96,22 @@ def headlines(cur):
     return cur.fetchall()
 
 
+def narrative(cur):
+    """Today's AI market note (ML-7a, ADR 0022) — only if it passed the number check (status ok).
+    None when switched off (DIGEST_NARRATIVE != 1), missing, or the table does not exist yet."""
+    if os.environ.get("DIGEST_NARRATIVE", "0") != "1":
+        return None
+    try:
+        cur.execute("SELECT summary FROM llm_narratives WHERE ts = %s AND kind = 'daily_market' "
+                    "AND status = 'ok'", (datetime.now(IST).date(),))
+    except psycopg.Error as exc:
+        if not stocks.table_missing(exc):
+            raise
+        return None
+    row = cur.fetchone()
+    return row[0] if row and row[0] else None
+
+
 def watchlist(cur, chat_id=None):
     """One user's compact watchlist lines; [] when empty or the table/column is missing."""
     def q(sql, args=()):
@@ -122,6 +141,10 @@ def build_message(chat_id=None):
 
         lines = [f"<b>Market digest</b>  <i>{datetime.now(IST):%d %b %Y, %H:%M IST}</i>",
                  stocks.quote_table(q, stocks.DIGEST_QUOTES)]
+        note = narrative(cur)
+        if note:
+            lines.append("<b>Summary</b> <i>(AI-written; every number checked against the data)</i>\n"
+                         + html.escape(note))
 
         facts = [(label, f"{rate:,.4f}") for label, _ts, rate in fx(cur)]
         gauge = sentiment(cur)

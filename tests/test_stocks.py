@@ -368,7 +368,8 @@ class ResolveTest(unittest.TestCase):
         self.assertIsNone(row)
         self.assertIn("TATAMOTORS.NS", problem)
         self.assertIn("/stock", stocks.pick_one(db, "")[1])
-        none = FakeDB([("upper(symbol) = ANY", []), ("name ILIKE", [])])
+        none = FakeDB([("upper(symbol) = ANY", []), ("name ILIKE", []),
+                       ("WHERE active ORDER BY symbol", [])])   # resolver's universe (fuzzy) lookup
         self.assertIn("No stock matching", stocks.pick_one(none, "zzz")[1])
 
 

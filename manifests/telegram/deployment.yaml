@@ -31,10 +31,16 @@ spec:
         kubernetes.io/hostname: pi1
       containers:
         - name: listener
-          image: local/telegram-digest:v8
+          image: local/telegram-digest:v13
           imagePullPolicy: Never
           args: ["python", "bot.py"]
           env:
+            - name: BOT_AI_RESOLVE            # forgiving /stock lookup: AI layer on (resolver.py; typed text only)
+              value: "1"
+            - name: LLM_BASE_URL
+              valueFrom: {secretKeyRef: {name: llm-gateway-key, key: base-url}}
+            - name: LLM_API_KEY
+              valueFrom: {secretKeyRef: {name: llm-gateway-key, key: api-key}}
             - name: PGHOST
               value: timescaledb.market-data.svc.cluster.local
             - name: PGUSER

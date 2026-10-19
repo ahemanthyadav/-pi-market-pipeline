@@ -499,17 +499,34 @@ def resolve(q, arg):
     )
 
 
-def pick_one(q, arg):
-    """(row, None) for a unique match, else (None, message for the user)."""
+def pick_one_ex(q, arg, asker=None):
+    """(row, None, note) for a unique match, else (None, message for the user, None).
+
+    Exact symbol / name first (resolve); if nothing matches, the forgiving resolver (resolver.py):
+    fuzzy spelling correction, then — if enabled — an AI guess validated against the universe.
+    `note` tells the user how a corrected query was read (None for an exact hit)."""
     if not arg:
-        return None, "Give a symbol or company name, e.g. <code>/stock TCS</code>"
+        return None, "Give a symbol or company name, e.g. <code>/stock TCS</code>", None
     rows = resolve(q, arg)
-    if not rows:
-        return None, f"No stock matching <b>{esc(arg)}</b> in NIFTY500 / SP500."
     if len(rows) > 1:
         return None, "Several matches — use the symbol:\n" + "\n".join(
-            f"<code>{esc(s)}</code> — {esc(n)}" for s, n, *_ in rows)
-    return rows[0], None
+            f"<code>{esc(s)}</code> — {esc(n)}" for s, n, *_ in rows), None
+    if rows:
+        return rows[0], None, None
+    import resolver
+    row, how = resolver.suggest(q, arg, asker)
+    if row:
+        via = " (matched by AI)" if how == "ai" else ""
+        return row, None, f"🔎 <i>“{esc(arg)}” → <b>{esc(row[0])}</b> {esc(row[1])}{via}</i>"
+    if how:                                   # "Did you mean" list
+        return None, f"No exact match for <b>{esc(arg)}</b>. {how}", None
+    return None, f"No stock matching <b>{esc(arg)}</b> in NIFTY500 / SP500.", None
+
+
+def pick_one(q, arg):
+    """(row, None) for a unique match, else (None, message for the user). See pick_one_ex."""
+    row, problem, _note = pick_one_ex(q, arg)
+    return row, problem
 
 
 # ---------------------------------------------------------------- /stock

@@ -38,9 +38,11 @@ spec:
             kubernetes.io/hostname: pi1
           containers:
             - name: digest
-              image: local/telegram-digest:v8
+              image: local/telegram-digest:v13
               imagePullPolicy: Never
               env:
+                - name: DIGEST_NARRATIVE        # ML-7a AI summary section (only notes that passed the number check)
+                  value: "1"
                 - name: PGHOST
                   value: timescaledb.market-data.svc.cluster.local
                 - name: PGUSER
@@ -102,7 +104,7 @@ spec:
             kubernetes.io/hostname: pi1
           containers:
             - name: alerts
-              image: local/telegram-digest:v8
+              image: local/telegram-digest:v13
               imagePullPolicy: Never
               args: ["python", "alerts.py"]
               env:

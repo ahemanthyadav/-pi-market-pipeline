@@ -35,6 +35,15 @@ Design consequences:
   depend on it for anything but the optional narrative.
 - Upgrade path without code changes: a paid NVIDIA deployment, or any other OpenAI-compatible provider, via `LLM_BASE_URL`.
 
+## Implementation (2026-10-18)
+Built as a **shared gateway** in its own repo (`../llm-gateway`, its ADR 0001): projects call capability names with
+their own key; the NVIDIA key lives only in the gateway (`ops/set-provider-key.sh`). marketdata uses Secret
+`market-data/llm-gateway-key` (fast-json, general, embed; 10 req/min; free only). The in-code failover described above is
+done by the gateway; clients only degrade when it is down. Uses so far: ML-7a narrative, forgiving symbol lookup (ADR 0023).
+Live since 2026-10-19 (key placed, smoke OK, first narrative status ok on attempt 1). Lesson: reasoning models spend
+`max_tokens` on thinking — 400 tokens returned empty text; clients leave headroom and the gateway turns thinking off
+for `fast-json`.
+
 ## Consequences
 - LLM jobs run as normal CronJobs on the Pi workers (they only make HTTPS calls; no GPU, small images).
 - Outbound data is public market data only; never send Telegram chat ids, watchlists or holdings to the provider.

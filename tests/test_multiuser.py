@@ -326,17 +326,18 @@ class BotFlowTest(unittest.TestCase):
         self.db = FakeDB()
         self.out = []
         self._saved = (bot.query, bot.execute, bot.send, bot.REGISTRY, bot.REQUESTS,
-                       stocks.pick_one, stocks.ytd_map)
+                       stocks.pick_one, stocks.ytd_map, stocks.pick_one_ex)
         bot.query, bot.execute = self.db.query, self.db.execute
         bot.send = lambda text, chat=None: self.out.append((str(chat or bot.OWNER), text))
         bot.REGISTRY = users.Registry(OWNER, self.db.query, ttl=0)
         bot.REQUESTS = users.AccessRequests(clock=lambda: 5000.0)
         stocks.pick_one = lambda q, arg: ((arg.upper() + ".NS", arg.upper()), None)
+        stocks.pick_one_ex = lambda q, arg, asker=None: ((arg.upper() + ".NS", arg.upper()), None, None)
         stocks.ytd_map = lambda q, symbols: {}
 
     def tearDown(self):
         (bot.query, bot.execute, bot.send, bot.REGISTRY, bot.REQUESTS,
-         stocks.pick_one, stocks.ytd_map) = self._saved
+         stocks.pick_one, stocks.ytd_map, stocks.pick_one_ex) = self._saved
 
     def say(self, chat, text, uname="someone"):
         bot.handle({"message": {"chat": {"id": int(chat)}, "text": text,
@@ -378,6 +379,13 @@ class BotFlowTest(unittest.TestCase):
         self.say(ALICE, "/help")
         self.assertIn("manage who has access", self.replies(OWNER)[0])
         self.assertNotIn("manage who has access", self.replies(ALICE)[0])
+
+    def test_corrected_symbol_never_writes_to_a_watchlist(self):
+        stocks.pick_one_ex = lambda q, arg, asker=None: (("INFY.NS", "Infosys Ltd."), None,
+                                                         "🔎 <i>“infosis” → <b>INFY.NS</b></i>")
+        self.say(OWNER, "/watch add infosis 10 1500")
+        self.assertEqual(self.db.watch, {})                          # nothing written
+        self.assertIn("/watch add INFY.NS", self.out[-1][1])         # asks to confirm with the exact symbol
 
     def test_watchlists_are_private_per_chat(self):
         self.say(OWNER, f"/adduser {ALICE} Alice")

@@ -294,6 +294,16 @@ Outbound-only, survives CGNAT, no VPS.
 - One process, ~30–50 MB RAM on pi1; restartPolicy Always, liveness = log
   heartbeats in a `bot_state` row (or reuse `pipeline_heartbeat`).
 
+### Forgiving symbol lookup (2026-10-18, ADR 0023, image v13)
+`/stock`, `/news`, `/watch` accept typos: fuzzy correction first ("infosis" → INFY.NS, shown with a 🔎 note; text under
+5 letters is never auto-picked), AI (shared gateway, `general`) for nicknames — its ticker AND company name must agree
+with the universe (live: facebook → META, big blue → IBM, hul → HINDUNILVR.NS, coke → KO); `/watch` never writes on a corrected symbol — it asks for
+the exact one. Switch: `BOT_AI_RESOLVE` on the Deployment.
+
+### AI market note in the digest (2026-10-18, ML-7a, image v9+; first real note 2026-10-19)
+`llm-narrative` (07:40 IST) writes `llm_narratives`; the 08:00 digest adds a "Summary (AI-written; every number checked)"
+section only when today's note passed the check. Switch: `DIGEST_NARRATIVE` on CronJob `telegram-digest`.
+
 ### Tier 3 — Strata-backed chat — ❌ DROPPED 2026-10-18 (ADR 0022: hosted API only, no local GPU; free-text questions = ML-7d `/ask`)
 
 Free-text messages → the workstation's Strata server (Qwen3.8-Flash-Next) →

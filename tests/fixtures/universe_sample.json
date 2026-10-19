@@ -1,0 +1,758 @@
+[
+[
+"AAPL",
+"Apple Inc.",
+"Information Technology",
+"SP500",
+"USD"
+],
+[
+"AAVAS.NS",
+"Aavas Financiers Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"AEP",
+"American Electric Power",
+"Utilities",
+"SP500",
+"USD"
+],
+[
+"AFFLE.NS",
+"Affle 3i Ltd.",
+"Information Technology",
+"NIFTY500",
+"INR"
+],
+[
+"AIG",
+"American International Group",
+"Financials",
+"SP500",
+"USD"
+],
+[
+"ALKEM.NS",
+"Alkem Laboratories Ltd.",
+"Healthcare",
+"NIFTY500",
+"INR"
+],
+[
+"ALLE",
+"Allegion",
+"Industrials",
+"SP500",
+"USD"
+],
+[
+"AMAT",
+"Applied Materials",
+"Information Technology",
+"SP500",
+"USD"
+],
+[
+"AMGN",
+"Amgen",
+"Health Care",
+"SP500",
+"USD"
+],
+[
+"AMZN",
+"Amazon",
+"Consumer Discretionary",
+"SP500",
+"USD"
+],
+[
+"APLAPOLLO.NS",
+"APL Apollo Tubes Ltd.",
+"Capital Goods",
+"NIFTY500",
+"INR"
+],
+[
+"APP",
+"AppLovin",
+"Communication Services",
+"SP500",
+"USD"
+],
+[
+"ASAHIINDIA.NS",
+"Asahi India Glass Ltd.",
+"Automobile and Auto Components",
+"NIFTY500",
+"INR"
+],
+[
+"ATO",
+"Atmos Energy",
+"Utilities",
+"SP500",
+"USD"
+],
+[
+"BAJAJ-AUTO.NS",
+"Bajaj Auto Ltd.",
+"Automobile and Auto Components",
+"NIFTY500",
+"INR"
+],
+[
+"BAJAJFINSV.NS",
+"Bajaj Finserv Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"BAJAJHFL.NS",
+"Bajaj Housing Finance Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"BAJAJHLDNG.NS",
+"Bajaj Holdings & Investment Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"BAJFINANCE.NS",
+"Bajaj Finance Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"BATAINDIA.NS",
+"Bata India Ltd.",
+"Consumer Durables",
+"NIFTY500",
+"INR"
+],
+[
+"BELRISE.NS",
+"Belrise Industries Ltd.",
+"Automobile and Auto Components",
+"NIFTY500",
+"INR"
+],
+[
+"BIIB",
+"Biogen",
+"Health Care",
+"SP500",
+"USD"
+],
+[
+"BRK-B",
+"Berkshire Hathaway",
+"Financials",
+"SP500",
+"USD"
+],
+[
+"BSOFT.NS",
+"Birlasoft Ltd.",
+"Information Technology",
+"NIFTY500",
+"INR"
+],
+[
+"CMCSA",
+"Comcast",
+"Communication Services",
+"SP500",
+"USD"
+],
+[
+"COALINDIA.NS",
+"Coal India Ltd.",
+"Oil Gas & Consumable Fuels",
+"NIFTY500",
+"INR"
+],
+[
+"COST",
+"Costco",
+"Consumer Staples",
+"SP500",
+"USD"
+],
+[
+"CROMPTON.NS",
+"Crompton Greaves Consumer Electricals Ltd.",
+"Consumer Durables",
+"NIFTY500",
+"INR"
+],
+[
+"DALBHARAT.NS",
+"Dalmia Bharat Ltd.",
+"Construction Materials",
+"NIFTY500",
+"INR"
+],
+[
+"ELV",
+"Elevance Health",
+"Health Care",
+"SP500",
+"USD"
+],
+[
+"ERIE",
+"Erie Indemnity",
+"Financials",
+"SP500",
+"USD"
+],
+[
+"ETERNAL.NS",
+"Eternal Ltd.",
+"Consumer Services",
+"NIFTY500",
+"INR"
+],
+[
+"EXIDEIND.NS",
+"Exide Industries Ltd.",
+"Automobile and Auto Components",
+"NIFTY500",
+"INR"
+],
+[
+"FCX",
+"Freeport-McMoRan",
+"Materials",
+"SP500",
+"USD"
+],
+[
+"FIS",
+"Fidelity National Information Services",
+"Financials",
+"SP500",
+"USD"
+],
+[
+"FORTIS.NS",
+"Fortis Healthcare Ltd.",
+"Healthcare",
+"NIFTY500",
+"INR"
+],
+[
+"FSLR",
+"First Solar",
+"Information Technology",
+"SP500",
+"USD"
+],
+[
+"GOOG",
+"Alphabet Inc. (Class C)",
+"Communication Services",
+"SP500",
+"USD"
+],
+[
+"GOOGL",
+"Alphabet Inc. (Class A)",
+"Communication Services",
+"SP500",
+"USD"
+],
+[
+"HDFCAMC.NS",
+"HDFC Asset Management Company Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"HDFCBANK.NS",
+"HDFC Bank Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"HDFCLIFE.NS",
+"HDFC Life Insurance Company Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"HSY",
+"Hershey Company (The)",
+"Consumer Staples",
+"SP500",
+"USD"
+],
+[
+"IBM",
+"IBM",
+"Information Technology",
+"SP500",
+"USD"
+],
+[
+"ICICIAMC.NS",
+"ICICI Prudential Asset Management Company Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"ICICIBANK.NS",
+"ICICI Bank Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"ICICIGI.NS",
+"ICICI Lombard General Insurance Company Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"ICICIPRULI.NS",
+"ICICI Prudential Life Insurance Company Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"IDBI.NS",
+"IDBI Bank Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"IDEA.NS",
+"Vodafone Idea Ltd.",
+"Telecommunication",
+"NIFTY500",
+"INR"
+],
+[
+"IDFCFIRSTB.NS",
+"IDFC First Bank Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"IEX",
+"IDEX Corporation",
+"Industrials",
+"SP500",
+"USD"
+],
+[
+"IFCI.NS",
+"IFCI Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"INFY.NS",
+"Infosys Ltd.",
+"Information Technology",
+"NIFTY500",
+"INR"
+],
+[
+"INTC",
+"Intel",
+"Information Technology",
+"SP500",
+"USD"
+],
+[
+"ITW",
+"Illinois Tool Works",
+"Industrials",
+"SP500",
+"USD"
+],
+[
+"JBMA.NS",
+"JBM Auto Ltd.",
+"Automobile and Auto Components",
+"NIFTY500",
+"INR"
+],
+[
+"JPM",
+"JPMorgan Chase",
+"Financials",
+"SP500",
+"USD"
+],
+[
+"KEI.NS",
+"KEI Industries Ltd.",
+"Capital Goods",
+"NIFTY500",
+"INR"
+],
+[
+"KMI",
+"Kinder Morgan",
+"Energy",
+"SP500",
+"USD"
+],
+[
+"KO",
+"Coca-Cola Company (The)",
+"Consumer Staples",
+"SP500",
+"USD"
+],
+[
+"KPIL.NS",
+"Kalpataru Projects International Ltd.",
+"Construction",
+"NIFTY500",
+"INR"
+],
+[
+"KSB.NS",
+"KSB Ltd.",
+"Capital Goods",
+"NIFTY500",
+"INR"
+],
+[
+"LALPATHLAB.NS",
+"Dr. Lal Path Labs Ltd.",
+"Healthcare",
+"NIFTY500",
+"INR"
+],
+[
+"LICI.NS",
+"Life Insurance Corporation of India",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"LIN",
+"Linde plc",
+"Materials",
+"SP500",
+"USD"
+],
+[
+"M&M.NS",
+"Mahindra & Mahindra Ltd.",
+"Automobile and Auto Components",
+"NIFTY500",
+"INR"
+],
+[
+"M&MFIN.NS",
+"Mahindra & Mahindra Financial Services Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"MANKIND.NS",
+"Mankind Pharma Ltd.",
+"Healthcare",
+"NIFTY500",
+"INR"
+],
+[
+"META",
+"Meta Platforms",
+"Communication Services",
+"SP500",
+"USD"
+],
+[
+"MINDACORP.NS",
+"Minda Corporation Ltd.",
+"Automobile and Auto Components",
+"NIFTY500",
+"INR"
+],
+[
+"MPC",
+"Marathon Petroleum",
+"Energy",
+"SP500",
+"USD"
+],
+[
+"MSFT",
+"Microsoft",
+"Information Technology",
+"SP500",
+"USD"
+],
+[
+"MSI",
+"Motorola Solutions",
+"Information Technology",
+"SP500",
+"USD"
+],
+[
+"MU",
+"Micron Technology",
+"Information Technology",
+"SP500",
+"USD"
+],
+[
+"NAUKRI.NS",
+"Info Edge (India) Ltd.",
+"Consumer Services",
+"NIFTY500",
+"INR"
+],
+[
+"NAVA.NS",
+"Nava Ltd.",
+"Power",
+"NIFTY500",
+"INR"
+],
+[
+"NDAQ",
+"Nasdaq, Inc.",
+"Financials",
+"SP500",
+"USD"
+],
+[
+"NKE",
+"Nike, Inc.",
+"Consumer Discretionary",
+"SP500",
+"USD"
+],
+[
+"NSLNISP.NS",
+"NMDC Steel Ltd.",
+"Metals & Mining",
+"NIFTY500",
+"INR"
+],
+[
+"O",
+"Realty Income",
+"Real Estate",
+"SP500",
+"USD"
+],
+[
+"PAGEIND.NS",
+"Page Industries Ltd.",
+"Textiles",
+"NIFTY500",
+"INR"
+],
+[
+"PGEL.NS",
+"PG Electroplast Ltd.",
+"Consumer Durables",
+"NIFTY500",
+"INR"
+],
+[
+"PIRAMALFIN.NS",
+"Piramal Finance Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"PPL",
+"PPL Corporation",
+"Utilities",
+"SP500",
+"USD"
+],
+[
+"RELIANCE.NS",
+"Reliance Industries Ltd.",
+"Oil Gas & Consumable Fuels",
+"NIFTY500",
+"INR"
+],
+[
+"RITES.NS",
+"RITES Ltd.",
+"Construction",
+"NIFTY500",
+"INR"
+],
+[
+"RL",
+"Ralph Lauren Corporation",
+"Consumer Discretionary",
+"SP500",
+"USD"
+],
+[
+"ROST",
+"Ross Stores",
+"Consumer Discretionary",
+"SP500",
+"USD"
+],
+[
+"RPOWER.NS",
+"Reliance Power Ltd.",
+"Power",
+"NIFTY500",
+"INR"
+],
+[
+"RSG",
+"Republic Services",
+"Industrials",
+"SP500",
+"USD"
+],
+[
+"SAIL.NS",
+"Steel Authority of India Ltd.",
+"Metals & Mining",
+"NIFTY500",
+"INR"
+],
+[
+"SAILIFE.NS",
+"Sai Life Sciences Ltd.",
+"Healthcare",
+"NIFTY500",
+"INR"
+],
+[
+"SAMMAANCAP.NS",
+"Sammaan Capital Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"SBICARD.NS",
+"SBI Cards and Payment Services Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"SBILIFE.NS",
+"SBI Life Insurance Company Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"SBIN.NS",
+"State Bank of India",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"SHREECEM.NS",
+"Shree Cement Ltd.",
+"Construction Materials",
+"NIFTY500",
+"INR"
+],
+[
+"SNPS",
+"Synopsys",
+"Information Technology",
+"SP500",
+"USD"
+],
+[
+"TATACAP.NS",
+"Tata Capital Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"TATACONSUM.NS",
+"Tata Consumer Products Ltd.",
+"Fast Moving Consumer Goods",
+"NIFTY500",
+"INR"
+],
+[
+"TATAINVEST.NS",
+"Tata Investment Corporation Ltd.",
+"Financial Services",
+"NIFTY500",
+"INR"
+],
+[
+"TCS.NS",
+"Tata Consultancy Services Ltd.",
+"Information Technology",
+"NIFTY500",
+"INR"
+],
+[
+"TECHM.NS",
+"Tech Mahindra Ltd.",
+"Information Technology",
+"NIFTY500",
+"INR"
+],
+[
+"TEGA.NS",
+"Tega Industries Ltd.",
+"Capital Goods",
+"NIFTY500",
+"INR"
+],
+[
+"TEL",
+"TE Connectivity",
+"Information Technology",
+"SP500",
+"USD"
+],
+[
+"TSLA",
+"Tesla, Inc.",
+"Consumer Discretionary",
+"SP500",
+"USD"
+],
+[
+"UCOBANK.NS",
+"UCO Bank",
+"Financial Services",
+"NIFTY500",
+"INR"
+]
+]

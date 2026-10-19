@@ -84,7 +84,11 @@ layer (2026-10-04): `universe_constituents`, `stock_prices`, `stock_fundamentals
 `job_state`; plus the Telegram bot layer (2026-10-12, ADR 0012): `watchlist` (per `chat_id`) and `bot_users`;
 plus data foundations (2026-10-17/18): `corporate_actions`, `stock_prices.adj_close` (OUR total-return close —
 never Yahoo's Adj Close), `price_anomalies`, `financial_facts` (duration-keyed, first-filing point-in-time; sources `edgar`, `nse_cons`, `nse_sa`, `yfinance`),
-`universe_membership_snapshots`, `factor_returns` (empty), `job_runs` (empty until AR-2 adoption).
+`universe_membership_snapshots`, `factor_returns` (empty), `job_runs` (empty until AR-2 adoption);
+plus `llm_narratives` (ML-7a AI notes; shown only when every number checked out).
+
+LLM use (ADR 0022/0023): only through the shared gateway (`../llm-gateway`, Secret `llm-gateway-key`); never a scoring
+input; never acts on data from an unvalidated AI answer; only public market data goes out.
 Non-SELECT SQL: propose it first and get approval before running.
 
 ## Analysis work
