@@ -294,7 +294,7 @@ Outbound-only, survives CGNAT, no VPS.
 - One process, ~30–50 MB RAM on pi1; restartPolicy Always, liveness = log
   heartbeats in a `bot_state` row (or reuse `pipeline_heartbeat`).
 
-### Tier 3 — Strata-backed chat (needs decisions before build)
+### Tier 3 — Strata-backed chat — ❌ DROPPED 2026-10-18 (ADR 0022: hosted API only, no local GPU; free-text questions = ML-7d `/ask`)
 
 Free-text messages → the workstation's Strata server (Qwen3.8-Flash-Next) →
 AI answers in Telegram, streamed by **message-edit** every few seconds

@@ -138,6 +138,9 @@ Effort: S = under a day · M = a few days · L = a week or more (estimates).
   back to scikit-learn). **Effort:** L. **Expectation:** modest; the value is the documented answer.
 
 ### ML-7 — LLM layer via hosted API (optional enrichment)
+
+> 2026-10-18 (ADR 0022): hosted API only — the RTX 3090 / Strata is out; one OpenAI-compatible endpoint configured by env;
+> no agent framework (plain jobs; a small tool loop for ML-7d).
 **Backing: 🔵 Engineering practice / product judgement** — no research claim that narration improves decisions. The rule **"the LLM never feeds scoring" is 🟢 research-backed** (Glasserman & Lin 2024, verified). Grounding and the number verifier are engineering controls.
 **Decision (2026-10-10): use an LLM API with an API key.** No GPU, no Wake-on-LAN; any Pi can run the job.
 

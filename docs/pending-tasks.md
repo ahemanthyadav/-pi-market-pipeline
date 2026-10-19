@@ -556,7 +556,9 @@ practice · ⚪ unproven here · ⚠️ citation not verified.
 - [ ] 🔶 **ML-6 🟡** cross-sectional GBM ranker — **hard-gated** on EV-0, EV-1 and composite v2 passing EV §5; weakest
   fit for large caps, expect small/null; a documented "no" is an acceptable outcome. **ML-8 🔵** TX2 stays CPU; DB move (AR-10) frees it for ML.
 - [ ] 🤔 **Provide the LLM provider choice and place the key yourself** (`LLM_API_KEY` in the local credentials
-  file; cluster Secret created out-of-band — never paste it into chat or a file in git).
+  file; cluster Secret created out-of-band — never paste it into chat or a file in git). **Decided 2026-10-18 (ADR 0022):
+  hosted API only — no 3090/Strata; no agent framework (plain jobs + a small tool loop for `/ask`).** Still needed from the
+  owner: which provider/model, and the key placed in `.secrets.env` (`LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`).
 
 ## 2. Security & hygiene (this week) — restored 2026-10-12
 
