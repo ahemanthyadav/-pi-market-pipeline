@@ -558,7 +558,8 @@ practice · ⚪ unproven here · ⚠️ citation not verified.
 - [ ] 🤔 **Provide the LLM provider choice and place the key yourself** (`LLM_API_KEY` in the local credentials
   file; cluster Secret created out-of-band — never paste it into chat or a file in git). **Decided 2026-10-18 (ADR 0022):
   hosted API only — no 3090/Strata; no agent framework (plain jobs + a small tool loop for `/ask`).** Still needed from the
-  owner: which provider/model, and the key placed in `.secrets.env` (`LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`).
+  owner: ~~which provider~~ **NVIDIA build.nvidia.com free tier (owner, 2026-10-18; terms + caveats in ADR 0022)** — place the
+  `nvapi-…` key in `.secrets.env` (`LLM_API_KEY`, with `LLM_PROVIDER=nvidia`, `LLM_BASE_URL`); model ids come from the bake-off.
 
 ## 2. Security & hygiene (this week) — restored 2026-10-12
 
