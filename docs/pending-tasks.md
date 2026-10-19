@@ -440,7 +440,7 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   1.106.0 on the TX2 (namespace `llm`, 642 MiB), capabilities `fast-json`/`general`/`reasoning`/`long-context`/`embed` with cross-family failover,
   NVIDIA rpm capped at 30/min, per-project keys (marketdata: free capabilities only, 10 req/min), own `litellm` DB. `ops/smoke.sh` → SMOKE-OK
   (failover, key scoping 403, rate limit 429); OpenAI SDK from the workstation via NodePort :30400 OK. Gotcha recorded: `model_info.tier` is
-  reserved by LiteLLM. The gateway repo has **no GitHub remote yet** (owner: create the repo, then `git remote add origin … && git push`).
+  reserved by LiteLLM. Repo on GitHub since 2026-10-19: `git@github.com:ahemanthyadav/llm-gateway.git` (`main`).
 - [x] ✅ 2026-10-18 **ML-7a daily market note — built (live 2026-10-19, see below).** `manifests/llm/narrative.py` (CronJob `llm-narrative`,
   07:40 IST, runs on the pipeline-health image + ConfigMap — no build): facts JSON (public data only) → gateway `fast-json` → every number must
   appear in the facts (one retry naming bad numbers) → `llm_narratives` (status ok/invalid/unavailable). Digest `telegram-digest:v9+` shows it only
