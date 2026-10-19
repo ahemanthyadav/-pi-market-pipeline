@@ -39,14 +39,13 @@ import html
 import os
 import sys
 import time
-from datetime import timedelta, timezone
 
 import psycopg
 import requests
 
 import stocks
 import users
-from digest import IST, TELEGRAM_LIMIT, build_message
+from digest import TELEGRAM_LIMIT, build_message
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 OWNER = os.environ["TELEGRAM_CHAT_ID"]
@@ -197,13 +196,13 @@ def _arg(text: str) -> str:
 
 
 def cmd_stock(text: str) -> str:
-    row, problem = stocks.pick_one(query, _arg(text))
-    return problem or stocks.stock_card(query, row)
+    row, problem, note = stocks.pick_one_ex(query, _arg(text))
+    return problem or ((note + "\n") if note else "") + stocks.stock_card(query, row)
 
 
 def cmd_news(text: str) -> str:
-    row, problem = stocks.pick_one(query, _arg(text))
-    return problem or stocks.news_text(query, row)
+    row, problem, note = stocks.pick_one_ex(query, _arg(text))
+    return problem or ((note + "\n") if note else "") + stocks.news_text(query, row)
 
 
 def cmd_top(text: str) -> str:
@@ -247,9 +246,12 @@ def cmd_watch(text: str, chat: str = None) -> str:
             return problem
         if action == "list":
             return stocks.watch_text(query, chat)
-        row, problem = stocks.pick_one(query, arg)
+        row, problem, note = stocks.pick_one_ex(query, arg)
         if problem:
             return problem
+        if note:   # a corrected/AI guess never writes to a watchlist — confirm with the exact symbol
+            return (f"{note}\nNot changed. If that is right, send it again with the exact symbol: "
+                    f"<code>/watch {html.escape(action)} {html.escape(row[0])}</code>")
         symbol = row[0]
         if action == "rm":
             gone = execute("DELETE FROM watchlist WHERE chat_id = %s AND symbol = %s",

@@ -181,8 +181,9 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (7 IN_* policy rates) + bond_yields (5 G-Sec tenors + 3 T-bills) + pipeline_heartbeat self-row 'rbi' |
 | headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (gazetteer extraction over raw_headlines, ADR 0010) |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only (manual INSERT follows) |
-| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v8 (pinned pi1) | Telegram digest (read-only; no DB write) |
-| telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v8, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
+| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v10 (pinned pi1) | Telegram digest (read-only; no DB write) |
+| telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v10, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
+| llm-narrative | 40 7 * * * (Asia/Kolkata) | local/pipeline-health:v5 | llm_narratives — ML-7a AI market note via the shared llm-gateway (ADR 0022); digest shows it only if every number checks out |
 
 ### Always-on / one-shot resources
 
@@ -405,7 +406,7 @@ kubectl get nodes
 
 # 2. CronJob schedules present?
 kubectl get cronjobs -n market-data
-# Should show 24 CronJobs: nse-fetcher, fiidii-fetcher, yfinance-fetcher, … nse-fundamentals,
+# Should show 25 CronJobs: nse-fetcher, fiidii-fetcher, yfinance-fetcher, … nse-fundamentals,
 # fx-fetcher, yields-fetcher, rates-fetcher, news-fetcher, sentiment-scorer,
 # ta-compute, pg-backup, pipeline-health, intraday-fetcher, fdi-watch,
 # universe-refresh, stock-prices, stock-fundamentals, stock-metrics,
@@ -826,6 +827,20 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
 - Data lives on TX2's sda4 USB SSD (independent from eMMC).
 - Even `kubectl delete statefulset timescaledb -n market-data` followed by
   `kubectl delete pvc pgdata-timescaledb-0 -n market-data` **cannot delete the data files** on sda4 — they remain on disk until you manually wipe them.
+
+## 9b. LLM layer (2026-10-18 — ADR 0022/0023; gateway repo `../llm-gateway`)
+```bash
+# Is today's AI note there, and did it pass the number check?
+kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" psql -U postgres -d postgres \
+  -c "SELECT ts, status, model, attempts, left(detail,80) FROM llm_narratives ORDER BY ts DESC LIMIT 5;"
+# Run it now (idempotent per IST day):  kubectl -n market-data create job llm-narrative-now --from=cronjob/llm-narrative
+# Ship a change to narrative.py / bakeoff.py:  ops-tools/apply-llm.sh
+# Gateway health / real calls:  ../llm-gateway/ops/smoke.sh [--live]
+```
+`unavailable` = gateway/provider problem (the digest just omits the note); `invalid` = the model's numbers did not match
+twice (never shown). Turn features off without a rebuild: `DIGEST_NARRATIVE=0` (CronJob telegram-digest),
+`BOT_AI_RESOLVE=0` (Deployment telegram-bot). Project key: Secret `llm-gateway-key` (rotate with
+`../llm-gateway/ops/new-project.sh marketdata market-data fast-json,general,embed 10 0 --rotate`).
 
 ## 10. Security & secrets
 

@@ -477,3 +477,19 @@ data:
       ON raw_headlines (md5(headline), source, ((ts AT TIME ZONE 'UTC')::date));
     CREATE UNIQUE INDEX IF NOT EXISTS ux_news_sentiment_key
       ON news_sentiment (md5(headline), source, ts);
+  12-llm.sql: |
+    -- ML-7a (2026-10-18, ADR 0022): LLM narratives produced through the shared llm-gateway.
+    -- One row per (IST day, kind); DELETE+INSERT by manifests/llm/narrative.py. The digest shows
+    -- `summary` only when status = 'ok' (every number checked against `facts`). Never a scoring input.
+    CREATE TABLE IF NOT EXISTS llm_narratives (
+      ts         DATE NOT NULL,
+      kind       TEXT NOT NULL,                 -- 'daily_market' (ML-7b/7c add kinds)
+      status     TEXT NOT NULL,                 -- ok | invalid | unavailable
+      summary    TEXT,
+      model      TEXT,                          -- which model actually answered (gateway response)
+      attempts   INT NOT NULL DEFAULT 0,
+      detail     TEXT,
+      facts      JSONB,                         -- the exact input the model saw
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (ts, kind)
+    );

@@ -1,7 +1,10 @@
-# Resolved 2026-10-09 during the native aarch64 builds on the TX2 (v1 digest,
-# v1→v2 two-way listener; python:3.12-slim base, unpinned
-# `pip install "psycopg[binary]" requests`). Re-dumped at v2: identical.
-# Re-pin here if a future rebuild misbehaves.
+# Frozen 2026-10-18 from the running local/telegram-digest:v8 (pip freeze, full transitive set);
+# consumed by the Dockerfile since v9 (AR-5 step 2). Re-freeze after any rebuild.
+certifi==2026.7.22
+charset-normalizer==3.5.2
+idna==3.20
 psycopg==3.3.6
 psycopg-binary==3.3.6
 requests==2.34.2
+typing_extensions==4.16.0
+urllib3==2.8.0

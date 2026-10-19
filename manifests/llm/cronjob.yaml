@@ -1,0 +1,64 @@
+# ML-7a daily market narrative (ADR 0022) — runs 20 min before the 08:00 IST digest.
+# Code: manifests/llm/narrative.py, shipped as ConfigMap llm-narrative-script by
+# ops-tools/apply-llm.sh (no image build: runs on the existing pipeline-health image).
+# Gateway key: Secret llm-gateway-key (created by ../llm-gateway/ops/new-project.sh).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: llm-narrative
+  namespace: market-data
+spec:
+  schedule: "40 7 * * *"
+  timeZone: Asia/Kolkata
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 1200
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 604800
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: narrative
+              image: local/pipeline-health:v5
+              imagePullPolicy: Never
+              command: ["python", "/scripts/narrative.py"]
+              env:
+                - name: PGHOST
+                  value: timescaledb.market-data.svc.cluster.local
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+                - name: PGDATABASE
+                  value: postgres
+                - name: LLM_BASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: llm-gateway-key
+                      key: base-url
+                - name: LLM_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: llm-gateway-key
+                      key: api-key
+                - name: LLM_CAPABILITY
+                  value: fast-json
+              resources:
+                requests: {memory: 64Mi, cpu: 50m}
+                limits: {memory: 256Mi, cpu: 250m}
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: script
+              configMap:
+                name: llm-narrative-script
