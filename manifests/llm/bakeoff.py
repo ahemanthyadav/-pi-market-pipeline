@@ -41,7 +41,7 @@ def run_one(facts, model, asker=n.ask):
         t = time.time()
         out = asker(msgs, model)
         first.setdefault("latency", time.time() - t)
-        first.setdefault("ok", not n.bad_numbers(out[0], facts))
+        first.setdefault("ok", not n.bad_numbers(out[0], facts) and not n.wrong_directions(out[0], facts))
         return out
     status, _s, _m, _a, detail = n.narrate(facts, timed)
     return {"first_ok": bool(first.get("ok")), "final_ok": status == "ok",

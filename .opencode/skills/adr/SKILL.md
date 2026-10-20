@@ -44,5 +44,6 @@ per-symbol backfills. Later: `0009`–`0013` (Telegram, gazetteer NER, node stat
 timestamps); 2026-10-18: `0014` own adj_close · `0015` point-in-time fundamentals · `0016` chunk sizing ·
 `0017` DB roles · `0018` signals gated by EV-0 · `0019` no UPS · `0020` repo layout stays ·
 `0021` India fundamentals from NSE filings · `0022` LLM via hosted API, no local GPU ·
-`0023` forgiving symbol lookup.
+`0023` forgiving symbol lookup ·
+`0024` headline embeddings via the gateway.
 New long-shelf-life decisions get the next number.

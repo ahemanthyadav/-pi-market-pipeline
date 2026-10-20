@@ -143,3 +143,41 @@ spec:
           resources:
             requests: {memory: 128Mi, cpu: 50m}
             limits: {memory: 512Mi, cpu: 500m}
+
+---
+# Resume of backfill-nse-fundamentals (hit MAX_MINUTES budget before cursor cleared, 2026-10-19).
+# Continues from the cursor stored in job_state (idempotent per symbol).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backfill-nse-fundamentals-resume
+  namespace: market-data
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 39600   # 11 h — must cover MAX_MINUTES (the 2.5 h deadline of the first run
+  ttlSecondsAfterFinished: 604800  # killed a healthy run with the cursor kept; resume is safe anyway)
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: nse-fundamentals
+          image: local/screener:v15
+          imagePullPolicy: Never
+          command: ["python", "nse_fundamentals.py"]
+          env:
+            - name: MAX_MINUTES
+              value: "630"
+            - name: PGHOST
+              value: timescaledb.market-data.svc.cluster.local
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: timescaledb-auth
+                  key: password
+            - name: PGDATABASE
+              value: postgres
+          resources:
+            requests: {memory: 128Mi, cpu: 50m}
+            limits: {memory: 512Mi, cpu: 500m}

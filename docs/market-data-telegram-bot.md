@@ -300,6 +300,15 @@ Outbound-only, survives CGNAT, no VPS.
 with the universe (live: facebook → META, big blue → IBM, hul → HINDUNILVR.NS, coke → KO); `/watch` never writes on a corrected symbol — it asks for
 the exact one. Switch: `BOT_AI_RESOLVE` on the Deployment.
 
+### /ask — questions answered from stored facts only (2026-10-19, ML-7d family, image v14–v22)
+`/ask TCS outlook`, `/ask news infosys`, `/ask usdinr`, `/ask fii flows`. Flow: find the subject (stock via the forgiving
+resolver — word-by-word, so "TCS outlook" is about TCS; index/FX/flows/news by keyword), gather a small facts JSON (public
+data only; news via semantic search over `headline_embeddings`, ADR 0024), gateway `general` answers, and the answer ships
+only if every number and direction checks out (`factcheck.py`, shared with ML-7a; percent forms of given values allowed,
+rounding/truncation to ≤0.01 tolerated, metric-key numbers like "12-month" allowed). Two failed checks or gateway down →
+the bot shows the facts table instead; a question mapping to no facts is refused, never guessed. 12–60 s per answer
+(NVIDIA queueing varies); never a scoring input.
+
 ### AI market note in the digest (2026-10-18, ML-7a, image v9+; first real note 2026-10-19)
 `llm-narrative` (07:40 IST) writes `llm_narratives`; the 08:00 digest adds a "Summary (AI-written; every number checked)"
 section only when today's note passed the check. Switch: `DIGEST_NARRATIVE` on CronJob `telegram-digest`.

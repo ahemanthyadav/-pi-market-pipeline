@@ -89,14 +89,16 @@ Effort: S = under a day · M = a few days · L = a week or more (estimates).
 
 ### ML-2 — News embeddings and story clustering
 **Backing: 🔵 Engineering practice** for de-duplication and clustering (standard sentence-embedding methods ⚠️). Any benefit to returns is **⚪ Unproven**; the news sample is ~10 days.
-- **Goal:** de-duplicate headlines and group them into stories/event timelines (roadmap Tier 2 #10).
-- **Build:** a small sentence-embedding model (e.g. MiniLM class, CPU) embeds each new headline; store vectors in
-  `headline_embeddings` as `float4[]` (the TimescaleDB image in use does not bundle pgvector — verify before assuming);
-  similarity in Python at this scale. Near-duplicate and story clusters per day; event timeline later.
-- **Where:** TX2 CPU, after the 00:15 sentiment job (its 4 Gi window) — model baked into a TX2-only image; Pis never
-  load it. **Effort:** M. **Depends on:** AR-5 image profiles (a TX2-only image is fine meanwhile).
-- **Start now (cheap):** store embeddings even before using them; value grows with history.
+- **Status 2026-10-19: storage + grouping LIVE (ADR 0024).** No local model after all: the shared llm-gateway's `embed`
+  capability (NVIDIA 2048-dim) embeds each new headline; pgvector **is** available in the image (0.8.1, verified — the
+  "verify before assuming" above); vectors live in `headline_embeddings` with the answering model stored per row
+  (`disable_fallbacks` — vectors from two models are never comparable). `news-embed` CronJob 01:00 UTC; all 1,651
+  existing headlines backfilled day one. Story grouping: cosine ≥ 0.86 within 72 h joins a story (threshold to tune —
+  first live day grouped nothing at 0.86).
+- **Goal:** de-duplicate headlines and group them into stories/event timelines (roadmap Tier 2 #10); semantic news
+  lookup for `/ask` (ML-7d family); ML-7c story summaries after that.
 - **Acceptance:** 100 sampled clusters hand-checked, ≥ 90 % coherent; dedup never merges distinct stories in the sample.
+- **Remaining:** threshold tuning, cluster hand-check against the acceptance rule, ML-7c summaries.
 
 ### ML-3 — Volatility forecasts
 **Backing: 🟢 Research-backed** — Hansen & Lunde (2005), verified; applies to *forecast accuracy*, not to returns.

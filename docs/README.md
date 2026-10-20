@@ -7,9 +7,9 @@
 > with Grafana dashboards, Tailscale-only access, and no container registry.
 > **Status 2026-10-19 — healthy; data-foundations pass done; AI layer live** (shared `llm-gateway`, NVIDIA free tier: daily AI
 > market note in the digest, every number checked; typo/nickname-tolerant `/stock` — ADR 0022/0023).
-> 4 nodes Ready (pi2 cordoned control plane), 25 CronJobs (nse-fundamentals suspended until its first backfill completes), the others
-> active, DB `Guaranteed` QoS with readiness probe. Images: screener toolkit `local/screener:v15`, telegram `local/telegram-digest:v13`, health monitor
-> `local/pipeline-health:v5`. Least-privilege DB roles for Grafana and the Telegram bot. Daily second copies of the DB dump
+> 4 nodes Ready (pi2 cordoned control plane), 26 CronJobs (nse-fundamentals suspended until its first backfill completes), the others
+> active, DB `Guaranteed` QoS with readiness probe. Images: screener toolkit `local/screener:v15`, telegram `local/telegram-digest:v22`, health monitor
+> `local/pipeline-health:v6`. Least-privilege DB roles for Grafana and the Telegram bot. Daily second copies of the DB dump
 > and the k3s control-plane datastore on the workstation. A mains power loss on 10-18 rebooted everything — recovered on
 > its own; no UPS by decision. Work order and reasoning: `engineering-plan-2026-10-18.md`; open items: `pending-tasks.md`.
 

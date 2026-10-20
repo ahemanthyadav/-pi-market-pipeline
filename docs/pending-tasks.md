@@ -4,7 +4,9 @@
 > the linked docs — this file is the index + status. Maintained per AGENTS.md docs
 > discipline: mark items ✅ with a date (and where the completion is recorded) when
 > done; prune ✅ lines into the relevant doc's history at housekeeping time.
-> **Last reviewed: 2026-10-18 13:10 UTC** (engineering pass done — see §1 first two items). Earlier: **2026-10-18 07:50 UTC** (`screener:v11` live — corporate_actions recording, canary OK; first k3s control-plane backup;
+> **Last reviewed: 2026-10-20 04:20 UTC** (read-only status pass: **power acceptance PASSED on all four nodes — the pi1 item is closed**;
+> NSE fundamentals backfill resume job Running, 30/138 symbols at 04:15 UTC; **pi2 rebooted again ~01:56 UTC 10-20**,
+> cause unknown, 0 undervolt). Earlier: **2026-10-18 13:10 UTC** (engineering pass done — see §1 first two items). Earlier: **2026-10-18 07:50 UTC** (`screener:v11` live — corporate_actions recording, canary OK; first k3s control-plane backup;
 > site-wide power event 10-18 ~06:00 UTC explained — all 5 machines rebooted, 0 undervolt; pi1 formal 24 h window due 10-19 06:20 UTC;
 > DQ-3 proven via DB; 10-17 overclaims on DQ-2/AR-2/AR-5 corrected back to open). Previously **2026-10-14 06:49 UTC** (power item **closed as hardware-complete** — owner confirmed pi1 on its own
 > supply; live read 06:49 UTC: all four nodes PASS, `dmesg` undervoltage counts 0 on every Pi, pi2 heat WARN only;
@@ -47,6 +49,10 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 - [x] ✅ 2026-10-18 **Cluster dedup — RETIRED, not redesigned** (owner delegated the call). Measured: 1–2 GB of user data per Pi on 229 GB SSDs,
   TX2 SSD 12 % used — nothing to deduplicate; the design targeted non-existent drives. Note: `piCluster/cluster/RETIRED.md`.
 - [ ] 🤔 **pi2 heat (owner, hardware):** soft-temp flag (`0x80000`/`0x80008`) recurs, max 69.3 °C in the 10-18 review — heatsink/airflow.
+  2026-10-20 window: pi1 (66.6 °C) and pi3 (73.1 °C) also hit the soft-temp WARN — consider airflow for all three workers.
+  **2026-10-20: owner removed pi2's case** (airflow fix). Baseline right after, 04:34 UTC: **51.5 °C**, `0x0`, load 0.6 (near-idle — the
+  test is whether the soft-temp flag stays away under load; read the next power-review WARN column before calling it fixed).
+  Also: **pi2 rebooted again ~2026-10-20 01:56 UTC**, cause unknown (0 undervolt events; no persistent journal — journald proposal pending).
 - [ ] 🔶 **pi2 still holds old images** (screener v1–v8, nse v1–v3, pipeline-health v1–v4, yfinance v1–v3, fiidii v1) — it is cordoned and its disk is
   4 % used, so no pressure; if ever pruned, remove named tags one by one (ops manual §8), in a quiet window, never `--prune`. Note: pi2's copies were the
   only remaining source for fdi-watch/fiidii/fx/rbi during the incident. ✅ 2026-10-18: **every one of the 16 live images now has a tarball on the
@@ -55,7 +61,7 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 - [x] ✅ 2026-10-14 **Fix the Pi power supplies — hardware fix COMPLETE** (owner: all Pis moved to separate power
   ~2026-10-12 02:30 UTC; before that pi1/pi2/pi3 shared one multiport block; pi1 given its own supply 2026-10-14).
   **The physical item is closed** — no swap test is needed any more. The 24 h acceptance on pi1 is still open below.
-  - [ ] 🔶 **pi1 acceptance pending** — the 24 h rule run 2026-10-13 03:51 UTC was a FAIL on the old supply (4 live
+  - [x] ✅ 2026-10-20 **pi1 acceptance PASSED — power item CLOSED** (final verdict sub-bullet below). History: the 24 h rule run 2026-10-13 03:51 UTC was a FAIL on the old supply (4 live
     `0x50005` samples, 36 `dmesg` events — see below). New trial on the new supply:
     `bash ops-tools/power-review.sh --since 2026-10-14T05:39:00Z`, **verdict due ≥ 2026-10-15 05:40 UTC**, needs real
     load (let the CronJobs run). **Read 2026-10-14 06:49 UTC (70 min, all four nodes PASS):** pi1 `0x0` throughout,
@@ -82,6 +88,12 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
     and 25/25 `0x0` during the 2026-10-18 v11 import** — the supply fix looks good. Formal clean window: `power-review.sh --since
     2026-10-18T06:20:00Z` — PASS at 07:14 UTC (all four); **verdict due ≥ 2026-10-19 06:20 UTC.** Note: the tool reads only the current
     `stats.csv`, so a weekly logrotate (pi3 rotated at 07:00 UTC 10-18) shortens its view — check sample counts when reading a verdict.
+  - **FINAL VERDICT 2026-10-20 04:12 UTC (`power-review.sh --since 2026-10-18T06:20:00Z`, ~46 h, 532–542 samples/node): pi0 · pi1 · pi2 · pi3 all
+    PASS — acceptance passed, the power item is CLOSED.** 0 live hits on every node, last hex `0x0` everywhere; `dmesg` undervoltage since boot
+    0 / 0 / 0 / 0 (pi1 under the full nightly CronJob load for the whole window). Heat WARNs only (pi1 66.6 °C, pi2 62.8 °C, pi3 73.1 °C max) —
+    heat stays open as its own item above. Verdict recorded in ops manual §8. **New finding: pi2 rebooted again ~2026-10-20 01:56 UTC** (`uptime -s`
+    2026-10-19 18:56 local), cause unknown and unrecoverable (no persistent journal — the journald proposal is still open, owner's call); healthy
+    since (load 0.9, `0x0`, Ready).
   - **Evidence (2026-10-10/11):** pi2 live undervolt+throttle (`0xd0005`, 62 °C) and wedged ~16 h. A 5 V 2 A adapter still gave
     9 `Undervoltage detected` events in 5.5 min at near-idle load. pi1/pi2/pi3 dropped off together while pi0 stayed up; pi2 and
     pi3 logged events within ~0.5 s of each other; pi3 went from clean to ~80–110 events/h from ~11:40 UTC 10-11 (1,364 by
@@ -449,17 +461,27 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   AI only for nicknames, validated against the universe → `/watch` never writes on a guess. Live in the bot pod: "infosis" → INFY.NS,
   "microsft" → MSFT, "hdfc bnk" → HDFCBANK.NS; "facebook" falls back gracefully until the key exists. 10 resolver tests on a real-universe sample.
   Also in v9/v10: telegram image installs from a full frozen `requirements.lock` (AR-5), unused imports removed from `bot.py` (F401).
+  Image now v22 (v13→v22: resolver hardening, factcheck shared module + tolerance ladder, /ask).
 - [x] ✅ 2026-10-19 **NVIDIA key placed; live.** `set-provider-key.sh` → `smoke.sh --live` SMOKE-OK (all 5 capabilities). Found live:
   many catalogue models are "not found for account" → chains rebuilt from a probe (gateway README); the reasoning primary
   returned EMPTY text at 400 tokens → `enable_thinking: false` on `fast-json` in the gateway + client headroom (narrative 1500).
   **First real ML-7a note: status ok, attempt 1** (Nifty/Sensex/VIX/flows/rupee — numbers and flow directions verified by hand).
   Symbol lookup fixed after live tests (ADR 0023 amendment, image v13): facebook → META, big blue → IBM, hul → HINDUNILVR.NS.
-- [ ] 🔶 **Bake-off** (orders the chains — gateway ADR 0002): `SECRET_NAME=llm-bakeoff-key DURATION=3h ../llm-gateway/ops/new-project.sh
-  marketdata-bakeoff market-data fast-json,fast-json.2,fast-json.3,general,general.2 20 0 && ops-tools/apply-llm.sh &&
-  kubectl apply -f manifests/llm/bakeoff-job.yaml` → read `RANKING`; reorder `../llm-gateway/config/litellm.yaml` → `ops/deploy.sh`.
+- [x] ✅ 2026-10-19 **Bake-off ran** (10 trading days × 5 candidate groups, scored with the full number+direction check):
+  fast-json.2 (gemma-4) 100 % first-try / 11.7 s · general.2 100 % / 11.7 s · general (gpt-oss-20b) 100 % / 9.9 s ·
+  fast-json (nemotron-lightning, thinking off) 90 % / 1.8 s · fast-json.3 90 % / 15.0 s. **Decision: keep the current order** —
+  after the built-in retry the top four all reach 100 % final pass, and the current primary is ~6× faster with no JSON-fence quirk;
+  reorder only if narrative quality regresses (gateway ADR 0002 has the numbers). Temp bake-off key cleaned up.
+- [ ] 🔶 **Story-grouping threshold** (ADR 0024): 0.86 grouped nothing on day one (65 headlines → 65 stories). Tune down
+  (~0.75?), hand-check 100 clusters against the ML-2 acceptance rule, then ML-7c story summaries.
 - [ ] 🔶 Watch the first ~2 weeks of `llm_narratives` and digests; then ML-7b (shortlist notes).
-- [ ] Known limit (ML-7a): the number check ignores sign — "outflow of 3,661" passes whether the fact is +3,661 or −3,661.
-  Add a direction check (rose/fell, inflow/outflow vs. the sign) if a wrong direction is ever seen.
+- [x] ✅ 2026-10-19 **Direction check live** (factcheck.py, shared by narrative.py and the bot): a direction word ("rose", "inflow",
+  "sold"…) that contradicts the sign of the number it introduces fails the check and triggers the same retry; "fell to 18.4" style
+  levels are skipped; the live 2026-10-19 note passes. 15 narrative tests.
+- [x] ✅ 2026-10-19 **Gateway monitored + backed up**: pipeline-health v6 adds `llm_narrative` (last status-ok note, 56 h page) and
+  `llm_gateway` (readiness probe) to `pipeline_heartbeat`; pg-backup dumps the `litellm` DB too (verified LITELLM-BACKUP-OK).
+- [x] ✅ 2026-10-19 **ML-2 embeddings live** (ADR 0024): `news-embed` CronJob 01:00 UTC, pgvector `headline_embeddings`, all 1,651
+  headlines embedded day one; serves `/ask` news lookup + story grouping. Semantic search + story digests = next (see ML-2 above).
 
 ### History backfills (found 2026-10-18 — coverage table: architecture §4.3a)
 
@@ -468,20 +490,32 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   filing-date point-in-time; 11 tests on real captured filings (`tests/fixtures/nse/`). Canary in-cluster (TCS / HDFCBANK / DIXON): 259
   filings, 1,580 facts, 0 warn; TCS revenue FY2005 ₹9,749 cr → FY2026 ₹2,67,021 cr, FY2014 ₹81,809 cr (two parser bugs found by the
   canary and fixed before the full run: net sales vs gross income; restated filings dropped). Screener reads `nse_cons` + EDGAR, TTM from
-  summed quarters where no YTD exists. **Started 2026-10-18 ~16:30 UTC: Job `backfill-nse-fundamentals` (~19 h, resumable — re-apply if
-  it stops). When it logs `cursor cleared`:** (1) un-suspend CronJob `nse-fundamentals` (remove `suspend: true`, apply); (2) screener
-  DRY_RUN diff for NIFTY top-50 (facts vs yfinance) before trusting India ranks — the live screener already reads it; (3) re-run EV-0 with
-  India fundamentals; (4) update the coverage row in architecture §4.3a with final counts.
+  summed quarters where no YTD exists. **Run history: 2026-10-18 16:30 UTC → 2026-10-19 (23 h): 357/495 symbols, 24,662 filings, 153,978 rows, partial —
+  hit MAX_MINUTES with the cursor kept. Resumed 2026-10-19 ~19:00 UTC (`backfill-nse-fundamentals-resume`, manifest in
+  `manifests/stock-screener/backfills.yaml`): 138 symbols left. When a run logs `cursor cleared`:** (1) un-suspend CronJob
+  `nse-fundamentals` (remove `suspend: true`, apply); (2) screener DRY_RUN diff for NIFTY top-50 (facts vs yfinance) before
+  trusting India ranks — the live screener already reads it; (3) re-run EV-0 with India fundamentals; (4) update the coverage
+  row in architecture §4.3a with final counts. Known gaps: ~13 symbols have 404-dead archive URLs on NSE's side (logged WARN,
+  skipped) — e.g. HEGAM, COFORGE, ARE&M, KPIL, CEMPRO; re-run for them after NSE fixes, or accept the gap.
+- [x] ✅ 2026-10-19 **`/ask` live** (`telegram-digest:v22`): free-text questions answered from DB facts only — subject found
+  word-by-word via the forgiving resolver, facts JSON (public data only, news via `headline_embeddings` semantic search) →
+  gateway `general` → every number AND direction checked by the shared `factcheck.py` (percent forms of given values and
+  rounding/truncation to ≤0.01 tolerated; metric-key numbers like "12-month" allowed). Two failed checks or gateway down →
+  the facts table is shown instead; unmapped questions are refused, never guessed. Live: TCS outlook, news infosys, usdinr,
+  fii flows all pass the check. Tuning that made it reliable is factcheck's tolerance ladder (4 image iterations).
 
-- [ ] 🔶 **H-1 FX history** — `fx_rates` starts 2025-12-15; Yahoo has decades for all 10 pairs. One-shot Job on the existing
-  `fx-fetcher:v1` image (pattern: `manifests/ingestion/fx/backfill-job.yaml`, 2026-10-12), daily closes at 00:00 UTC.
-- [ ] 🔶 **H-2 US bond yields** — `bond_yields` starts 2026-09-29; ^TNX/^FVX/^TYX/^IRX on Yahoo (1960s+) and FRED DGS2/10/30.
+- [x] ✅ 2026-10-19 **H-1 FX history done** — `manifests/ingestion/history/` (ConfigMap + Job per mode, `history_backfill.py`): 58,222
+  rows, USDJPY from 1996, INR pairs from 2003/06 (Yahoo depth per pair); only pre-live dates written, ts = 00:00 UTC.
+- [x] ✅ 2026-10-19 **H-2 US bond yields done** — ^TNX/^FVX/^TYX/^IRX from 1990 (36,884 rows) + FRED DGS2/1976, DGS10/1962, DGS30/1977.
   India G-Sec history has no stable source (RBI widget is current-only) — stays forward-only.
-- [ ] 🔶 **H-3 Fed funds (DFF)** — `interest_rates` starts 2026-10-01; FRED has DFF from 1954 (`rates-fetcher` already uses fredapi).
-  RBI policy-rate history: forward-only unless a source is found.
-- [ ] 🔶 **H-4 technical indicators** — recompute RSI/MACD/MA/Bollinger over the full `index_prices` history (1985+); no new feed.
-- [ ] 🔶 **H-5 stock metrics history** — `stock_metrics_daily` only from 2026-10-01; recomputable from prices (now with `adj_close`).
-  Historical *scores* wait for EV-1 + point-in-time fundamentals.
+- [x] ✅ 2026-10-19 **H-3 Fed funds done** — DFF from 1954-07-01 (26,390 rows). RBI policy-rate history: forward-only unless a source is found.
+- [x] ✅ 2026-10-19 **H-4 technical indicators done** — full history for all 38 index tickers (2.6 M rows), bar-for-bar identical to
+  the live `ta-compute.compute()` (unit-tested); seamless with live rows (verified on the ^NSEI overlap).
+- [x] ✅ 2026-10-19 **H-5 stock metrics done** — 5 years of weekly snapshots, latest-bar-of-week, live `stock_metrics.compute()`
+  itself (2.39 M rows). Historical *scores* wait for EV-1 + point-in-time fundamentals.
+- [x] ✅ 2026-10-19 **Chunk fix** (found by the backfills): fx/yields/rates/ta/metrics tables were still on 7-day chunks — decades of
+  history created ~3,500 tiny chunks and DFF's COPY failed on "out of shared memory". Same fix as stock_prices (10-18): 1-year chunks for
+  new data (06e), fx_rates/bond_yields 1990–2025 merged per year with the existing merge script; rows + sums verified identical before/after.
 - [ ] 🤔 **H-6 FII/DII history** — check NSE archive depth before deciding.
 - Not backfillable (record so nobody tries): news/sentiment (RSS is current-only), intraday beyond ~2 years, membership snapshots
   (needs EV-1), India fundamentals beyond ~4 years (G-6).

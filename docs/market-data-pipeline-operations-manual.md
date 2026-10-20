@@ -169,7 +169,7 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | sentiment-scorer | 15 0 * * * | local/sentiment-fetcher:v1 (TX2 only) | news_sentiment |
 | ta-compute | 30 0 * * * | local/ta-compute:v1 | technical_indicators |
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | /var/lib/market-data/backups on pi3 |
-| pipeline-health | 45 1 * * * | local/pipeline-health:v5 | pipeline_heartbeat (feed freshness, 14 feeds incl. rbi; weekend-safe 96 h on stock prices/scores since v5) |
+| pipeline-health | 45 1 * * * | local/pipeline-health:v6 | pipeline_heartbeat (feed freshness, 14 feeds incl. rbi; weekend-safe 96 h on stock prices/scores since v5) |
 | intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
 | universe-refresh | 0 9 * * 0 | local/screener:v15 | universe_constituents + ticker_names (998 symbols) |
 | stock-prices | 30 23 * * * | local/screener:v15 | stock_prices (998 symbols, 5d window) |
@@ -181,9 +181,10 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (7 IN_* policy rates) + bond_yields (5 G-Sec tenors + 3 T-bills) + pipeline_heartbeat self-row 'rbi' |
 | headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (gazetteer extraction over raw_headlines, ADR 0010) |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only (manual INSERT follows) |
-| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v13 (pinned pi1) | Telegram digest (read-only; no DB write) |
-| telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v13, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
-| llm-narrative | 40 7 * * * (Asia/Kolkata) | local/pipeline-health:v5 | llm_narratives — ML-7a AI market note via the shared llm-gateway (ADR 0022); digest shows it only if every number checks out |
+| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v22 (pinned pi1) | Telegram digest (read-only; no DB write) |
+| telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v22, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
+| llm-narrative | 40 7 * * * (Asia/Kolkata) | local/pipeline-health:v6 | llm_narratives — ML-7a AI market note via the shared llm-gateway (ADR 0022); digest shows it only if every number checks out |
+| news-embed | 0 1 * * * | local/pipeline-health:v6 | headline_embeddings — ML-2: embeds new headlines via the gateway `embed` capability, groups near-duplicates into stories (ADR 0024) |
 
 ### Always-on / one-shot resources
 
@@ -406,7 +407,7 @@ kubectl get nodes
 
 # 2. CronJob schedules present?
 kubectl get cronjobs -n market-data
-# Should show 25 CronJobs: nse-fetcher, fiidii-fetcher, yfinance-fetcher, … nse-fundamentals,
+# Should show 26 CronJobs: nse-fetcher, fiidii-fetcher, yfinance-fetcher, … nse-fundamentals,
 # fx-fetcher, yields-fetcher, rates-fetcher, news-fetcher, sentiment-scorer,
 # ta-compute, pg-backup, pipeline-health, intraday-fetcher, fdi-watch,
 # universe-refresh, stock-prices, stock-fundamentals, stock-metrics,
@@ -484,6 +485,12 @@ First read (06:11 UTC, idle): `0x0`, 0 undervoltage events — not evidence yet.
 2026-10-14T05:39:00Z → 06:49:21Z (14 samples/node, no gaps) — **all four PASS**: pi0 `0x0` (36.9 °C, load 0.96) ·
 pi1 `0x0` throughout (50.5 °C, load 1.17) · pi2 `0x80000` heat-only, WARN at 60.1 °C (load 2.32) · pi3 `0x0` (50.5 °C, load 1.93).
 `dmesg` undervoltage since boot: **pi0 0 · pi1 0 · pi2 0 · pi3 0**. Positive but short — the 24 h verdict is still the acceptance.
+
+**FINAL ACCEPTANCE 2026-10-20 04:12 UTC — PASS on all four nodes; the power item is CLOSED.** `power-review.sh --since 2026-10-18T06:20:00Z`
+(~46 h window, 532–542 samples/node): 0 live hits on every node, last hex `0x0` everywhere; `dmesg` undervoltage since boot
+pi0 0 · pi1 0 · pi2 0 · pi3 0 — pi1 under the full nightly CronJob load throughout. Heat WARNs only (pi1 66.6 °C, pi2 62.8 °C,
+pi3 73.1 °C max): heat, not power, is the remaining hardware item (pending-tasks §1). The "no bulk transfers to pi1" caution is lifted.
+Note: pi2 rebooted again ~2026-10-20 01:56 UTC, cause unknown (0 undervolt events, no persistent journal); healthy since.
 
 ### pi2 wedged ~16 h + live undervoltage found (2026-10-09→10) — full post-mortem
 **Root cause (first catch of the node-stats logger, ADR 0011):** pi2 ran
@@ -839,7 +846,13 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" psql -U postgr
 ```
 `unavailable` = gateway/provider problem (the digest just omits the note); `invalid` = the model's numbers did not match
 twice (never shown). Turn features off without a rebuild: `DIGEST_NARRATIVE=0` (CronJob telegram-digest),
-`BOT_AI_RESOLVE=0` (Deployment telegram-bot). Project key: Secret `llm-gateway-key` (rotate with
+`BOT_AI_RESOLVE=0` (Deployment telegram-bot).
+
+Headline embeddings (ML-2, ADR 0024): `kubectl -n market-data create job news-embed-now --from=cronjob/news-embed`;
+check `SELECT count(*), count(DISTINCT model) FROM headline_embeddings;`. Embeddings use `disable_fallbacks`
+(vectors are model-specific); if the gateway's embed primary ever changes, new rows store the new model name and
+old/new rows never compare — re-embed a day with the job if search looks thin. Ship script changes:
+`ops-tools/apply-llm.sh` (ships narrative.py, bakeoff.py, factcheck.py, news_embed.py in one ConfigMap). Project key: Secret `llm-gateway-key` (rotate with
 `../llm-gateway/ops/new-project.sh marketdata market-data fast-json,general,embed 10 0 --rotate`).
 
 ## 10. Security & secrets

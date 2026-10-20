@@ -62,6 +62,10 @@ jobs:
           python3 tests/test_narrative.py
           python3 tests/test_digest_narrative.py
           python3 tests/test_resolver.py
+          python3 tests/test_health.py
+          python3 tests/test_news_embed.py
+          python3 tests/test_history_backfill.py
+          python3 tests/test_ask.py
       - name: Shell tests
         run: |
           bash tests/test-precommit-hook.sh

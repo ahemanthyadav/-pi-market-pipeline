@@ -16,7 +16,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: bakeoff
-          image: local/pipeline-health:v5
+          image: local/pipeline-health:v6
           imagePullPolicy: Never
           command: ["python", "/scripts/bakeoff.py"]
           env:

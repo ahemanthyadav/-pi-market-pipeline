@@ -8,6 +8,7 @@
 # previous dump, readable TOC, index_prices data present), atomic mv + .sha256
 # sidecar, prune only readable dumps beyond the newest 7 (empty files always
 # removed). Tested by tests/test-pg-backup.sh. Applied + canaried 2026-10-11.
+# Also dumps the llm-gateway's `litellm` DB (best effort, 2026-10-19) as litellm-<date>.dump.
 # Restore drill (from any pod with the image + Secret):
 #   pg_restore -h timescaledb -U postgres -d postgres -c /backups/<file>.dump
 apiVersion: batch/v1
@@ -84,6 +85,20 @@ spec:
                   done
                   ls -lh /backups/
                   echo "BACKUP-OK $FILE size=$SIZE entries=$ENTRIES sha256=$HASH"
+
+                  # 2026-10-19: the shared llm-gateway's own DB (keys, budgets, usage — ../llm-gateway).
+                  # Best effort: never fails the market-data backup above. Keeps 7.
+                  LFILE=litellm-$(date -u +%F).dump
+                  if pg_dump -h timescaledb -U postgres -d litellm -Fc -f ".$LFILE.tmp" 2>/dev/null \
+                     && pg_restore -l ".$LFILE.tmp" > /dev/null 2>&1; then
+                    mv ".$LFILE.tmp" "$LFILE"
+                    sha256sum "$LFILE" > "$LFILE.sha256"
+                    ls -t litellm-*.dump | tail -n +8 | while read -r f; do rm -f "$f" "$f.sha256"; done
+                    echo "LITELLM-BACKUP-OK $LFILE size=$(wc -c < "$LFILE")"
+                  else
+                    rm -f ".$LFILE.tmp"
+                    echo "WARN: litellm DB not backed up (gateway DB missing or unreachable)"
+                  fi
               volumeMounts:
                 - name: backups
                   mountPath: /backups

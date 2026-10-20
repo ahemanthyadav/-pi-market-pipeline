@@ -119,6 +119,7 @@ def _help_text() -> str:
         "/scores — screener top-5 today\n"
         "/stock TCS — price, trend, score, valuation, news for one stock\n"
         "/news TCS — tagged headlines + sentiment\n"
+        "/ask TCS outlook — question answered from stored facts only (numbers checked); AI off → facts table\n"
         "/top growth sp500 — best by value|quality|growth|momentum|risk\n"
         "/multibagger sp500 — small, fast-growing, high-return candidates\n"
         "/movers — who entered/left the screener top-20\n"
@@ -203,6 +204,14 @@ def cmd_stock(text: str) -> str:
 def cmd_news(text: str) -> str:
     row, problem, note = stocks.pick_one_ex(query, _arg(text))
     return problem or ((note + "\n") if note else "") + stocks.news_text(query, row)
+
+
+def cmd_ask(text: str) -> str:
+    import ask
+    arg = _arg(text)
+    if not arg:
+        return "Ask a question about a stock, index, FX, flows or recent news, e.g. <code>/ask TCS outlook</code>"
+    return ask.answer(query, arg)
 
 
 def cmd_top(text: str) -> str:
@@ -323,6 +332,7 @@ COMMANDS = {
     "digest": cmd_digest,
     "stock": cmd_stock,
     "news": cmd_news,
+    "ask": cmd_ask,
     "top": cmd_top,
     "movers": cmd_movers,
     "multibagger": cmd_multibagger,
@@ -426,6 +436,7 @@ MENU = [
     ("movers", "Entered / left the screener top-20"),
     ("track", "How the screener's picks have done"),
     ("news", "Tagged headlines + sentiment — /news TCS"),
+    ("ask", "Question answered from stored facts only — /ask TCS outlook"),
     ("world", "All world indices: day, 1m, YTD — /world asia"),
     ("index", "One index in depth — /index nikkei"),
     ("fx", "USD/INR and other currency pairs"),

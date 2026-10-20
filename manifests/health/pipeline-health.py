@@ -57,7 +57,35 @@ FEEDS = [
     # own; checking it here makes a dead rbi job visible. Policy rows carry the fetch date.
     ("rbi", "SELECT max(ts) FROM interest_rates WHERE left(rate_name, 3) = 'IN_'",
      "SELECT count(*) FROM interest_rates WHERE left(rate_name, 3) = 'IN_'", 96),
+    # v6 (2026-10-19): last AI note that PASSED the number check (ML-7a, ADR 0022). This job runs at
+    # 07:15 IST, the note at 07:40 IST -> a good day is ~24h old; 56h = two missed days before it pages.
+    ("llm_narrative", "SELECT max(ts) FROM llm_narratives WHERE status = 'ok'",
+     "SELECT count(*) FROM llm_narratives", 56),
 ]
+
+# v6: the shared llm-gateway (../llm-gateway) — a live readiness probe (also proves its DB connection).
+# last_data_ts = last time it answered; fresh = answered now.
+GATEWAY_URL = os.environ.get("LLM_GATEWAY_HEALTH",
+                             "http://llm-gateway.llm.svc.cluster.local:4000/health/readiness")
+GATEWAY_UPSERT = """
+INSERT INTO pipeline_heartbeat
+  (feed, last_check, last_data_ts, fresh, rows_total, max_age_hours)
+VALUES ('llm_gateway', now(), CASE WHEN %(ok)s THEN now() END, %(ok)s, 0, 24)
+ON CONFLICT (feed) DO UPDATE SET
+  last_check = now(),
+  last_data_ts = COALESCE(EXCLUDED.last_data_ts, pipeline_heartbeat.last_data_ts),
+  fresh = EXCLUDED.fresh
+"""
+
+
+def gateway_ok(url=None, opener=None):
+    """True if the gateway answers its readiness probe with 200 within 10 s. Never raises."""
+    import urllib.request
+    try:
+        with (opener or urllib.request.urlopen)(url or GATEWAY_URL, timeout=10) as r:
+            return r.status == 200
+    except Exception:  # noqa: BLE001 — any failure just means "not healthy"
+        return False
 
 UPSERT = """
 INSERT INTO pipeline_heartbeat
@@ -80,6 +108,7 @@ def main() -> int:
         dbname=os.environ.get("PGDATABASE", "postgres"),
     )
     fresh_n = 0
+    total_extra = 0
     try:
         with conn:
             with conn.cursor() as cur:
@@ -107,9 +136,15 @@ def main() -> int:
                         fresh_n += 1
                     print(f"{feed:16s} fresh={str(fresh):5s} "
                           f"last={last_ts} rows={rows} max_age_h={max_age}")
+                if os.environ.get("LLM_GATEWAY_CHECK", "1") == "1":
+                    ok = gateway_ok()
+                    cur.execute(GATEWAY_UPSERT, {"ok": ok})
+                    fresh_n += ok
+                    total_extra = 1
+                    print(f"{'llm_gateway':16s} fresh={str(ok):5s} (readiness probe)")
     finally:
         conn.close()
-    print(f"HEALTH-OK fresh={fresh_n}/{len(FEEDS)}")
+    print(f"HEALTH-OK fresh={fresh_n}/{len(FEEDS) + total_extra}")
     return 0
 
 

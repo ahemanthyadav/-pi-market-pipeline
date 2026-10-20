@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.modules.setdefault("psycopg", types.ModuleType("psycopg"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "manifests" / "llm"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "manifests" / "telegram"))   # factcheck.py
 import narrative as n  # noqa: E402
 
 FACTS = {"indices": [{"name": "Nifty 50", "close": 22363.35, "change_pct": -1.21},
@@ -32,6 +33,32 @@ class NumberCheck(unittest.TestCase):
 
     def test_unicode_minus_and_plus(self):
         self.assertEqual(n.bad_numbers("Sentiment −0.08, rupee +0.15%.", FACTS), [])
+
+
+class Directions(unittest.TestCase):
+    def test_faithful_text_has_no_direction_errors(self):
+        t = ("Nifty 50 fell 1.21% to 22,363.35 as FIIs sold Rs 5,012 crore while DIIs bought 3,890; "
+             "VIX rose 6.5% to 18.4. India VIX fell to 18.4 earlier.")      # "fell to 18.4" is a level: skipped
+        self.assertEqual(n.wrong_directions(t, FACTS), [])
+
+    def test_swapped_directions_are_caught(self):
+        self.assertEqual(n.wrong_directions("Nifty 50 rose 1.21%.", FACTS), ["1.21"])
+        self.assertEqual(n.wrong_directions("FIIs recorded net inflows of 5,012 crore, DIIs outflows of 3,890.", FACTS),
+                         ["5,012", "3,890"])
+
+    def test_live_note_2026_10_19_passes(self):
+        facts = {"flows_rs_cr": {"DII": -3661, "FII": 1166}, "fx": {"change_pct": 0.05},
+                 "indices": [{"name": "Nifty 50", "change_pct": 0.65}, {"name": "Sensex", "change_pct": 0.56},
+                             {"name": "India VIX", "close": 14.06, "change_pct": 0.25}]}
+        t = ("The Nifty 50 and Sensex rose 0.65% and 0.56% respectively, while the India VIX increased 0.25% to 14.06. "
+             "DIIs recorded net outflows of 3,661 crores, contrasting with FII inflows of 1,166 crores, and the rupee "
+             "depreciated 0.05% against the dollar.")
+        self.assertEqual(n.wrong_directions(t, facts), [])
+
+    def test_wrong_direction_triggers_the_retry(self):
+        answers = iter([("Nifty 50 rose 1.21%.", "m"), ("Nifty 50 fell 1.21%.", "m")])
+        status, summary, *_ = n.narrate(FACTS, lambda msgs: next(answers))
+        self.assertEqual((status, summary), ("ok", "Nifty 50 fell 1.21%."))
 
 
 class Fences(unittest.TestCase):
