@@ -65,6 +65,23 @@ class EdgarFactRows(unittest.TestCase):
         rows = sorted((r[1], r[4]) for r in sf.edgar_fact_rows(facts) if r[0] == "total_revenue")
         self.assertEqual(rows, [("2023-06-30", 211.0), ("2024-06-30", 245.0)])
 
+    def test_ev9_alternate_tags_fill_gaps_without_stealing_keys(self):
+        # EV-9: a company that moved from NetIncomeLoss to ProfitLoss keeps its old series
+        # under the first tag and gains the new periods from the alternate.
+        facts = {
+            "NetIncomeLoss": {"units": {"USD": [e("2024-12-31", 100.0, "2025-02-10", "2024-01-01")]}},
+            "ProfitLoss": {"units": {"USD": [
+                e("2024-12-31", 1.0, "2025-02-10", "2024-01-01"),      # same key: first tag owns it
+                e("2025-12-31", 130.0, "2026-02-09", "2025-01-01"),    # new period: filled
+            ]}},
+            "RegulatedAndUnregulatedOperatingRevenue": {"units": {"USD": [
+                e("2025-12-31", 900.0, "2026-02-09", "2025-01-01")]}},  # utility revenue tag
+        }
+        ni = sorted((r[1], r[4]) for r in sf.edgar_fact_rows(facts) if r[0] == "net_income")
+        self.assertEqual(ni, [("2024-12-31", 100.0), ("2025-12-31", 130.0)])
+        rev = [(r[1], r[4]) for r in sf.edgar_fact_rows(facts) if r[0] == "total_revenue"]
+        self.assertEqual(rev, [("2025-12-31", 900.0)])
+
     def test_deterministic(self):
         facts = {"NetIncomeLoss": {"units": {"USD": [e("2024-06-30", 88.0, "2024-07-30", "2023-07-01")]}}}
         self.assertEqual(sf.edgar_fact_rows(facts), sf.edgar_fact_rows(facts))

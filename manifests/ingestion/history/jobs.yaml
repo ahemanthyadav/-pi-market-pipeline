@@ -152,7 +152,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: backfill
-          image: local/screener:v15
+          image: local/screener:v16
           imagePullPolicy: Never
           command: ["python", "/scripts/history_backfill.py"]
           env:

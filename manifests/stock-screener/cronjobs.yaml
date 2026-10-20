@@ -1,5 +1,5 @@
 # Stock-screener CronJobs (Phases B-G). All use the single toolkit image
-# local/screener:v15 (imagePullPolicy: Never — import on pi1/pi2/pi3 first).
+# local/screener:v16 (imagePullPolicy: Never — import on pi1/pi2/pi3 first).
 # Schedules slot into the existing UTC chain without disturbing it:
 #   Sun 09:00 universe · daily 23:30 prices · Sat 06:00 fundamentals ·
 #   daily 02:00 metrics → 02:15 screener → 02:30 report
@@ -26,7 +26,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: universe
-              image: local/screener:v15
+              image: local/screener:v16
               imagePullPolicy: Never
               command: ["python", "universe_refresh.py"]
               env:
@@ -66,7 +66,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: prices
-              image: local/screener:v15
+              image: local/screener:v16
               imagePullPolicy: Never
               command: ["python", "stock_prices.py"]
               env:
@@ -106,7 +106,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: fundamentals
-              image: local/screener:v15
+              image: local/screener:v16
               imagePullPolicy: Never
               command: ["python", "stock_fundamentals.py"]
               env:
@@ -148,7 +148,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: metrics
-              image: local/screener:v15
+              image: local/screener:v16
               imagePullPolicy: Never
               command: ["python", "stock_metrics.py"]
               env:
@@ -188,7 +188,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: screener
-              image: local/screener:v15
+              image: local/screener:v16
               imagePullPolicy: Never
               command: ["python", "stock_screener.py"]
               env:
@@ -233,7 +233,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: report
-              image: local/screener:v15
+              image: local/screener:v16
               imagePullPolicy: Never
               command: ["python", "stock_report.py"]
               env:
@@ -283,7 +283,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: nse-fundamentals
-              image: local/screener:v15
+              image: local/screener:v16
               imagePullPolicy: Never
               command: ["python", "nse_fundamentals.py"]
               env:

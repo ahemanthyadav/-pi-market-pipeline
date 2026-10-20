@@ -30,14 +30,24 @@ EDGAR = "https://data.sec.gov/api/xbrl/companyfacts/CIK{}.json"
 
 # EDGAR metric -> accepted us-gaap tags (first match wins)
 EDGAR_MAP = {
-    "total_revenue": ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"],
-    "net_income": ["NetIncomeLoss"],
+    # Append-only; the first tag with data wins per (metric, end, duration) key, so later
+    # tags only fill gaps. EV-9 extension 2026-10-20: tags chosen from a probe of the 100
+    # then-stale series (which fresh tags those companies actually file in 10-K/10-Q).
+    "total_revenue": ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax",
+                      "RevenueFromContractWithCustomerIncludingAssessedTax",
+                      "RegulatedAndUnregulatedOperatingRevenue",   # utilities: DTE, DUK, NEE, XEL
+                      "RevenuesNetOfInterestExpense"],             # banks/brokers: MS, WFC
+    "net_income": ["NetIncomeLoss", "ProfitLoss",
+                   "NetIncomeLossAvailableToCommonStockholdersBasic"],
     "operating_income": ["OperatingIncomeLoss"],
     "eps": ["EarningsPerShareDiluted", "EarningsPerShareBasic"],
     "shareholder_equity": ["StockholdersEquity"],
     "total_debt": ["LongTermDebtNoncurrent", "LongTermDebt"],
     "ocf": ["NetCashProvidedByUsedInOperatingActivities"],
-    "capex": ["PaymentsToAcquirePropertyPlantAndEquipment"],
+    "capex": ["PaymentsToAcquirePropertyPlantAndEquipment",
+              "PaymentsToAcquireProductiveAssets",
+              "PaymentsToAcquireOtherProductiveAssets",
+              "PaymentsForCapitalImprovements"],                   # REITs: HST, INVH, WY
 }
 # yfinance statement row -> metric. yfinance 1.7 renamed rows to CamelCase
 # (e.g. "NetIncome"); candidate lists cover both 0.2.x spaced names and 1.7+.
