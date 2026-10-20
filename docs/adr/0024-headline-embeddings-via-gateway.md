@@ -24,6 +24,13 @@ a hosted embedding API directly, or the gateway.
    cosine similarity ≥ 0.86, else starts its own story (`story_id` = own `headline_id`). Threshold is a
    starting point — tuning is a pending task; first live day grouped nothing (65 headlines → 65 stories), so
    it will likely come down.
+   **Amended 2026-10-20: `STORY_SIM=0.82`** (env on the `news-embed` CronJob; script default stays 0.86).
+   Basis: nearest-neighbour distance distribution over the first 1,651 vectors (0.86 ≈ distance ≤ 0.14
+   caught only the 53-vector near-duplicate spike → 49 merges) plus a manual review of nearest pairs:
+   the 0.10–0.16 distance band is consistently the same story reworded (IDBI Q2, Bandhan +8 %, Tech
+   Mahindra Q2, SEBI extension), while 0.20+ was not reviewed. Known accepted cost: daily recurring
+   templates ("outlook today", gold-rate columns) dated ≤ 3 days apart can merge. Existing story_ids are
+   not regrouped (only NULL rows are assigned). Re-tune only with a fresh pair review at the new threshold.
 5. **Never a scoring input** (ADR 0018 stands): embeddings serve lookup/grouping only. Only public headline
    text leaves the cluster; no chat ids, no watchlists.
 6. Runs 01:00 UTC (`news-embed` CronJob), after news 23:45 / sentiment 00:15 / NER 00:45; idempotent

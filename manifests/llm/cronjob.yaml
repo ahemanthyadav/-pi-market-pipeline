@@ -111,6 +111,11 @@ spec:
                     secretKeyRef:
                       name: llm-gateway-key
                       key: api-key
+                # ADR 0024 amendment 2026-10-20: 0.86 only caught near-duplicates (49/1651 grouped).
+                # Measured NN-distance distribution + pair review: 0.10-0.16 band is same-story rewrites,
+                # 0.20+ unvalidated. 0.82 = cosine distance 0.18. Re-tune only with a fresh pair review.
+                - name: STORY_SIM
+                  value: "0.82"
               resources:
                 requests: {memory: 64Mi, cpu: 50m}
                 limits: {memory: 256Mi, cpu: 250m}
