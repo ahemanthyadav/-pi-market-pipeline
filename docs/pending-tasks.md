@@ -39,8 +39,8 @@ Detail stays with each item; this is the decision view — keep it in sync when 
 |---|---|---|
 | Worker heat (pi1/pi2/pi3) | buy + fit heatsinks/fan (pi2 case already off) | read the next power-review WARN column |
 | Persistent journald on pi1/pi2 | a yes/no (cost: constant disk writes on fragile nodes) | 15-min quiet-window apply, reversible |
-| Router UDP 51820 forward | delete one rule in the router admin (5 min) | tracker tick |
-| CGNAT claim | router WAN page vs egress IP, or phone off Wi-Fi (10 min) | unblocks pi0 tailnet DNS (~30 min agent work) |
+| Router UDP 51820 forward | delete one rule in the router admin (5 min) — **SECURITY: likely reachable, see §2** | tracker tick |
+| CGNAT claim | ✅ agent-verified 2026-10-20 (NOT CGNAT); one router-WAN-page glance closes it | unblocks pi0 tailnet DNS (~30 min agent work) |
 | Phone check of bot commands | 10 min on the phone (incl. `/ask TCS 52 week high`) | fix any layout breakage found |
 | Who messaged the bot | confirm the chat id is `sailu` (2 min) | tracker tick |
 | Off-site backup | pick destination + encryption, create the account/credentials | build the restic/rclone job + docs (~1 session) |
@@ -713,13 +713,17 @@ practice · ⚪ unproven here · ⚠️ citation not verified.
   `validation/grafana/` gitignored; agents denied read/edit of `.secrets.env` in `opencode.jsonc`. Credential rotation is
   explicitly NOT a priority (owner decision 2026-10-10). Detail: ops manual §10.
 - [ ] 🔶 **Verify the CGNAT claim** — 2026-10-10 measurement: the public IP this LAN egresses with EQUALS the router's WAN IP
-  (docs concluded CGNAT from the opposite). One check from one workstation; confirm on the router's WAN page or from the phone off
-  Wi-Fi. If not CGNAT: "no inbound ports by construction" is false and the stale UDP 51820 forward may be reachable — remove it
-  first. Detail: ops manual §12.9. **Gates the pi0 DNS item below.**
+  (docs concluded CGNAT from the opposite). ✅ **Re-measured 2026-10-20** (two IP-echo services, compared programmatically, never
+  printed): egress STILL equals the stored router WAN_IP, 10 days apart; the old EXTERNAL_SEEN_IP matches neither — the original
+  CGNAT conclusion rested on a stale value. **Working conclusion: NOT CGNAT.** Remaining: one glance at the router's WAN page (or a
+  phone-off-Wi-Fi check) to close it. Consequence already actionable: the UDP 51820 item below is now a **security action**, not
+  housekeeping. Detail: ops manual §12.9. **Gates the pi0 DNS item below.**
 - [ ] 🔶 **pi0 DNS over the tailnet (ad-block on the move)** — pi0 is on the tailnet and the admin page works, but a DNS query from
   pi1 over the tailnet timed out: Pi-hole `dns.listeningMode` is `LOCAL`. Needs a decision on the listening mode (after the CGNAT
   check) and the tailnet nameserver set in the admin console. Detail: ops manual §12.6.
-- [ ] 🔶 Remove the dead router UDP 51820 port-forward (WireGuard leftover) — owner, router-side. Detail: roadmap §11.
+- [ ] 🔶 **Remove the dead router UDP 51820 port-forward (WireGuard leftover) — owner, router-side, now a SECURITY action:** the
+  2026-10-20 CGNAT re-measurement says this LAN has a normal public address, so the forward is potentially internet-reachable.
+  Five minutes in the router admin. Detail: roadmap §11; ops manual §12.9.
 - [ ] 🔶 **Find out who messaged the bot** — the old `telegram-bot` pod's log showed a chat NOT on the allow-list sending `/status`
   (ignored; the allow-list works). Worth knowing who it was. 2026-10-12 08:46 UTC: the current pod's log shows a group chat (`/top`, `/status`,
   `/gold`) and a private chat (`/start`) being ignored just before the two `/adduser` calls — probably the person now added as `sailu`; owner to confirm, then close.

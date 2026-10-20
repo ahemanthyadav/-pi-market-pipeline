@@ -949,9 +949,14 @@ old/new rows never compare — re-embed a day with the job if search looks thin.
    ("CGNAT, no inbound ports by construction") rested on router-WAN ≠ externally-seen IP.
    Re-measured 2026-10-10: the address this LAN currently egresses with EQUALS the
    router WAN IP — the signature of a normal public address. Single check, one workstation
-   (no VPN/exit node visible). Confirm on the router WAN page or from the phone off Wi-Fi
-   before relying on the claim; if it fails, treat UDP 51820 (stale forward) as reachable
-   and remove it. Real addresses: local `.hosts.env` only.
+   (no VPN/exit node visible). **Re-measured 2026-10-20 (two IP-echo services, values
+   compared programmatically, never printed): egress still equals the stored router
+   WAN_IP, 10 days apart; the old EXTERNAL_SEEN_IP (the value the original CGNAT
+   conclusion rested on) matches neither.** Working conclusion: NOT CGNAT — "no inbound
+   ports by construction" is false, so treat the stale UDP 51820 router forward as
+   potentially internet-reachable and REMOVE IT (owner, router admin — now a security
+   action, not housekeeping). Final confirmation remains a glance at the router WAN
+   page or a phone-off-Wi-Fi check. Real addresses: local `.hosts.env` only.
 
 ---
 
