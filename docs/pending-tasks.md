@@ -38,7 +38,7 @@ Detail stays with each item; this is the decision view — keep it in sync when 
 | Item | What it takes from the owner | Agent part after |
 |---|---|---|
 | Worker heat (pi1/pi2/pi3) | buy + fit heatsinks/fan (pi2 case already off) | read the next power-review WARN column |
-| Persistent journald on pi1/pi2 | a yes/no (cost: constant disk writes on fragile nodes) | 15-min quiet-window apply, reversible |
+| ~~Persistent journald on pi1/pi2~~ | ✅ owner said yes; applied 2026-10-20 (ops manual §8: the RPi `40-rpi-volatile-storage.conf` gotcha) | done |
 | Router UDP 51820 forward | delete one rule in the router admin (5 min) — **SECURITY: likely reachable, see §2** | tracker tick |
 | CGNAT claim | ✅ agent-verified 2026-10-20 (NOT CGNAT); one router-WAN-page glance closes it | unblocks pi0 tailnet DNS (~30 min agent work) |
 | Phone check of bot commands | 10 min on the phone (incl. `/ask TCS 52 week high`) | fix any layout breakage found |
@@ -107,7 +107,9 @@ telegram `stocks.py` `series()` onto the facts path. Each is ~20 min *inside* an
   2026-10-20 window: pi1 (66.6 °C) and pi3 (73.1 °C) also hit the soft-temp WARN — consider airflow for all three workers.
   **2026-10-20: owner removed pi2's case** (airflow fix). Baseline right after, 04:34 UTC: **51.5 °C**, `0x0`, load 0.6 (near-idle — the
   test is whether the soft-temp flag stays away under load; read the next power-review WARN column before calling it fixed).
-  Also: **pi2 rebooted again ~2026-10-20 01:56 UTC**, cause unknown (0 undervolt events; no persistent journal — journald proposal pending).
+  Also: **pi2 rebooted again ~2026-10-20 01:56 UTC**, cause unknown (0 undervolt events; that boot left no journal).
+  ✅ 2026-10-20 **persistent journald now ON for pi1 + pi2** (owner-approved; 200M cap; RPi OS gotcha + rollback in ops manual §8) —
+  the NEXT unexplained hang/reboot is diagnosable: read `journalctl -b -1 -e` on the affected node.
 - [x] ✅ 2026-10-19 **pi2 old images: MOOT** — verified with `ctr images ls`: pi2 holds no `local/*` images at all (and
   212 G free). The old tracker note (screener v1–v8, health v1–v4, …) is stale; pi2 runs only control-plane system pods.
   (Its disk is

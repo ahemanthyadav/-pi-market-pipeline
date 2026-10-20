@@ -492,6 +492,15 @@ pi0 0 · pi1 0 · pi2 0 · pi3 0 — pi1 under the full nightly CronJob load thr
 pi3 73.1 °C max): heat, not power, is the remaining hardware item (pending-tasks §1). The "no bulk transfers to pi1" caution is lifted.
 Note: pi2 rebooted again ~2026-10-20 01:56 UTC, cause unknown (0 undervolt events, no persistent journal); healthy since.
 
+**Persistent journald enabled on pi1 + pi2, 2026-10-20 (owner-approved)** so the next hang leaves a trace: drop-in
+`/etc/systemd/journald.conf.d/90-persistent.conf` (`Storage=persistent`, `SystemMaxUse=200M`, `SystemKeepFree=1G`) +
+`install -d -g systemd-journal -m 2755 /var/log/journal/<machine-id>`, restart `systemd-journald` then `systemd-journal-flush`.
+**Gotcha: Raspberry Pi OS ships `/usr/lib/systemd/journald.conf.d/40-rpi-volatile-storage.conf` (`Storage=volatile`), and drop-ins
+apply in filename order across /etc and /usr/lib — a `10-*.conf` loses to it; the override must sort after `40-`.** An empty
+`/var/log/journal` directory alone does nothing on RPi OS for the same reason. Verified: pi1 18 MB / pi2 8.1 MB flushed to disk,
+`journalctl --list-boots` reads them, load unchanged. After the next mystery reboot: `journalctl -b -1 -e` on the node.
+Rollback: delete the drop-in, restart journald.
+
 ### pi2 wedged ~16 h + live undervoltage found (2026-10-09→10) — full post-mortem
 **Root cause (first catch of the node-stats logger, ADR 0011):** pi2 ran
 with LIVE undervoltage + throttle flags (`vcgencmd get_throttled` = 0xd0005
