@@ -39,7 +39,7 @@ Detail stays with each item; this is the decision view — keep it in sync when 
 |---|---|---|
 | Worker heat (pi1/pi2/pi3) | buy + fit heatsinks/fan (pi2 case already off) | read the next power-review WARN column |
 | ~~Persistent journald on pi1/pi2~~ | ✅ owner said yes; applied 2026-10-20 (ops manual §8: the RPi `40-rpi-volatile-storage.conf` gotcha) | done |
-| Router UDP 51820 forward | delete one rule in the router admin (5 min) — **SECURITY: likely reachable, see §2** | tracker tick |
+| ~~Router UDP 51820 forward~~ | ✅ owner checked 2026-10-20: forwarding page EMPTY — no rule exists, closed | done |
 | CGNAT claim | ✅ agent-verified 2026-10-20 (NOT CGNAT); one router-WAN-page glance closes it | unblocks pi0 tailnet DNS (~30 min agent work) |
 | Phone check of bot commands | 10 min on the phone (incl. `/ask TCS 52 week high`) | fix any layout breakage found |
 | Who messaged the bot | confirm the chat id is `sailu` (2 min) | tracker tick |
@@ -723,9 +723,10 @@ practice · ⚪ unproven here · ⚠️ citation not verified.
 - [ ] 🔶 **pi0 DNS over the tailnet (ad-block on the move)** — pi0 is on the tailnet and the admin page works, but a DNS query from
   pi1 over the tailnet timed out: Pi-hole `dns.listeningMode` is `LOCAL`. Needs a decision on the listening mode (after the CGNAT
   check) and the tailnet nameserver set in the admin console. Detail: ops manual §12.6.
-- [ ] 🔶 **Remove the dead router UDP 51820 port-forward (WireGuard leftover) — owner, router-side, now a SECURITY action:** the
-  2026-10-20 CGNAT re-measurement says this LAN has a normal public address, so the forward is potentially internet-reachable.
-  Five minutes in the router admin. Detail: roadmap §11; ops manual §12.9.
+- [x] ✅ 2026-10-20 **Router UDP 51820 port-forward — CLOSED: verified ABSENT.** Owner checked the router admin panel: the
+  port-forwarding page is empty — no rules exist, so the "stale WireGuard forward" in the old docs no longer describes this router.
+  Nothing was reachable; nothing to remove. (If the panel has a UPnP active-mappings table, one glance there is a free extra check.)
+  Detail: roadmap §11; ops manual §12.9.
 - [ ] 🔶 **Find out who messaged the bot** — the old `telegram-bot` pod's log showed a chat NOT on the allow-list sending `/status`
   (ignored; the allow-list works). Worth knowing who it was. 2026-10-12 08:46 UTC: the current pod's log shows a group chat (`/top`, `/status`,
   `/gold`) and a private chat (`/start`) being ignored just before the two `/adduser` calls — probably the person now added as `sailu`; owner to confirm, then close.

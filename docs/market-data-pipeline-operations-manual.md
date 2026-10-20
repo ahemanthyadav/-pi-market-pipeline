@@ -962,10 +962,13 @@ old/new rows never compare — re-embed a day with the job if search looks thin.
    compared programmatically, never printed): egress still equals the stored router
    WAN_IP, 10 days apart; the old EXTERNAL_SEEN_IP (the value the original CGNAT
    conclusion rested on) matches neither.** Working conclusion: NOT CGNAT — "no inbound
-   ports by construction" is false, so treat the stale UDP 51820 router forward as
-   potentially internet-reachable and REMOVE IT (owner, router admin — now a security
-   action, not housekeeping). Final confirmation remains a glance at the router WAN
-   page or a phone-off-Wi-Fi check. Real addresses: local `.hosts.env` only.
+   ports by construction" is false. **UDP 51820 forward: RESOLVED 2026-10-20 — the owner
+   checked the router admin panel and the port-forwarding page is EMPTY (no rules at all),
+   so the stale WireGuard forward the old docs described no longer exists; nothing was
+   reachable.** With no forwards and no other inbound path, the practical posture ("tailnet
+   only, nothing listens from the internet") holds even without CGNAT. Final confirmation of
+   the address question itself remains a glance at the router WAN page or a phone-off-Wi-Fi
+   check. Real addresses: local `.hosts.env` only.
 
 ---
 
