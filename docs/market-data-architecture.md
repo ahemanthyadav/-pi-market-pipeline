@@ -626,13 +626,13 @@ layer (JOINs on ticker/symbol), not in DDL.*
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | pi3 SSD dumps |
 | pipeline-health | 45 1 * * * | local/pipeline-health:v6 | pipeline_heartbeat (14 feeds incl. rbi; stock prices/scores 96 h since v5) |
 | intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
-| universe-refresh | 0 9 * * 0 | local/screener:v15 | universe_constituents + ticker_names (998) |
-| stock-prices | 30 23 * * * | local/screener:v15 | stock_prices (5d window) |
-| stock-fundamentals | 0 6 * * 6 | local/screener:v15 | stock_fundamentals (EDGAR US + yfinance NSE) |
-| stock-metrics | 0 2 * * * | local/screener:v15 | stock_metrics_daily |
-| stock-screener | 15 2 * * * | local/screener:v15 | stock_scores + screening_runs |
-| stock-report | 30 2 * * * | local/screener:v15 | stock_reports (top-25/universe + digest) |
-| nse-fundamentals | 0 10 * * 0 | local/screener:v15 | financial_facts `nse_cons`/`nse_sa` — India results filings (G-6, ADR 0021); **suspended until the first backfill completes** |
+| universe-refresh | 0 9 * * 0 | local/screener:v16 | universe_constituents + ticker_names (998) |
+| stock-prices | 30 23 * * * | local/screener:v16 | stock_prices (5d window) |
+| stock-fundamentals | 0 6 * * 6 | local/screener:v16 | stock_fundamentals (EDGAR US + yfinance NSE) |
+| stock-metrics | 0 2 * * * | local/screener:v16 | stock_metrics_daily |
+| stock-screener | 15 2 * * * | local/screener:v16 | stock_scores + screening_runs |
+| stock-report | 30 2 * * * | local/screener:v16 | stock_reports (top-25/universe + digest) |
+| nse-fundamentals | 0 10 * * 0 | local/screener:v16 | financial_facts `nse_cons`/`nse_sa` — India results filings (G-6, ADR 0021); **suspended until the first backfill completes** |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only → manual INSERT |
 
 **Schedules are node-local PDT, not UTC** (verified 2026-10-04 — the "02:00-02:30"

@@ -4,9 +4,11 @@
 > the linked docs — this file is the index + status. Maintained per AGENTS.md docs
 > discipline: mark items ✅ with a date (and where the completion is recorded) when
 > done; prune ✅ lines into the relevant doc's history at housekeeping time.
-> **Last reviewed: 2026-10-20 04:20 UTC** (read-only status pass: **power acceptance PASSED on all four nodes — the pi1 item is closed**;
-> NSE fundamentals backfill resume job Running, 30/138 symbols at 04:15 UTC; **pi2 rebooted again ~01:56 UTC 10-20**,
-> cause unknown, 0 undervolt). Earlier: **2026-10-18 13:10 UTC** (engineering pass done — see §1 first two items). Earlier: **2026-10-18 07:50 UTC** (`screener:v11` live — corporate_actions recording, canary OK; first k3s control-plane backup;
+> **Last reviewed: 2026-10-20 06:05 UTC** (completion pass: G-22 verified closed (502/503, only VYLR) · EV-9 EDGAR_MAP extended,
+> `screener:v16` live, verification pass running · story threshold tuned to 0.82 (ADR 0024 amended) · H-6 depth checked (NSE serves
+> 1 day — owner decision) · Auto/FMCG + MIDCAP150 NSE-direct avenue verified to 2015 · telegram v23: /ask carries the 52-week range.
+> Earlier 04:20 UTC: **power acceptance PASSED on all four nodes — the pi1 item is closed**; **pi2 rebooted again ~01:56 UTC 10-20**,
+> cause unknown, 0 undervolt. Earlier: **2026-10-18 13:10 UTC** (engineering pass done — see §1 first two items). Earlier: **2026-10-18 07:50 UTC** (`screener:v11` live — corporate_actions recording, canary OK; first k3s control-plane backup;
 > site-wide power event 10-18 ~06:00 UTC explained — all 5 machines rebooted, 0 undervolt; pi1 formal 24 h window due 10-19 06:20 UTC;
 > DQ-3 proven via DB; 10-17 overclaims on DQ-2/AR-2/AR-5 corrected back to open). Previously **2026-10-14 06:49 UTC** (power item **closed as hardware-complete** — owner confirmed pi1 on its own
 > supply; live read 06:49 UTC: all four nodes PASS, `dmesg` undervoltage counts 0 on every Pi, pi2 heat WARN only;
@@ -272,6 +274,8 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   the live DB. `tests/test_index_fetchers.py` (4 tests).
 - [ ] 🔶 `NIFTYMIDCAP150.NS` has only 2019 → today on Yahoo, so its reading
   rests on two years of comparisons; a longer series needs NSE's own archive.
+  ✅ Avenue verified 2026-10-20: NSE `api/historicalOR/indicesHistory?indexType=NIFTY%20MIDCAP%20150` serves daily EOD records back to
+  at least Jan 2015 (close-only in the early years, OHLC None). Backfill = a one-shot Job on the session-cookie pattern — build decision open.
 - [x] ✅ 2026-10-14 **pi2 reboots under shared-charger power — closed with the power fix.** Six+ reboots on
   2026-10-10 (each took API + cluster DNS + the bot down); the cause was the shared multiport block, and pi2 is on a
   dedicated supply since ~2026-10-12 02:30 UTC — it PASSed the 24 h review (10-12 02:59 → 10-13 03:51, 0 events).
@@ -342,6 +346,9 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   ✅ restored via Yahoo `^CRSLDX` (nse-fetcher v3, 9/9 tickers live). Auto/
   FMCG 🔶 confirmed dead across all Yahoo symbol families; remaining avenue is
   NSE-direct (session-cookie API, fiidii-fetcher pattern) or jugaad-data.
+  ✅ Avenue VERIFIED 2026-10-20: `api/historicalOR/indicesHistory` answers for `NIFTY AUTO` and `NIFTY FMCG` (served as "CNX AUTO"/
+  "CNX FMCG") with full daily OHLC back to at least Jan 2015. Remaining = build the fetcher/backfill (ticker naming decision for
+  `index_prices` included) — a one-session task on the fiidii cookie pattern.
   Detail: findings Tier 2 #9; ops manual §12.2.
 - [ ] 🔶 Per-job heartbeat v2 + fetcher-internal upstream guards — lands with
   the next NATURAL image rebuilds (don't rebuild 9 working images just for
@@ -474,8 +481,11 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   fast-json (nemotron-lightning, thinking off) 90 % / 1.8 s · fast-json.3 90 % / 15.0 s. **Decision: keep the current order** —
   after the built-in retry the top four all reach 100 % final pass, and the current primary is ~6× faster with no JSON-fence quirk;
   reorder only if narrative quality regresses (gateway ADR 0002 has the numbers). Temp bake-off key cleaned up.
-- [ ] 🔶 **Story-grouping threshold** (ADR 0024): 0.86 grouped nothing on day one (65 headlines → 65 stories). Tune down
-  (~0.75?), hand-check 100 clusters against the ML-2 acceptance rule, then ML-7c story summaries.
+- [x] ✅ 2026-10-20 **Story-grouping threshold tuned: `STORY_SIM=0.82`** (env on the `news-embed` CronJob, applied; ADR 0024 amended with
+  the evidence). Measured NN-distance distribution over 1,651 vectors + manual pair review: 0.86 caught only the near-duplicate spike
+  (49 merges); the 0.10–0.16 distance band is same-story rewrites; 0.20+ unreviewed, so not 0.75. Accepted cost: date-bearing daily
+  templates ≤ 3 days apart can merge. Existing story_ids keep (only NULL rows group).
+  - [ ] 🔶 After ~a week at 0.82: hand-check clusters against the ML-2 acceptance rule, then ML-7c story summaries.
 - [ ] 🔶 Watch the first ~2 weeks of `llm_narratives` and digests; then ML-7b (shortlist notes).
 - [x] ✅ 2026-10-19 **Direction check live** (factcheck.py, shared by narrative.py and the bot): a direction word ("rose", "inflow",
   "sold"…) that contradicts the sign of the number it introduces fails the check and triggers the same retry; "fell to 18.4" style
@@ -525,7 +535,10 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
 - [x] ✅ 2026-10-19 **Chunk fix** (found by the backfills): fx/yields/rates/ta/metrics tables were still on 7-day chunks — decades of
   history created ~3,500 tiny chunks and DFF's COPY failed on "out of shared memory". Same fix as stock_prices (10-18): 1-year chunks for
   new data (06e), fx_rates/bond_yields 1990–2025 merged per year with the existing merge script; rows + sums verified identical before/after.
-- [ ] 🤔 **H-6 FII/DII history** — check NSE archive depth before deciding.
+- [ ] 🤔 **H-6 FII/DII history** — ✅ depth CHECKED 2026-10-20: NSE's `fiidiiTradeReact` serves exactly ONE day (probed live) and no
+  official NSE bulk archive exists; the only sources are third-party aggregator pages (Stockezee/Upstox day-by-day tables, no CSV)
+  and a static 2018–24 research dataset (Mendeley). Decision for the owner: accept forward-only (like news), or adopt a third-party
+  source with its quality/terms caveats. Our own history accrues daily since 2026-10.
 - Not backfillable (record so nobody tries): news/sentiment (RSS is current-only), intraday beyond ~2 years, membership snapshots
   (needs EV-1), India fundamentals beyond ~4 years (G-6).
 
@@ -561,9 +574,17 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   SP500 top-50 46/50 (changes = fresher 10-Ks, e.g. MU FY2026, and TTM FCF). **Flipped live 2026-10-18** (env on CronJob `stock-screener`;
   rollback = `FUND_SOURCE=yfinance`). Bug caught by the diff and fixed before the flip: CBOE's EDGAR revenue stops in 2017 (tag change) →
   scored on a 9-year-old CAGR in v12's dry run; v13 guard. Logs: `out/screener-dry-{yfinance,facts}.log` (gitignored).
-  **Follow-up (EV-9):** 19/486 revenue, 58/388 capex, 33/488 net-income EDGAR series are stale because companies moved to tags the map lacks
-  (utilities `RegulatedAndUnregulatedOperatingRevenue`, banks `RevenuesNetOfInterestExpense`, …) — extend `EDGAR_MAP` (append-only, first tag
-  still wins) + one fundamentals pass. Telegram `stocks.py` `series()` still reads the old path (own image).
+  **Follow-up (EV-9) — map extension DONE 2026-10-20 (`screener:v16`), verification pass running:** stale series re-measured (100:
+  17 revenue / 54 capex / 29 net income), every stale company's companyfacts probed for which fresh 10-K/10-Q tags it actually files,
+  and `EDGAR_MAP` extended append-only: revenue += `RevenueFromContractWithCustomerIncludingAssessedTax`, `RegulatedAndUnregulated
+  OperatingRevenue` (utilities), `RevenuesNetOfInterestExpense` (banks); net_income += `ProfitLoss`, `NetIncomeLossAvailableToCommon
+  StockholdersBasic`; capex += `PaymentsToAcquireProductiveAssets`, `…OtherProductiveAssets`, `PaymentsForCapitalImprovements` (REITs).
+  Rejected on semantics: M&A/securities payments, `CapitalExpendituresIncurredButNotYetPaid` (accrual). Canary on real filings
+  (DUK/MS/CAT/AMZN): 0 rows lost, each target healed to 2026 periods. First-wins is per (metric, end, duration) key, so old series
+  are untouched (new unit test). Known unfixable: `VMRK` (no fresh tag), `ARES` capex, financial companies with no capex by nature.
+  §6 cycle: per-file sha256 identical, tarball `fe692042…` at every hop + TX2 store, imported pi1+pi3, 7 CronJobs bumped (diff = 7
+  image lines). One-off Job `fundamentals-ev9` running on pi3 — **verify stale counts drop (~100 → ~35) when it completes**.
+  Telegram `stocks.py` `series()` still reads the old path (own image).
 - [x] ✅ 2026-10-17 **P0 · DQ-3 weekly fundamentals job — PROVEN LIVE.** Fix shipped in v9 (`failed` initialised; `upsert()` keeps the earliest
   `filing_published_at`). The Sat 2026-10-17 run (`stock-fundamentals-29870700`, 13:00→14:40 UTC, Complete) is the first real pass on it.
   Its pod log was lost (likely in the 10-18 site-wide power event), so the proof is DB-side: `job_state.stock_fundamentals` cursor = NULL
@@ -577,7 +598,8 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   rows: `A, AAPL, ABBV, ABNB, ABT, ACGL, ACN` (the first 7 alphabetically — they missed the first full pass) and `SKYD, TWLO, VYLR` (added by `universe-refresh` after it). SEC
   `companyfacts` answers HTTP 200 with data for 9 of the 10 (e.g. AAPL 441 annual/quarterly facts); only `VYLR` has none (new spin-off). The weekly job re-processes the whole
   universe, so **the Sat 10-17 pass should fill them — verify then** (active S&P symbols with EDGAR rows should rise from 493 to 502); if not, run a
-  `BACKFILL=1` canary for those symbols.
+  `BACKFILL=1` canary for those symbols. ✅ **Verified 2026-10-20: 502/503 active S&P symbols have EDGAR rows**; the only gap is `VYLR`
+  (SEC has no companyfacts for it yet — new spin-off, SEC-side, re-check in a quarter). CLOSED.
 
 ### Evidence-based signals (plan 2026-10-10 — `evidence-based-signals-roadmap.md`)
 
