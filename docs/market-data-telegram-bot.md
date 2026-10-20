@@ -300,7 +300,7 @@ Outbound-only, survives CGNAT, no VPS.
 with the universe (live: facebook → META, big blue → IBM, hul → HINDUNILVR.NS, coke → KO); `/watch` never writes on a corrected symbol — it asks for
 the exact one. Switch: `BOT_AI_RESOLVE` on the Deployment.
 
-### /ask — questions answered from stored facts only (2026-10-19, ML-7d family, image v14–v22)
+### /ask — questions answered from stored facts only (2026-10-19, ML-7d family, image v14–v23)
 `/ask TCS outlook`, `/ask news infosys`, `/ask usdinr`, `/ask fii flows`. Flow: find the subject (stock via the forgiving
 resolver — word-by-word, so "TCS outlook" is about TCS; index/FX/flows/news by keyword), gather a small facts JSON (public
 data only; news via semantic search over `headline_embeddings`, ADR 0024), gateway `general` answers, and the answer ships

@@ -501,12 +501,17 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   trusting India ranks — the live screener already reads it; (3) re-run EV-0 with India fundamentals; (4) update the coverage
   row in architecture §4.3a with final counts. Known gaps: ~13 symbols have 404-dead archive URLs on NSE's side (logged WARN,
   skipped) — e.g. HEGAM, COFORGE, ARE&M, KPIL, CEMPRO; re-run for them after NSE fixes, or accept the gap.
-- [x] ✅ 2026-10-19 **`/ask` live** (`telegram-digest:v22`): free-text questions answered from DB facts only — subject found
+- [x] ✅ 2026-10-19 **`/ask` live** (`telegram-digest:v23`): free-text questions answered from DB facts only — subject found
   word-by-word via the forgiving resolver, facts JSON (public data only, news via `headline_embeddings` semantic search) →
   gateway `general` → every number AND direction checked by the shared `factcheck.py` (percent forms of given values and
   rounding/truncation to ≤0.01 tolerated; metric-key numbers like "12-month" allowed). Two failed checks or gateway down →
   the facts table is shown instead; unmapped questions are refused, never guessed. Live: TCS outlook, news infosys, usdinr,
   fii flows all pass the check. Tuning that made it reliable is factcheck's tolerance ladder (4 image iterations).
+  ✅ 2026-10-20 **v23: stock facts now carry the real 52-week range** — `high_52w`/`low_52w` (bounded `max(high)/min(low)`
+  on `stock_prices`, 52 w; 997/998 symbols) and `pos_52w` sent as `position_in_52w_range` (a live answer had misread it as
+  "35% above the low"). Full §6 cycle: per-file sha256 identical, tarball `55a47c49…` checked at every hop + saved to the
+  TX2 store (SHA256SUMS.all regenerated, 40 tarballs), imported on pi1 (21.8 s, `0x0`), applied (diff = 3 image lines),
+  canary in the new pod: facts show 3350.0/1976.8 for TCS.NS and the gateway answer quotes them, factcheck ok. 8 ask tests.
 
 - [x] ✅ 2026-10-19 **H-1 FX history done** — `manifests/ingestion/history/` (ConfigMap + Job per mode, `history_backfill.py`): 58,222
   rows, USDJPY from 1996, INR pairs from 2003/06 (Yahoo depth per pair); only pre-live dates written, ts = 00:00 UTC.
