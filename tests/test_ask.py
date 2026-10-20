@@ -28,7 +28,9 @@ def fake_q(sql, args=()):
     if "upper(symbol) = ANY" in sql:
         return [ROW]
     if "stock_metrics_daily" in sql:
-        return [("close", 1500.0), ("ret_1m", -0.05), ("pe", 24.0)]
+        return [("close", 1500.0), ("ret_1m", -0.05), ("pe", 24.0), ("pos_52w", 0.3549)]
+    if "stock_prices" in sql:
+        return [(1850.0, 1050.0)]
     if "stock_scores" in sql:
         return [("composite", 12)]
     if "raw_headlines" in sql:
@@ -69,6 +71,13 @@ class Gate(unittest.TestCase):
     def test_question_with_no_facts_is_refused_not_guessed(self):
         out = ask.answer(lambda sql, args=(): [], "what is the weather", asker=lambda m: self.fail("called"))
         self.assertIn("can only answer", out)
+
+    def test_stock_facts_carry_the_52w_range_not_just_the_position(self):
+        facts, _ = ask.build_facts(fake_q, "INFY")
+        self.assertEqual(facts["metrics"]["high_52w"], 1850.0)
+        self.assertEqual(facts["metrics"]["low_52w"], 1050.0)
+        self.assertNotIn("pos_52w", facts["metrics"])
+        self.assertEqual(facts["metrics"]["position_in_52w_range"], 0.3549)
 
     def test_news_headlines_pass_numbers_only(self):
         # headline text has no sign context: a number quoted from a headline must not need a sign match

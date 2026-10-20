@@ -53,7 +53,9 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   **2026-10-20: owner removed pi2's case** (airflow fix). Baseline right after, 04:34 UTC: **51.5 °C**, `0x0`, load 0.6 (near-idle — the
   test is whether the soft-temp flag stays away under load; read the next power-review WARN column before calling it fixed).
   Also: **pi2 rebooted again ~2026-10-20 01:56 UTC**, cause unknown (0 undervolt events; no persistent journal — journald proposal pending).
-- [ ] 🔶 **pi2 still holds old images** (screener v1–v8, nse v1–v3, pipeline-health v1–v4, yfinance v1–v3, fiidii v1) — it is cordoned and its disk is
+- [x] ✅ 2026-10-19 **pi2 old images: MOOT** — verified with `ctr images ls`: pi2 holds no `local/*` images at all (and
+  212 G free). The old tracker note (screener v1–v8, health v1–v4, …) is stale; pi2 runs only control-plane system pods.
+  (Its disk is
   4 % used, so no pressure; if ever pruned, remove named tags one by one (ops manual §8), in a quiet window, never `--prune`. Note: pi2's copies were the
   only remaining source for fdi-watch/fiidii/fx/rbi during the incident. ✅ 2026-10-18: **every one of the 16 live images now has a tarball on the
   TX2 SSD** (`/mnt/tx2-ssd/image-tarballs/` + `/mnt/tx2-ssd/sentiment-fetcher-v1.tar.gz`; checksums in `SHA256SUMS.all`) — the 9 that existed only on
@@ -491,8 +493,10 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   filings, 1,580 facts, 0 warn; TCS revenue FY2005 ₹9,749 cr → FY2026 ₹2,67,021 cr, FY2014 ₹81,809 cr (two parser bugs found by the
   canary and fixed before the full run: net sales vs gross income; restated filings dropped). Screener reads `nse_cons` + EDGAR, TTM from
   summed quarters where no YTD exists. **Run history: 2026-10-18 16:30 UTC → 2026-10-19 (23 h): 357/495 symbols, 24,662 filings, 153,978 rows, partial —
-  hit MAX_MINUTES with the cursor kept. Resumed 2026-10-19 ~19:00 UTC (`backfill-nse-fundamentals-resume`, manifest in
-  `manifests/stock-screener/backfills.yaml`): 138 symbols left. When a run logs `cursor cleared`:** (1) un-suspend CronJob
+  hit MAX_MINUTES with the cursor kept. Resumed 2026-10-19 (`backfill-nse-fundamentals-resume`, manifest in
+  `manifests/stock-screener/backfills.yaml`); the first resume hit its 2.5 h Job deadline (script cursor kept, nothing lost —
+  the deadline now covers the script budget). **~100 symbols left, running (cursor at RVNL.NS). When a run logs
+  `cursor cleared`:** (1) un-suspend CronJob
   `nse-fundamentals` (remove `suspend: true`, apply); (2) screener DRY_RUN diff for NIFTY top-50 (facts vs yfinance) before
   trusting India ranks — the live screener already reads it; (3) re-run EV-0 with India fundamentals; (4) update the coverage
   row in architecture §4.3a with final counts. Known gaps: ~13 symbols have 404-dead archive URLs on NSE's side (logged WARN,

@@ -38,6 +38,14 @@ def stock_facts(q, row):
                      "AND ts >= now() - interval '400 days' ORDER BY ts DESC LIMIT 12", (sym,))
     f = {"symbol": sym, "name": row[1], "sector": row[2], "universe": row[3],
          "metrics": {k: v for k, v in (m or [])}}
+    if "pos_52w" in f["metrics"]:
+        # self-describing for the model: 0.35 = 35% of the way up the low->high range, not "35% above the low"
+        f["metrics"]["position_in_52w_range"] = f["metrics"].pop("pos_52w")
+    hl = q_or_none(q, "SELECT max(high), min(low) FROM stock_prices "
+                      "WHERE symbol = %s AND ts >= now() - interval '52 weeks'", (sym,))
+    if hl and hl[0] and hl[0][0] is not None:
+        f["metrics"]["high_52w"] = round(hl[0][0], 2)
+        f["metrics"]["low_52w"] = round(hl[0][1], 2)
     sc = q_or_none(q, "SELECT composite, rank FROM stock_scores WHERE symbol = %s "
                       "AND ts >= now() - interval '400 days' ORDER BY ts DESC LIMIT 1", (sym,))
     if sc:

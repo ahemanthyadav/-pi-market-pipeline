@@ -31,7 +31,7 @@ spec:
         kubernetes.io/hostname: pi1
       containers:
         - name: listener
-          image: local/telegram-digest:v22
+          image: local/telegram-digest:v23
           imagePullPolicy: Never
           args: ["python", "bot.py"]
           env:
