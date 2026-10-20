@@ -23,6 +23,59 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 
 ---
 
+## 0. What completing each open item takes (index, 2026-10-20)
+
+Every open item below, sorted by what unblocks it. "Agent" = any work session can do it unaided once the condition is met.
+Detail stays with each item; this is the decision view — keep it in sync when items close.
+
+**Gated on a running job (agent, automatic):**
+| Item | Unblock | Then |
+|---|---|---|
+| G-6 NSE backfill follow-ups | resume Job logs `cursor cleared` | un-suspend `nse-fundamentals`, screener DRY_RUN diff, EV-0 re-run, §4.3a counts (~1 h) |
+| EV-9 verification | Job `fundamentals-ev9` completes | one stale-count query + tracker tick (minutes) |
+
+**Owner hands/decision first — then mostly minutes, not sessions:**
+| Item | What it takes from the owner | Agent part after |
+|---|---|---|
+| Worker heat (pi1/pi2/pi3) | buy + fit heatsinks/fan (pi2 case already off) | read the next power-review WARN column |
+| Persistent journald on pi1/pi2 | a yes/no (cost: constant disk writes on fragile nodes) | 15-min quiet-window apply, reversible |
+| Router UDP 51820 forward | delete one rule in the router admin (5 min) | tracker tick |
+| CGNAT claim | router WAN page vs egress IP, or phone off Wi-Fi (10 min) | unblocks pi0 tailnet DNS (~30 min agent work) |
+| Phone check of bot commands | 10 min on the phone (incl. `/ask TCS 52 week high`) | fix any layout breakage found |
+| Who messaged the bot | confirm the chat id is `sailu` (2 min) | tracker tick |
+| Off-site backup | pick destination + encryption, create the account/credentials | build the restic/rclone job + docs (~1 session) |
+| k3s restore drill | a spare SSD + ~1 h at the bench | agent drives the §9 steps alongside |
+| H-6 FII/DII history | decide: forward-only vs third-party source | none, or ~1 session if a source is adopted |
+
+**Time-gated — the calendar does the work (agent acts at the date):**
+| Item | Due | Effort then |
+|---|---|---|
+| Story-cluster hand-check at 0.82 | ~2026-10-27 (a week of clusters) | ~1 h review, re-tune only with a fresh pair review |
+| ML-7a narrative watch → ML-7b | ~2026-11-02 (2 weeks of notes) | review, then ML-7b is ~1 session |
+| Price-audit retirement | 4 clean weekly runs (~2026-11-15) | remove one cron line + tracker |
+| Grafana FII/sentiment re-tune | ~2026-12 (60 d of history) | ~1 h with real distributions |
+| Yearly chunk merge | 2027-01 | ops manual §11 procedure |
+
+**Per-natural-rebuild (zero marginal cost when an image next changes anyway; never rebuild for these alone):**
+AR-2 `mdjob` adoption · AR-5 lock installs (14 images) · F401 import cleanups · per-job heartbeat v2 ·
+telegram `stocks.py` `series()` onto the facts path. Each is ~20 min *inside* an already-happening §6 cycle.
+
+**Projects — each needs its own session(s) plus a decision or ADR (order per §16 priorities):**
+| Project | Size | Gate / first decision |
+|---|---|---|
+| **EV-1 historical index membership** | 1–2 sessions | source choice (S&P change history; NSE circulars) — **blocks all US signal work** |
+| EV-9 (roadmap half): more statement lines | ~1 session | none — extends the same map + readers |
+| EV-10…14 → EV-17/18 composite v2 | 2+ sessions | gated on EV-1 + EV-9; per-universe rules = owner |
+| G-20 factor returns | ~1 session | verify Ken French / IIM-A terms first |
+| G-21 extra signals | ~1 session each | each must pass EV-0 §5 |
+| Auto/FMCG + MIDCAP150 fetcher | ~1 session | `index_prices` ticker naming (avenue verified 2026-10-20) |
+| ML-0 experiment infra / ML-1 anomaly v1 | 1–2 sessions | shares EV-0 harness |
+| ML-3 vol / ML-5 peers / ML-4 regime | ~1 session each | ML-4 descriptive-only until EV-0 shows value |
+| ML-6 GBM ranker | gated | hard gate: EV-0 + EV-1 + composite v2 pass §5 |
+| v2+ architecture (§4) / icebox (§6) | multi-session | deliberately later / deliberately never |
+
+---
+
 ## 1. Immediate (next checkpoint: tomorrow's `/health`)
 
 > **Restored 2026-10-12:** commit `c455687` dropped the power-fix item, §2 (Security & hygiene), the `nodewatch` and
