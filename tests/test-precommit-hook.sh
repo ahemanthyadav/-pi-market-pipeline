@@ -41,6 +41,7 @@ echo "echo hunter2 | sudo -S ls" > "$SCRATCH/a.md";            expect blocked "l
 echo "SSH_PASS='x1y2z3' python3 ops-tools/runcmd.py a b c" > "$SCRATCH/a.md"; expect blocked "SSH_PASS on command line"
 echo "tok $(printf '123456789:%s' "$(printf 'A%.0s' {1..35})")" > "$SCRATCH/a.md"; expect blocked "telegram-token shape"
 echo 'chatid: "1234567890"' > "$SCRATCH/a.md";                 expect blocked "chat id literal"
+echo "run '@@PW@@' tok $(printf '123456789:%s' "$(printf 'A%.0s' {1..35})")" > "$SCRATCH/a.md"; expect blocked "token on a line that also mentions @@PW@@ (old bypass)"
 echo "postgres://user:hunter22pw@db/x" > "$SCRATCH/a.md";      expect blocked "URL with credentials"
 echo "GRAFANA_ADMIN_PASSWORD=zq9-fake-local-secret-value" > "$FAKEENV"
 echo "text zq9-fake-local-secret-value text" > "$SCRATCH/a.md"
@@ -54,6 +55,8 @@ echo "== must PASS"
 echo "# runbook: use placeholders like <pi2-ip> and the @@PW@@ token" > "$SCRATCH/a.md"; expect passes "placeholders + @@PW@@ token"
 echo "cuDNN 8.2.1.32 and TensorRT 8.2.1.9, localhost 127.0.0.1" > "$SCRATCH/a.md";       expect passes "version numbers / loopback"
 echo "ssh pi2@<pi2-ip>   # alias: runcmd.py pi2 pi2 'uptime'" > "$SCRATCH/a.md";        expect passes "aliases in commands"
+echo "SSH_PASS=@@PW@@ python3 ops-tools/runcmd.py pi2 pi2 'uptime'" > "$SCRATCH/a.md";  expect passes "SSH_PASS with @@PW@@ placeholder"
+echo "echo @@PW@@ | sudo -S systemctl restart k3s-agent" > "$SCRATCH/a.md";             expect passes "sudo echo with @@PW@@ placeholder"
 
 echo; echo "result: $pass passed, $fail failed"
 [ $fail -eq 0 ]
