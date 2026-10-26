@@ -103,6 +103,7 @@ Each is ~20 min *inside* an already-happening §6 cycle.
 | Project | Size | Gate / first decision |
 |---|---|---|
 | **EV-1 historical index membership** | ✅ US done 2026-10-26 (ADR 0025, `index_membership` live, drift 0) — US signal work UNBLOCKED; 🔶 India half deferred (NSE PDFs, own session) | India: ~1 session |
+| **UI / Analysis Explorer** (`ui-implementation-plan.md`, owner asked 2026-10-26) | Phase 1 Grafana dashboards: agent-ready NOW (grants verified, dashboards are code); Phase 2 FastAPI explorer: 1–2 sessions + §6 cycle + ADR 0027 + owner exposure choice | P1 ~1 session · P2 1–2 sessions |
 | ~~EV-9 (roadmap half): more statement lines~~ | ✅ done 2026-10-26, `screener:v17` live, canary 3/3; universe fills on the 10-31 weekly run | done |
 | EV-10…14 → EV-17/18 composite v2 | 2+ sessions | data gates CLEARED 2026-10-26 (EV-1 US + EV-9 live); next = EV-0 §5 re-run on point-in-time membership, then per-universe rules = owner |
 | ~~G-20 factor returns~~ | ✅ done 2026-10-26 (`factors-fetcher:v1` live, terms verified; EV-0 §5 test-4 extension rides the next scoring change) | done |
