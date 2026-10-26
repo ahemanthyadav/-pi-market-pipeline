@@ -15,6 +15,7 @@ deterministically ("connection is closed") mid-loop — this layout matches the
 proven prices/fundamentals/metrics fetchers.
 """
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -47,15 +48,20 @@ def q1(cur, sql, args=()):
 
 
 def news_block(cur, sym, name):
+    # The ticker matches only ticker_relevance (where it IS a symbol) and the
+    # company name only headlines: tickers like ALL/IT/ON are English words,
+    # so ILIKE '%ALL%' — and even \mALL\M against headlines — pulled in
+    # "falls"/"rally"/"All eyes" noise and skewed the average (2026-10-26).
     base = sym.replace(".NS", "").replace("-", ".")
     first = name.split()[0] if name else ""
+    pat_base = rf"\m{re.escape(base)}\M"
+    pat_name = rf"\m{re.escape(first)}\M" if first else pat_base
     cur.execute(
         """SELECT headline, sentiment_score FROM news_sentiment
            WHERE ts >= now() - interval '3 days'
-             AND (ticker_relevance ILIKE %s OR headline ILIKE %s
-                  OR ticker_relevance ILIKE %s OR headline ILIKE %s)
+             AND (ticker_relevance ~* %s OR headline ~* %s)
            ORDER BY ts DESC LIMIT 10""",
-        (f"%{base}%", f"%{base}%", f"%{first}%", f"%{first}%"))
+        (pat_base, pat_name))
     rows = cur.fetchall()
     if not rows:
         return "_No matching headlines in the last 3 days._\n", 0.0

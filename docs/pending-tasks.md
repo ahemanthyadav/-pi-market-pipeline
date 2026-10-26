@@ -105,7 +105,7 @@ Each is ~20 min *inside* an already-happening §6 cycle.
 | Project | Size | Gate / first decision |
 |---|---|---|
 | **EV-1 historical index membership** | ✅ US done 2026-10-26 (ADR 0025, `index_membership` live, drift 0) — US signal work UNBLOCKED; 🔶 India half deferred (NSE PDFs, own session) | India: ~1 session |
-| ~~**UI / Analysis Explorer**~~ | ✅ BOTH PHASES LIVE 2026-10-26: 4 new Grafana dashboards (24 queries validated as grafana_ro pre-apply; 11 total) + the **marketview** web app in its own repo (ADR 0027, `local/marketview:v1` on pi1, all routes canaried 200, bad input 404s) — port-forward exposure; NodePort/`tailscale serve` = 🤔 owner choice | done |
+| ~~**UI / Analysis Explorer**~~ | ✅ BOTH PHASES LIVE 2026-10-26: 4 new Grafana dashboards (24 queries validated as grafana_ro pre-apply; 11 total) + the **marketview** web app in its own repo (ADR 0027, `local/marketview:v3` on pi1, all routes canaried 200, bad input 404s) — port-forward exposure; NodePort/`tailscale serve` = 🤔 owner choice | done |
 | ~~EV-9 (roadmap half): more statement lines~~ | ✅ done 2026-10-26, `screener:v17` live, canary 3/3; universe fills on the 10-31 weekly run | done |
 | EV-10…14 → EV-17/18 composite v2 | 2+ sessions | data gates CLEARED 2026-10-26 (EV-1 US + EV-9 live); next = EV-0 §5 re-run on point-in-time membership, then per-universe rules = owner |
 | ~~G-20 factor returns~~ | ✅ done 2026-10-26 (`factors-fetcher:v1` live, terms verified; EV-0 §5 test-4 extension rides the next scoring change) | done |
@@ -668,6 +668,23 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   (needs EV-1), India fundamentals beyond ~4 years (G-6).
 
 ### Data correctness — prerequisite for EV-0 and every ML backtest (found 2026-10-10)
+
+- [ ] 🆕 2026-10-26 **P2 · DQ-5 recurring accuracy cross-checks** — proposed after the on-screen-values review
+  (which found+fixed F33 chart.js and F34 news-matching, finds §1.1b; the values themselves verified clean:
+  Graham/peer/fair-value/upside recomputed exact from inputs for AAPL/ALL/HDFCBANK, closes & yfinance ratios
+  consistent with public quotes within date tolerance, S&P membership dates AAPL 1982-11-30 / MSFT 1994-06-01 /
+  ALL 1995-07-13 all correct). Candidate job `accuracy-check` (weekly, SELECT-only + one assertions report row):
+  1. **Second-source price check**: rotating ~25-symbol sample, `stock_prices.close` vs Stooq free CSV
+     (`stooq.com/q/d/l/?s=aapl.us`) on matching dates; flag |Δ| > 0.5%.
+  2. **Internal consistency SQL**: `fair_value == median(method cols)` recomputed in SQL; `upside_pct` from
+     fair/close; `market_cap/close` (shares) drift < 2% day-over-day without a split row; `pe × eps(yf TTM) ≈ close`
+     where both legs are yfinance-sourced.
+  3. **Sector-median recompute**: `sector_metrics.median_pe` vs a fresh `percentile_cont(0.5)` over members.
+  4. **Membership spot-check**: `index_membership` current set == `universe_constituents` (drift guard already
+     exists at write; this reads it back daily).
+  Display note (no code change yet): the dossier "Fundamentals (latest)" table mixes EDGAR filing-basis rows
+  (eps 21.73 for ALL) with yfinance TTM snapshots (pe 5.07 ⇒ TTM eps ≈ 50) — correct data, two bases; consider
+  a basis column or footnote in marketview.
 
 - [x] ✅ 2026-10-18 **P0 · DQ-1 (G-1) corporate actions / adjusted prices — DONE.** (ADR 0014) History: CTVA proven 2026-10-12 and repaired 10-13
   (`audit-price-adjustments.py`); split detection + resync in v10 (10-14); `corporate_actions` recording in v11 (10-17).

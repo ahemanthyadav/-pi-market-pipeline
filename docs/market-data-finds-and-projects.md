@@ -27,6 +27,13 @@
 | F9 | **No-registry image cycle has a pi2 tax** | `ctr images import` is slow on pi2 and blocks the SSH channel | Run pi2 imports detached (nohup + poll `/tmp/*.log`). |
 | F10 | **CGNAT is structural, not fixable at home** | Router WAN ≠ public IP; WireGuard handshakes received but replies dropped | Tailscale is the only remote path; any public-serving ambition needs a VPS/tunnel (see decision log). |
 
+### 1.1b UI/report accuracy finds (2026-10-26 — found by reviewing on-screen values)
+
+| # | Find | Fix |
+|---|---|---|
+| F33 | **Docker `ADD <url>` creates files root:0600** → unreadable by a `runAsUser: 1000` pod. Starlette StaticFiles stats the file (stat needs only dir perms), sends `200` + `content-length`, then fails on open — **empty body behind a green status**. marketview's vendored Chart.js served 0 bytes; every chart silently dead while all route canaries passed | `chmod -R a+rX` after the ADD (marketview v2); §6 canary must fetch the static asset and CHECKSUM it, not just check routes (marketview `docs/OPERATIONS.md` §4) |
+| F34 | **Ticker-vs-headline `ILIKE '%SYM%'` substring matching**: "ALL" matched every "f**all**s"/"r**all**y" headline; word boundaries (`\mALL\M`) still match the English word "All". Skewed per-stock news sentiment averages in stock_reports and showed unrelated headlines on dossiers | Ticker matches only `ticker_relevance` (where it IS a symbol); headlines match the company NAME, word-bounded (`stock_report.py` v22, marketview v3). Same trap waits for ON, IT, A, SO, KEY, COST… |
+
 ### 1.2 Data & feed quirks
 
 | # | Find | Status |
