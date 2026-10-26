@@ -102,6 +102,9 @@ def recompute_adj_close(conn, symbol):
     """Recompute adj_close for a whole symbol from close + corporate_actions.
     One UPDATE; rows whose value is unchanged are not rewritten. Returns rows changed."""
     with conn.cursor() as cur:
+        # Deliberate rule-9 exception: a total-return recompute needs the full
+        # history, so no ts bound is possible. Acceptable since the 2026-10-18
+        # chunk merge (1-year chunks); runs only for dividend/resync symbols.
         cur.execute("SELECT ts, close FROM stock_prices WHERE symbol=%s ORDER BY ts", (symbol,))
         bars = cur.fetchall()
         cur.execute("SELECT ts, amount FROM corporate_actions WHERE symbol=%s "

@@ -12,6 +12,7 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      automountServiceAccountToken: false
       containers:
         - name: prices
           image: local/screener:v16
@@ -47,6 +48,7 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      automountServiceAccountToken: false
       containers:
         - name: fundamentals
           image: local/screener:v16
@@ -85,6 +87,7 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      automountServiceAccountToken: false
       containers:
         - name: actions
           image: local/screener:v16
@@ -121,6 +124,7 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      automountServiceAccountToken: false
       containers:
         - name: nse-fundamentals
           image: local/screener:v16
@@ -159,6 +163,7 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      automountServiceAccountToken: false
       containers:
         - name: nse-fundamentals
           image: local/screener:v16

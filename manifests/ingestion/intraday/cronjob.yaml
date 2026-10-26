@@ -22,6 +22,7 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          automountServiceAccountToken: false
           containers:
             - name: fetcher
               image: local/intraday-fetcher:v1

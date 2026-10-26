@@ -34,6 +34,7 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          automountServiceAccountToken: false
           nodeSelector:
             kubernetes.io/hostname: pi1
           containers:
@@ -100,6 +101,7 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          automountServiceAccountToken: false
           nodeSelector:
             kubernetes.io/hostname: pi1
           containers:

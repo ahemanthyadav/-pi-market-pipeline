@@ -29,11 +29,26 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/hostname: pi1
+      automountServiceAccountToken: false   # uses no k8s API
       containers:
         - name: listener
           image: local/telegram-digest:v23
           imagePullPolicy: Never
           args: ["python", "bot.py"]
+          # A wedged getUpdates loop used to stay wedged forever (nothing
+          # restarts a Deployment on silence). bot.py touches /tmp/bot-alive
+          # each poll iteration SINCE THE v24 IMAGE — apply this probe only
+          # with (or after) the v23→v24 rebuild, or the pod restart-loops.
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import os,sys,time; sys.exit(0 if time.time()-os.path.getmtime('/tmp/bot-alive')<300 else 1)"
+            initialDelaySeconds: 120
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 5
           env:
             - name: BOT_AI_RESOLVE            # forgiving /stock lookup: AI layer on (resolver.py; typed text only)
               value: "1"

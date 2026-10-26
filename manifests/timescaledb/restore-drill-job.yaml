@@ -15,6 +15,7 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      automountServiceAccountToken: false
       nodeSelector:
         kubernetes.io/hostname: pi3   # backups live on pi3's SSD (hostPath below)
       containers:

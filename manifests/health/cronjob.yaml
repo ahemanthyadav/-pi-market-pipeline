@@ -23,6 +23,7 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          automountServiceAccountToken: false
           containers:
             - name: health
               image: local/pipeline-health:v6

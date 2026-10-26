@@ -21,6 +21,7 @@ spec:
       value: "true"
       effect: NoSchedule
   restartPolicy: Never
+  automountServiceAccountToken: false
   containers:
     - name: smoke
       image: ubuntu:18.04
