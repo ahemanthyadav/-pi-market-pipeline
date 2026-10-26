@@ -241,6 +241,8 @@ pinned pi1, 192Mi limit) lives in the SIBLING REPO `../marketview` (ADR 0027) wi
 own manifests and tests — `workloads.py --check` does not track it. DB access:
 `grafana_ro`. Access: `kubectl -n market-data port-forward svc/marketview 8080:8080`.
 Rebuild = marketview repo code change → tag bump → §6 cycle → import on pi1 only.
+Its own runbook (deploy, rollback, recovery): `../marketview/docs/OPERATIONS.md`.
+Remote: private GitHub repo `marketview` (pushed 2026-10-26).
 Grafana dashboards (provisioned in `manifests/grafana/dashboards.yaml`, 11 as of
 2026-10-26): overview · indices · markets · sentiment · flows · screener · derived ·
 **valuation · sectors · dossier · factors** (the last four added with ADR 0026).
