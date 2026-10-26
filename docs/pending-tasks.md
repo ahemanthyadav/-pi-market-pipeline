@@ -4,10 +4,14 @@
 > the linked docs — this file is the index + status. Maintained per AGENTS.md docs
 > discipline: mark items ✅ with a date (and where the completion is recorded) when
 > done; prune ✅ lines into the relevant doc's history at housekeeping time.
-> **Last reviewed: 2026-10-26** (deploy pass — owner said "deploy all": staged hardening applied, telegram v24
-> live with probe + non-root canary, host keys pinned, H-6 decided forward-only, AR-8 blocked on an owner-run
-> Secret/role creation — details in §1. Netpol finding: TX2 kernel has no ipset → netpol unenforced on the DB's
-> node, documented in `manifests/network-policies.yaml`.) Earlier **2026-10-25** (full-project review pass, 3-agent + synthesis; fixes implemented same session:
+> **Last reviewed: 2026-10-26** (deploy + backlog pass — owner said "deploy all" then "implement all"):
+> staged hardening applied · telegram v24 live (probe + non-root canary PASSED) · host keys pinned · H-6
+> decided forward-only · AR-8 ⛔ blocked on an owner-run Secret/role creation (§1) · netpol finding: TX2
+> kernel has no ipset → unenforced on the DB's node (header documents it) · **EV-9 done** (`screener:v17`→
+> v18 same day) · **Auto/FMCG + MIDCAP150 done** (`nse-fetcher:v7`; NSE caps 70 records/call — paginated)
+> · **G-20 done** (`factors-fetcher:v1`, first mdjob adopter) · **EV-1 US done**
+> (ADR 0025, schema 14, `membership-history` CronJob — US signal work unblocked; India deferred, PDFs).
+> House-prescribed next: the EV-0 §5 re-run on point-in-time membership (own session, pair review). Earlier **2026-10-25** (full-project review pass, 3-agent + synthesis; fixes implemented same session:
 > pre-commit `@@PW@@` pattern-bypass closed (+2 hook test cases) · `tests/run-all.sh` single entrypoint (AGENTS/CI/CLAUDE.md all point at it) ·
 > `mdjob.write_window` now returns the live conn after a retry (+`tests/test_mdjob.py`, 8 tests) · ops-tools: labeled runcmd timeout (rc 5),
 > getfile/putfile error handling + exit codes, optional `.ssh_known_hosts` pinning, `_creds` unquoted-whitespace warning, `ev0 --start`
@@ -87,7 +91,7 @@ Each is ~20 min *inside* an already-happening §6 cycle.
 |---|---|---|
 | **EV-1 historical index membership** | ✅ US done 2026-10-26 (ADR 0025, `index_membership` live, drift 0) — US signal work UNBLOCKED; 🔶 India half deferred (NSE PDFs, own session) | India: ~1 session |
 | ~~EV-9 (roadmap half): more statement lines~~ | ✅ done 2026-10-26, `screener:v17` live, canary 3/3; universe fills on the 10-31 weekly run | done |
-| EV-10…14 → EV-17/18 composite v2 | 2+ sessions | gated on EV-1 + EV-9; per-universe rules = owner |
+| EV-10…14 → EV-17/18 composite v2 | 2+ sessions | data gates CLEARED 2026-10-26 (EV-1 US + EV-9 live); next = EV-0 §5 re-run on point-in-time membership, then per-universe rules = owner |
 | ~~G-20 factor returns~~ | ✅ done 2026-10-26 (`factors-fetcher:v1` live, terms verified; EV-0 §5 test-4 extension rides the next scoring change) | done |
 | G-21 extra signals | ~1 session each | each must pass EV-0 §5 |
 | ~~Auto/FMCG + MIDCAP150 fetcher~~ | ✅ done 2026-10-26 (`nse-fetcher:v7`, series live 2015→today) | done |
