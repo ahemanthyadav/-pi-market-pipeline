@@ -5,10 +5,18 @@
 > commodities, yields, rates, news, FinBERT sentiment, FII/DII flows, technicals,
 > and a 998-stock fundamental screener (Nifty 500 + S&P 500) — into TimescaleDB,
 > with Grafana dashboards, Tailscale-only access, and no container registry.
-> **Status 2026-10-19 — healthy; data-foundations pass done; AI layer live** (shared `llm-gateway`, NVIDIA free tier: daily AI
-> market note in the digest, every number checked; typo/nickname-tolerant `/stock` — ADR 0022/0023).
-> 4 nodes Ready (pi2 cordoned control plane), 28 CronJobs (nse-fundamentals suspended until its first backfill completes), the others
-> active, DB `Guaranteed` QoS with readiness probe. Images: screener toolkit `local/screener:v18`, telegram `local/telegram-digest:v24`, health monitor
+> **Status 2026-10-26 — healthy; hardening + valuation/membership layer deployed.** Pod hardening applied
+> (SA tokens off everywhere, probes, non-root canary passed; netpol applied but unenforced on the TX2 — kernel
+> lacks ipset, see `manifests/network-policies.yaml`). New since 10-26: **EV-9 full statement lines**,
+> **EV-1 point-in-time S&P 500 membership** (`index_membership`, ADR 0025 — US signal work unblocked),
+> **G-20 factor returns** (`factor_returns`: Ken French + IIM-A), **Auto/FMCG + MIDCAP150 restored via
+> NSE-direct** (series complete 2015→today), and the **ADR 0026 valuation layer**: an 8-method intrinsic
+> fair-value panel per symbol daily (`stock_valuations`), sector→style metric-relevance tables
+> (`sector_styles`/`metric_relevance`), and daily sector aggregates + rendered `__sectors__` analysis
+> (`sector_metrics`) — all descriptive, never in the composite without EV-0. AI layer live (shared
+> `llm-gateway`, NVIDIA free tier: daily AI market note, every number checked — ADR 0022/0023).
+> 4 nodes Ready (pi2 cordoned control plane), 29 CronJobs (nse-fundamentals suspended until its first backfill completes), the others
+> active, DB `Guaranteed` QoS with readiness probe. Images: screener toolkit `local/screener:v20`, telegram `local/telegram-digest:v24`, health monitor
 > `local/pipeline-health:v6`. Least-privilege DB roles for Grafana and the Telegram bot. Daily second copies of the DB dump
 > and the k3s control-plane datastore on the workstation. A mains power loss on 10-18 rebooted everything — recovered on
 > its own; no UPS by decision. Work order and reasoning: `engineering-plan-2026-10-18.md`; open items: `pending-tasks.md`.

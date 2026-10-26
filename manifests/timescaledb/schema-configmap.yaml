@@ -530,3 +530,175 @@ data:
     -- Point-in-time lookup: members of a universe on a given day.
     CREATE INDEX IF NOT EXISTS ix_index_membership_window
       ON index_membership (universe, added, removed);
+  15-stock-valuations.sql: |
+    -- Deterministic intrinsic-value estimates for EVERY active symbol
+    -- (ADR 0026, 2026-10-26): the famous methods, each NULL when its inputs
+    -- don't apply (losses, no dividend, ROE below the discount rate, ...).
+    -- fair_value = median of the methods that produced a number. Assumptions
+    -- (ERP 4.5%, terminal growth 2.5%, growth clamps, 25% tax in EPV, EPV
+    -- carries no cash credit) are pinned in ADR 0026. Purely DESCRIPTIVE:
+    -- never feeds stock_scores/composite without an EV-0 pass.
+    CREATE TABLE IF NOT EXISTS stock_valuations (
+      symbol          TEXT NOT NULL,
+      ts              TIMESTAMPTZ NOT NULL,     -- valuation date 00:00 UTC
+      universe        TEXT NOT NULL,
+      close           DOUBLE PRECISION NOT NULL,
+      graham          DOUBLE PRECISION,  -- sqrt(22.5 * EPS * BVPS)
+      peer_multiple   DOUBLE PRECISION,  -- sector-median P/E x EPS (P/B x BVPS where P/E misleads)
+      fcf_yield       DOUBLE PRECISION,  -- FCF/share / r (perpetuity, no growth)
+      dcf             DOUBLE PRECISION,  -- 2-stage FCF DCF: 5y at clamped CAGR, terminal 2.5%
+      ddm             DOUBLE PRECISION,  -- Gordon growth on dividends/share
+      epv             DOUBLE PRECISION,  -- Greenwald: norm. EBIT x (1-25%) / r - debt, per share
+      residual_income DOUBLE PRECISION,  -- justified P/B: (ROE-g)/(r-g) x BVPS
+      peg_lynch       DOUBLE PRECISION,  -- PEG=1: EPS x 100 x clamped EPS CAGR
+      fair_value      DOUBLE PRECISION,  -- median of the available methods
+      upside_pct      DOUBLE PRECISION,
+      methods         INT NOT NULL,
+      discount_rate   DOUBLE PRECISION,  -- (10y + ERP), decimal
+      growth_used     DOUBLE PRECISION,  -- clamped revenue CAGR fed to the DCF, decimal
+      PRIMARY KEY (symbol, ts)
+    );
+    SELECT create_hypertable('stock_valuations', 'ts', if_not_exists => TRUE);
+    SELECT set_chunk_time_interval('stock_valuations', INTERVAL '365 days');
+
+  16-metric-relevance.sql: |
+    -- Which metrics matter per sector (ADR 0026, 2026-10-26). Two normalized
+    -- tables: every universe_constituents.sector maps to a STYLE, each style
+    -- carries metric weights: 3 primary / 2 secondary / 1 context /
+    -- 0 actively misleading (with the reason). Consumed by valuation.py
+    -- (method selection), stock_report.py and the bot's /stock card.
+    -- Curated seed — edit HERE and re-apply (upserts), never ad hoc.
+    CREATE TABLE IF NOT EXISTS sector_styles (
+      sector TEXT PRIMARY KEY,            -- exact universe_constituents.sector value
+      style  TEXT NOT NULL,               -- shared lens across both taxonomies
+      cyclical BOOLEAN NOT NULL,
+      note   TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS metric_relevance (
+      style  TEXT NOT NULL,
+      metric TEXT NOT NULL,               -- stock_fundamentals metric name
+      weight SMALLINT NOT NULL CHECK (weight BETWEEN 0 AND 3),
+      note   TEXT NOT NULL,
+      PRIMARY KEY (style, metric)
+    );
+    INSERT INTO sector_styles (sector, style, cyclical, note) VALUES
+      ('Financials','financial',false,'Banks/insurers: leverage is the business model'),
+      ('Financial Services','financial',false,'Banks/NBFCs/insurers: leverage is the business model'),
+      ('Real Estate','real_estate',true,'REITs: depreciation depresses earnings, debt funds assets'),
+      ('Realty','real_estate',true,'Developers: project cycles, leverage-driven'),
+      ('Utilities','utility',false,'Rate-regulated: stable cash flows, heavy debt is normal'),
+      ('Power','utility',false,'Regulated/contracted generation: utility economics'),
+      ('Energy','commodity',true,'Earnings follow the commodity price cycle'),
+      ('Materials','commodity',true,'Price-taker margins, cycle timing dominates'),
+      ('Metals & Mining','commodity',true,'Deep cyclical: peak P/E is a trap'),
+      ('Oil Gas & Consumable Fuels','commodity',true,'Commodity price cycle dominates'),
+      ('Chemicals','commodity',true,'Spread/cycle driven, capacity additions matter'),
+      ('Construction Materials','commodity',true,'Cement/aggregates: regional cycles'),
+      ('Industrials','industrial',true,'Order-book cyclicals, operating leverage'),
+      ('Capital Goods','industrial',true,'Order-book cyclicals, operating leverage'),
+      ('Construction','industrial',true,'Order-book + working-capital cycles'),
+      ('Automobile and Auto Components','industrial',true,'Volume cyclicals with platform economics'),
+      ('Textiles','industrial',true,'Thin-margin cyclicals'),
+      ('Services','industrial',true,'Mixed services: treat as industrial baseline'),
+      ('Consumer Staples','consumer_defensive',false,'Stable demand: quality of earnings is the story'),
+      ('Fast Moving Consumer Goods','consumer_defensive',false,'Stable demand: margins and returns are the story'),
+      ('Consumer Discretionary','consumer_cyclical',true,'Demand swings with the cycle'),
+      ('Consumer Services','consumer_cyclical',true,'Discretionary demand, growth-led'),
+      ('Consumer Durables','consumer_cyclical',true,'Big-ticket demand swings with the cycle'),
+      ('Media Entertainment & Publication','consumer_cyclical',true,'Ad-spend cyclicality'),
+      ('Information Technology','tech_growth',false,'Growth + gross-margin economics'),
+      ('Communication Services','tech_growth',false,'Platform/media mix: growth economics'),
+      ('Telecommunication','telecom',false,'Capex-heavy subscription infrastructure'),
+      ('Health Care','healthcare',false,'Pipeline/approval driven, defensive demand'),
+      ('Healthcare','healthcare',false,'Pipeline/approval driven, defensive demand'),
+      ('Diversified','default',false,'No single lens'),
+      ('_default','default',false,'Fallback for unmapped sectors')
+    ON CONFLICT (sector) DO UPDATE SET style=EXCLUDED.style,
+      cyclical=EXCLUDED.cyclical, note=EXCLUDED.note;
+    INSERT INTO metric_relevance (style, metric, weight, note) VALUES
+      ('financial','pb',3,'Book value is the balance sheet being sold; the primary multiple'),
+      ('financial','roe',3,'Returns on that book decide what P/B is deserved'),
+      ('financial','eps',2,'Meaningful but provision-cycle dependent'),
+      ('financial','pe',2,'Usable, but P/B x ROE is the cleaner pair'),
+      ('financial','ev_ebitda',0,'Meaningless for banks: debt IS the raw material'),
+      ('financial','fcf',0,'Bank "FCF" is not economically meaningful'),
+      ('financial','total_debt',0,'Leverage is the business model; judge capital adequacy instead'),
+      ('financial','total_revenue',1,'NII/premium growth context'),
+      ('real_estate','pb',3,'Assets carry the value; price vs book is the anchor'),
+      ('real_estate','total_debt',3,'Leverage against hard assets: the survival variable'),
+      ('real_estate','ev_ebitda',2,'Closest standard proxy to cap-rate thinking'),
+      ('real_estate','pe',1,'Depreciation depresses earnings: prefer cash measures'),
+      ('real_estate','fcf',1,'Capex timing distorts it; FFO (not stored) is the right lens'),
+      ('real_estate','roe',1,'Leverage-inflated; use with the debt line'),
+      ('utility','ev_ebitda',3,'Standard lens for regulated cash machines'),
+      ('utility','total_debt',3,'Regulated leverage is normal but interest cover matters'),
+      ('utility','dividends_paid',3,'The investment case is usually the payout'),
+      ('utility','pe',2,'Stable earnings keep it meaningful'),
+      ('utility','eps',2,'Regulated growth is slow but steady'),
+      ('utility','fcf',1,'Heavy regulated capex makes FCF lumpy by design'),
+      ('commodity','pb',3,'Across the cycle, trough P/B beats any earnings multiple'),
+      ('commodity','ev_ebitda',3,'Mid-cycle lens; normalize before comparing'),
+      ('commodity','total_debt',3,'Survivability through the downcycle'),
+      ('commodity','pe',1,'Peak earnings make P/E most attractive exactly at the top'),
+      ('commodity','fcf',2,'Capital discipline signal at cycle highs'),
+      ('commodity','operating_margin',2,'Cost-curve position'),
+      ('industrial','ev_ebitda',3,'Standard cyclical lens'),
+      ('industrial','operating_margin',3,'Operating leverage: watch the swing'),
+      ('industrial','pe',2,'Fine mid-cycle; beware at peaks'),
+      ('industrial','fcf',2,'Working-capital cycles show up here first'),
+      ('industrial','total_debt',2,'Cyclical + levered is the dangerous mix'),
+      ('industrial','total_revenue',2,'Order-book proxy'),
+      ('consumer_defensive','pe',3,'Stable earnings make P/E genuinely meaningful'),
+      ('consumer_defensive','roe',3,'Brand economics show up as durable returns'),
+      ('consumer_defensive','operating_margin',3,'Pricing power made visible'),
+      ('consumer_defensive','fcf',3,'Low-capex models should convert earnings to cash'),
+      ('consumer_defensive','gross_profit',2,'Brand premium at the top line'),
+      ('consumer_defensive','total_revenue',2,'Volume vs pricing mix'),
+      ('consumer_cyclical','total_revenue',3,'Demand momentum is the driver'),
+      ('consumer_cyclical','pe',2,'Meaningful away from cycle extremes'),
+      ('consumer_cyclical','ev_ebitda',2,'Cross-check against P/E'),
+      ('consumer_cyclical','operating_margin',2,'Discounting pressure shows here'),
+      ('consumer_cyclical','fcf',2,'Inventory discipline signal'),
+      ('tech_growth','total_revenue',3,'Growth is most of the valuation'),
+      ('tech_growth','gross_profit',3,'Unit economics: software vs services shows here'),
+      ('tech_growth','operating_margin',3,'Scale economics / rule-of-40 half'),
+      ('tech_growth','fcf',3,'SBC-heavy models must still produce cash'),
+      ('tech_growth','pe',2,'Meaningful only growth-adjusted'),
+      ('tech_growth','ev_ebitda',2,'Common comp, distorted by capitalized costs'),
+      ('telecom','ev_ebitda',3,'The sector trades on it'),
+      ('telecom','total_debt',3,'Spectrum + network capex live on the balance sheet'),
+      ('telecom','fcf',2,'Post-capex cash is the dividend capacity'),
+      ('telecom','pe',1,'Depreciation noise; cash lenses are cleaner'),
+      ('healthcare','total_revenue',3,'Pipeline/approval growth driven'),
+      ('healthcare','pe',2,'Meaningful for diversified names, not binary biotechs'),
+      ('healthcare','operating_margin',2,'R&D intensity vs profitability balance'),
+      ('healthcare','fcf',2,'Funds the pipeline without dilution'),
+      ('healthcare','ev_ebitda',2,'Standard comp across subsectors'),
+      ('default','pe',2,'Balanced lens when no sector style applies'),
+      ('default','pb',2,'Balanced lens'),
+      ('default','ev_ebitda',2,'Balanced lens'),
+      ('default','roe',2,'Balanced lens'),
+      ('default','fcf',2,'Balanced lens'),
+      ('default','total_debt',2,'Balanced lens')
+    ON CONFLICT (style, metric) DO UPDATE SET weight=EXCLUDED.weight, note=EXCLUDED.note;
+  17-sector-metrics.sql: |
+    -- Daily sector aggregates (ADR 0026): one row per (universe, sector, day),
+    -- written by valuation.py right after stock_valuations. Medians are over
+    -- sane positive values; returns are equal-weighted means of members.
+    CREATE TABLE IF NOT EXISTS sector_metrics (
+      universe          TEXT NOT NULL,
+      sector            TEXT NOT NULL,
+      ts                TIMESTAMPTZ NOT NULL,
+      members           INT NOT NULL,
+      median_pe         DOUBLE PRECISION,
+      median_pb         DOUBLE PRECISION,
+      median_ev_ebitda  DOUBLE PRECISION,
+      median_roe        DOUBLE PRECISION,
+      median_op_margin  DOUBLE PRECISION,
+      avg_ret_6m        DOUBLE PRECISION,
+      avg_ret_12m       DOUBLE PRECISION,
+      median_upside_pct DOUBLE PRECISION,  -- from today's stock_valuations
+      PRIMARY KEY (universe, sector, ts)
+    );
+    SELECT create_hypertable('sector_metrics', 'ts', if_not_exists => TRUE);
+    SELECT set_chunk_time_interval('sector_metrics', INTERVAL '365 days');

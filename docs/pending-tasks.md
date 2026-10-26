@@ -11,7 +11,17 @@
 > v18 same day) · **Auto/FMCG + MIDCAP150 done** (`nse-fetcher:v7`; NSE caps 70 records/call — paginated)
 > · **G-20 done** (`factors-fetcher:v1`, first mdjob adopter) · **EV-1 US done**
 > (ADR 0025, schema 14, `membership-history` CronJob — US signal work unblocked; India deferred, PDFs).
-> House-prescribed next: the EV-0 §5 re-run on point-in-time membership (own session, pair review). Earlier **2026-10-25** (full-project review pass, 3-agent + synthesis; fixes implemented same session:
+> House-prescribed next: the EV-0 §5 re-run on point-in-time membership (own session, pair review).
+> **Later same day (owner: "get all gaps covered / all famous calculations / sector info"):** the ADR 0026
+> valuation layer shipped as `screener:v20` — schemas 15/16/17 applied (`schema-valuation-17` Job), daily
+> `stock-valuation` CronJob (the 29th, 02:10): 8-method intrinsic panel (Graham, peer multiple, FCF
+> perpetuity, 2-stage DCF, DDM, EPV, residual income, Lynch PEG) for every active symbol →
+> `stock_valuations` (canary: 998 symbols, 983 with a fair value), sector→style relevance tables (31
+> sectors, 64 weighted metrics with reasons) driving method selection, `sector_metrics` daily aggregates,
+> and stock-report now renders sector lens + fair-value panel + "what matters in this sector" + a
+> `__sectors__` analysis row (canary: 50 reports + 31 sector rows). v19 burned on a column-name bug
+> (stock_prices.symbol), caught by canary. DDM coverage and reported share counts complete with the
+> 10-31 EV-9 weekly pass. ALL of it descriptive — composite untouched (ADR 0026 hard rule). Earlier **2026-10-25** (full-project review pass, 3-agent + synthesis; fixes implemented same session:
 > pre-commit `@@PW@@` pattern-bypass closed (+2 hook test cases) · `tests/run-all.sh` single entrypoint (AGENTS/CI/CLAUDE.md all point at it) ·
 > `mdjob.write_window` now returns the live conn after a retry (+`tests/test_mdjob.py`, 8 tests) · ops-tools: labeled runcmd timeout (rc 5),
 > getfile/putfile error handling + exit codes, optional `.ssh_known_hosts` pinning, `_creds` unquoted-whitespace warning, `ev0 --start`
@@ -83,7 +93,10 @@ AR-2 `mdjob` adoption (API fixed + tested 2026-10-25 — ready to adopt) · AR-5
 F401 import cleanups · per-job heartbeat v2 · telegram `stocks.py` `series()` onto the facts path ·
 news-fetcher `timegm` fix (in repo 2026-10-25; identical behavior in-cluster, so next natural news rebuild) ·
 per-image `securityContext` (runAsNonRoot + drop caps — **telegram canary PASSED with v24 2026-10-26**; roll out to the
-other images per natural rebuild, news next).
+other images per natural rebuild, news next) ·
+telegram v25 riders: `/stock` card gains the ADR 0026 fair-value line + sector lens, a `/sectors` command
+reading `sector_metrics`, and `stocks.py series()` onto the facts path (all queued for the next natural
+telegram rebuild — the data is already live and queryable).
 Each is ~20 min *inside* an already-happening §6 cycle.
 
 **Projects — each needs its own session(s) plus a decision or ADR (order per §16 priorities):**
