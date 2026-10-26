@@ -3,10 +3,13 @@
 > **Purpose:** everything about the Marketfredbot Telegram channel — how the
 > deployed digest + alert pipeline is wired, how to operate and change it, and
 > the tiered menu of two-way/next-step upgrades with their real constraints.
-> **Repo state 2026-10-25:** manifests pin `local/telegram-digest:v23` (deployment + both
-> CronJobs); v24 is staged in code (HTML-safe truncation, getMe retry, rule-9 bounds,
-> /tmp/bot-alive liveness heartbeat — see pending-tasks). The live-state claims below are
-> from the last full live verification and need a re-verify pass on the current image.
+> **Repo + live state 2026-10-26:** `local/telegram-digest:v24` LIVE (deployment + both
+> CronJobs): HTML-safe truncation, getMe retry, rule-9 bounds, `/tmp/bot-alive` liveness
+> heartbeat + exec probe, non-root securityContext (the per-image canary — passed).
+> Deploy-verified same day: bot polling on pi1 (owner + 2 members), heartbeat fresh,
+> uid 1000, and a no-send validation job built the digest from the live DB
+> (`DIGEST-BUILD-OK 873 chars`). First scheduled v24 digest/alerts: 2026-10-27 cycle.
+> Commands still unverified from the phone since v8 — see pending-tasks.
 > **Last live-verified: 2026-10-12 08:46 UTC** (live: Deployment + both CronJobs on `local/telegram-digest:v8` — multi-user, ADR 0012;
 > bot Running on pi1; `bot_users` holds 2 member rows added by the owner at 08:31/08:32 UTC — one private chat, one group chat, same
 > name; `watchlist` still empty; `telegram-alerts` first scheduled run 09:45 UTC OK (`ALERTS-OK 3 message(s) for 3 user(s)` — owner + both member rows). Index cards validated

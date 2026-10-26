@@ -30,10 +30,18 @@ spec:
       nodeSelector:
         kubernetes.io/hostname: pi1
       automountServiceAccountToken: false   # uses no k8s API
+      securityContext:                       # per-image canary (tracker: start with telegram)
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
       containers:
         - name: listener
-          image: local/telegram-digest:v23
+          image: local/telegram-digest:v24
           imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           args: ["python", "bot.py"]
           # A wedged getUpdates loop used to stay wedged forever (nothing
           # restarts a Deployment on silence). bot.py touches /tmp/bot-alive

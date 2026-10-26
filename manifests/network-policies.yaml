@@ -1,4 +1,11 @@
-# Network policies — STAGED 2026-10-25, not yet applied (tracker: pending-tasks).
+# Network policies — applied 2026-10-26. **NOT ENFORCED on the TX2** (verified
+# same day): the L4T kernel 4.9.337-tegra ships no ipset modules, which
+# kube-router's netpol controller requires, so no NWPLCY iptables chains are
+# programmed there — and the DB pod is pinned to the TX2. The policy IS
+# enforced on pi1/pi2/pi3 (chains verified) and activates for the DB if it
+# ever moves or the TX2 kernel changes. Until then the DB's real guards stay
+# Postgres auth + the AR-8 restricted roles. Kept applied: zero cost, honest
+# header, fails closed nowhere.
 #
 # Completes the AR-8 least-privilege story at the network layer: today any pod
 # in ANY namespace can open timescaledb:5432; the only guard is Postgres auth.

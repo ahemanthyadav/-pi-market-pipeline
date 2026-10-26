@@ -37,10 +37,18 @@ spec:
           automountServiceAccountToken: false
           nodeSelector:
             kubernetes.io/hostname: pi1
+          securityContext:                   # per-image canary (with v24)
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
           containers:
             - name: digest
-              image: local/telegram-digest:v23
+              image: local/telegram-digest:v24
               imagePullPolicy: Never
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
               env:
                 - name: DIGEST_NARRATIVE        # ML-7a AI summary section (only notes that passed the number check)
                   value: "1"
@@ -104,11 +112,19 @@ spec:
           automountServiceAccountToken: false
           nodeSelector:
             kubernetes.io/hostname: pi1
+          securityContext:                   # per-image canary (with v24)
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
           containers:
             - name: alerts
-              image: local/telegram-digest:v23
+              image: local/telegram-digest:v24
               imagePullPolicy: Never
               args: ["python", "alerts.py"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
               env:
                 - name: PGHOST
                   value: timescaledb.market-data.svc.cluster.local

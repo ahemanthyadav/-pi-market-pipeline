@@ -4,7 +4,10 @@
 > the linked docs — this file is the index + status. Maintained per AGENTS.md docs
 > discipline: mark items ✅ with a date (and where the completion is recorded) when
 > done; prune ✅ lines into the relevant doc's history at housekeeping time.
-> **Last reviewed: 2026-10-25** (full-project review pass, 3-agent + synthesis; fixes implemented same session:
+> **Last reviewed: 2026-10-26** (deploy pass — owner said "deploy all": staged hardening applied, telegram v24
+> live with probe + non-root canary, host keys pinned, H-6 decided forward-only, AR-8 blocked on an owner-run
+> Secret/role creation — details in §1. Netpol finding: TX2 kernel has no ipset → netpol unenforced on the DB's
+> node, documented in `manifests/network-policies.yaml`.) Earlier **2026-10-25** (full-project review pass, 3-agent + synthesis; fixes implemented same session:
 > pre-commit `@@PW@@` pattern-bypass closed (+2 hook test cases) · `tests/run-all.sh` single entrypoint (AGENTS/CI/CLAUDE.md all point at it) ·
 > `mdjob.write_window` now returns the live conn after a retry (+`tests/test_mdjob.py`, 8 tests) · ops-tools: labeled runcmd timeout (rc 5),
 > getfile/putfile error handling + exit codes, optional `.ssh_known_hosts` pinning, `_creds` unquoted-whitespace warning, `ev0 --start`
@@ -42,11 +45,12 @@ Detail stays with each item; this is the decision view — keep it in sync when 
 | G-6 NSE backfill follow-ups | resume Job logs `cursor cleared` | un-suspend `nse-fundamentals`, screener DRY_RUN diff, EV-0 re-run, §4.3a counts (~1 h) |
 | EV-9 verification | Job `fundamentals-ev9` completes | one stale-count query + tracker tick (minutes) |
 
-**Agent-ready, needs only a calm cluster window (added 2026-10-25):**
+**Agent-ready, needs only a calm cluster window:**
 | Item | What | Effort |
 |---|---|---|
-| Staged manifest hardening apply | automount-token off, Grafana probes, netpol (DB pod restart last) | ~30 min, §7 window |
-| Telegram v24 rebuild | §6 cycle; liveness probe applies WITH v24, never before | ~30 min |
+| ~~Staged manifest hardening apply~~ | ✅ applied 2026-10-26 (netpol: TX2 kernel lacks ipset — documented no-op for the DB) | done |
+| ~~Telegram v24 rebuild~~ | ✅ live 2026-10-26 incl. probe + non-root canary | done |
+| AR-8 PGUSER flip | after the owner runs the two §1 commands (Secret + role) | ~30 min |
 
 **Owner hands/decision first — then mostly minutes, not sessions:**
 | Item | What it takes from the owner | Agent part after |
@@ -59,7 +63,7 @@ Detail stays with each item; this is the decision view — keep it in sync when 
 | Who messaged the bot | confirm the chat id is `sailu` (2 min) | tracker tick |
 | Off-site backup | pick destination + encryption, create the account/credentials | build the restic/rclone job + docs (~1 session) |
 | k3s restore drill | a spare SSD + ~1 h at the bench | agent drives the §9 steps alongside |
-| H-6 FII/DII history | decide: forward-only vs third-party source | none, or ~1 session if a source is adopted |
+| ~~H-6 FII/DII history~~ | ✅ owner decided 2026-10-26: **forward-only** — no third-party backfill; item closed | done |
 
 **Time-gated — the calendar does the work (agent acts at the date):**
 | Item | Due | Effort then |
@@ -74,7 +78,8 @@ Detail stays with each item; this is the decision view — keep it in sync when 
 AR-2 `mdjob` adoption (API fixed + tested 2026-10-25 — ready to adopt) · AR-5 lock installs (14 images) ·
 F401 import cleanups · per-job heartbeat v2 · telegram `stocks.py` `series()` onto the facts path ·
 news-fetcher `timegm` fix (in repo 2026-10-25; identical behavior in-cluster, so next natural news rebuild) ·
-per-image `securityContext` (runAsNonRoot + drop caps — needs a canary per image, start with telegram/news).
+per-image `securityContext` (runAsNonRoot + drop caps — **telegram canary PASSED with v24 2026-10-26**; roll out to the
+other images per natural rebuild, news next).
 Each is ~20 min *inside* an already-happening §6 cycle.
 
 **Projects — each needs its own session(s) plus a decision or ADR (order per §16 priorities):**
@@ -95,27 +100,33 @@ Each is ~20 min *inside* an already-happening §6 cycle.
 
 ## 1. Immediate (next checkpoint: tomorrow's `/health`)
 
-- [ ] 🔶 **Apply the staged manifest hardening (2026-10-25) — calm window, `cluster-mutation` discipline.**
-  In the repo but NOT applied to the cluster: `automountServiceAccountToken: false` on every pod spec
-  (verified: no pod uses the k8s API — all kubectl refs are comments/log text; **the StatefulSet line restarts
-  the DB pod**, so that one goes in a §7 quiet window), Grafana readiness+liveness probes
-  (`grafana/deployment.yaml`), and `manifests/network-policies.yaml` (DB ingress limited to the market-data
-  namespace — verify kube-router netpol is enabled on pi2 first; apply+verify steps in the file header).
-  Order: grafana → cronjobs (spec-only, no pod impact until next run) → netpol → DB StatefulSet last.
-- [ ] 🔶 **Telegram image v23→v24 rebuild (§6 cycle)** — picks up: HTML-safe `trim_html` in bot/digest/alerts
-  (a cut mid-`<pre>` made Telegram 400 and the message was lost), getMe startup retry, rule-9 bounds
-  (/fii + digest headlines/flows — after >90 d dead capital_flows /fii shows empty; headlines >3 d old drop out),
-  factcheck comment fix, `/tmp/bot-alive` heartbeat. **The staged liveness probe in `telegram/deployment.yaml`
-  must be applied together with (never before) v24** — on v23 the heartbeat file doesn't exist and the pod
-  would restart-loop. factcheck.py also ships in the llm-narrative ConfigMap (`apply-llm.sh`) — re-apply
-  optional (comment-only). No new deps, no schema change.
-- [ ] 🤔 **AR-8 completion: writer role `pipeline_rw` (owner approval needed — non-SELECT SQL).** Jobs still
-  connect as the `postgres` superuser. Proposal: `CREATE ROLE pipeline_rw LOGIN PASSWORD <new Secret>;
-  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO pipeline_rw;` + default privileges,
-  new Secret `pipeline-db-rw`, then flip job manifests' PGUSER per natural rebuild (superuser stays for
-  migrations/backups). Say the word and an agent drafts the exact SQL + manifest diffs for review.
-- [ ] 🔶 *(optional, 5 min)* **Pin SSH host keys:** `ssh-keyscan <each node ip> >> .ssh_known_hosts` (gitignored)
-  — ops-tools then reject unknown/changed keys instead of auto-accepting (`_creds.host_key_policy`).
+- [x] ✅ 2026-10-26 **Staged manifest hardening APPLIED** (owner said "deploy all"; cluster-mutation discipline,
+  one change verified at a time): grafana probes live (new pod healthy, `/api/health` ok) → all 26 CronJobs
+  configured (spec-only; `nse-fundamentals` suspend state preserved) → DB StatefulSet applied in the
+  05:11–05:30 UTC gap between intraday and the morning fetch block (pod back in 22 s, `pg_isready` +
+  bounded query verified) → netpol applied. **Netpol finding:** NOT enforced on the TX2 — L4T kernel
+  `4.9.337-tegra` ships no ipset modules (kube-router hard dep); chains verified present on pi1/pi2/pi3,
+  absent on TX2, and the DB is pinned to TX2, so the policy is a documented no-op for the DB until the
+  kernel changes or the DB moves (header updated; cross-ns `nc` to :5432 still connects). DB guard remains
+  Postgres auth + AR-8 roles. Kept applied — zero cost, activates if placement ever changes.
+- [x] ✅ 2026-10-26 **Telegram v24 LIVE (§6 cycle run end-to-end):** built on TX2, tarball archived to
+  `/mnt/tx2-ssd/image-tarballs/` + `SHA256SUMS.all` regenerated, imported on pi1, deployment applied WITH
+  the liveness probe + **non-root securityContext (per-image canary — PASSED: uid 1000, caps dropped)**;
+  bot polling (owner + 2 members), heartbeat 21 s fresh; cronjobs on v24; no-send validation job ran
+  `digest.build_message()` against the live DB → `DIGEST-BUILD-OK 873 chars`. First scheduled v24
+  digest/alerts: 2026-10-27 cycle — glance at `ALERTS-OK`/`DIGEST-DONE` markers.
+- [ ] ⛔ **AR-8 completion: writer role `pipeline_rw` — blocked on a permission gate, needs the OWNER to run
+  two commands.** Owner approved 2026-10-26 ("implement all"), fetcher code verified DML-only (no DDL
+  anywhere), but the agent permission classifier denies secret-store writes, so the Secret + role must be
+  created by hand. Run (never echo the password):
+  1. `PW=$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 32)`
+  2. `kubectl -n market-data create secret generic pipeline-db-rw --from-file=password=<(printf %s "$PW")`
+  3. `printf "CREATE ROLE pipeline_rw LOGIN PASSWORD '%s';\nGRANT USAGE ON SCHEMA public TO pipeline_rw;\nGRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO pipeline_rw;\nGRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO pipeline_rw;\nALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO pipeline_rw;\nALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO pipeline_rw;\n" "$PW" | kubectl -n market-data exec -i timescaledb-0 -- psql -U postgres -d postgres -f -`
+  Then any session can flip the 21 manifest files' `PGUSER: postgres` → `pipeline_rw` +
+  `timescaledb-auth` → `pipeline-db-rw` (pattern precedent: telegram already runs as `telegram_app`),
+  verify with one triggered job, and apply. pg-backup + schema-job stay on `postgres` (pg_dump/DDL).
+- [x] ✅ 2026-10-26 **SSH host keys pinned:** all 5 nodes ssh-keyscanned into gitignored `.ssh_known_hosts`
+  (15 keys, 5 hosts); `_creds.host_key_policy` now RejectPolicy; runcmd verified against every node after.
 
 > **Restored 2026-10-12:** commit `c455687` dropped the power-fix item, §2 (Security & hygiene), the `nodewatch` and
 > stats-logger records from this file. They are back below (power item and `nodewatch` here, §2 before §4), brought up to date
