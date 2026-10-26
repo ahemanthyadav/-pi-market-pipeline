@@ -1,0 +1,40 @@
+# Network policies — applied 2026-10-26. **NOT ENFORCED on the TX2** (verified
+# same day): the L4T kernel 4.9.337-tegra ships no ipset modules, which
+# kube-router's netpol controller requires, so no NWPLCY iptables chains are
+# programmed there — and the DB pod is pinned to the TX2. The policy IS
+# enforced on pi1/pi2/pi3 (chains verified) and activates for the DB if it
+# ever moves or the TX2 kernel changes. Until then the DB's real guards stay
+# Postgres auth + the AR-8 restricted roles. Kept applied: zero cost, honest
+# header, fails closed nowhere.
+#
+# Completes the AR-8 least-privilege story at the network layer: today any pod
+# in ANY namespace can open timescaledb:5432; the only guard is Postgres auth.
+# This restricts DB ingress to pods in the market-data namespace (every job,
+# Grafana and the bot live here, so nothing legitimate changes).
+#
+# k3s enforces NetworkPolicy via its built-in kube-router controller (enabled
+# unless the server runs --disable-network-policy — verify on pi2 before
+# trusting it). Admin paths are unaffected: kubectl exec (§5 DB pattern) and
+# kubectl port-forward both enter via the kubelet, not the pod network.
+#
+# Apply (calm window, cluster-mutation discipline), then verify:
+#   kubectl apply -f manifests/network-policies.yaml
+#   kubectl -n market-data exec timescaledb-0 -- pg_isready          # still up
+#   kubectl -n default run np-test --rm -it --image=busybox --restart=Never -- \
+#     nc -z -w3 timescaledb.market-data.svc.cluster.local 5432       # must now FAIL
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: timescaledb-ingress-same-namespace
+  namespace: market-data
+spec:
+  podSelector:
+    matchLabels:
+      app: timescaledb
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}   # any pod in market-data; other namespaces are cut off
+      ports:
+        - protocol: TCP
+          port: 5432

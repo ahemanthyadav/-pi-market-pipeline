@@ -23,6 +23,7 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          automountServiceAccountToken: false
           nodeSelector:
             hardware: gpu
           tolerations:

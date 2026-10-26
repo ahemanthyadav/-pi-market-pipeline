@@ -10,8 +10,8 @@ copying this file into the build context (no registry, ADR 0004).
         with job_run("fx-fetcher") as run:
             rows = fetch()
             conn = connect()
-            run.rows = write_window(conn, "fx_rates", ["pair", "ts"], rows)
-            conn.close()
+            run.rows, conn = write_window(conn, "fx_rates", ["pair", "ts"], rows)
+            conn.close()   # always close the RETURNED conn — a retry replaces it
         return 0 if run.rows else 1
 
 job_runs is created by 06d-job-runs.sql in the schema ConfigMap.
@@ -41,12 +41,13 @@ def write_window(conn, table, key_cols, rows, retry=True):
     """DELETE + INSERT each row's own key in ONE transaction (ADR 0005).
 
     rows: list of dicts with identical keys, each containing every key_col.
-    On OperationalError the connection is rebuilt and the whole window retried
-    once; returns the row count. The caller owns the (possibly new) connection
-    only through the return value of connect() — pass retry=False to opt out.
+    Returns (written, conn). On OperationalError the broken connection is closed,
+    a fresh one is built and the whole window retried once — so keep using (and
+    eventually close) the RETURNED connection, never the one passed in (same
+    contract as stock_prices.write_resilient). Pass retry=False to opt out.
     """
     if not rows:
-        return 0
+        return 0, conn
     cols = list(rows[0].keys())
     where = " AND ".join(f"{c}=%s" for c in key_cols)
     insert = (f"INSERT INTO {table} ({', '.join(cols)}) "
@@ -58,15 +59,15 @@ def write_window(conn, table, key_cols, rows, retry=True):
                     cur.execute(f"DELETE FROM {table} WHERE {where}",
                                 [row[c] for c in key_cols])
                     cur.execute(insert, [row[c] for c in cols])
-        return len(rows)
+        return len(rows), conn
     except psycopg.OperationalError:
         if not retry:
             raise
-        fresh = connect()
         try:
-            return write_window(fresh, table, key_cols, rows, retry=False)
-        finally:
-            fresh.close()
+            conn.close()
+        except Exception:  # noqa: BLE001 — the conn is already broken
+            pass
+        return write_window(connect(), table, key_cols, rows, retry=False)
 
 
 class _Run:

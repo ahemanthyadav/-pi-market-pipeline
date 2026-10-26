@@ -19,9 +19,10 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      automountServiceAccountToken: false
       containers:
         - name: backfill
-          image: local/nse-fetcher:v4
+          image: local/nse-fetcher:v7
           imagePullPolicy: Never
           env:
             - name: PGHOST
@@ -46,3 +47,53 @@ spec:
             limits:
               memory: 1Gi
               cpu: "1"
+---
+# One-shot NSE-DIRECT deep backfill (v5, 2026-10-26): ^CNXAUTO + ^CNXFMCG full
+# daily OHLC 2015 → today from api/historicalOR/indicesHistory (Yahoo's series
+# are dead), plus NIFTYMIDCAP150.NS pre-Yahoo history (close-only early years),
+# hard-capped strictly BEFORE 2019-01-14 — Yahoo owns the series from that bar
+# on (rule 4). Idempotent; skips the Yahoo leg entirely (NSE_DIRECT_ONLY).
+#   kubectl apply -f backfill-job.yaml   (or apply this doc alone)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backfill-nse-direct
+  namespace: market-data
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 604800
+  template:
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      containers:
+        - name: backfill
+          image: local/nse-fetcher:v7
+          imagePullPolicy: Never
+          env:
+            - name: PGHOST
+              value: timescaledb.market-data.svc.cluster.local
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: timescaledb-auth
+                  key: password
+            - name: PGDATABASE
+              value: postgres
+            - name: BACKFILL
+              value: "1"
+            - name: NSE_DIRECT_ONLY
+              value: "1"
+            - name: NSE_MIDCAP150
+              value: "1"
+            - name: FETCH_START
+              value: "2015-01-01"
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 512Mi
+              cpu: 500m

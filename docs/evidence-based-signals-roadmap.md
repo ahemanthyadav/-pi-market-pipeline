@@ -52,7 +52,7 @@ in the database.
 | ID | Item | Why it has backing | Data | Effort |
 |---|---|---|---|---|
 | EV-0 | **Signal test harness**: monthly cross-sectional rank correlation between a signal and next-month return (the information coefficient), its t-statistic, quintile spread, turnover, and results split by decade and by universe | Standard methodology since Fama & MacBeth (1973). Acceptance bar follows Harvey, Liu & Zhu (2016): because hundreds of signals have been tried, require **t > 3**, not 2 | Have (prices; EDGAR for US fundamentals) | M |
-| EV-1 | Historical index membership (S&P 500 changes list; NSE reconstitution circulars) | Removes survivorship bias from EV-0 | New feed | M |
+| EV-1 | ✅ **US DONE 2026-10-26** (ADR 0025, `membership-history` CronJob, `screener:v18`) — point-in-time S&P 500 intervals in `index_membership` from Wikipedia's constituents + changes tables; canary: 891 intervals, 503 open, drift 0 vs universe_constituents, spot-checked against the 2026-10-06 changes. Comprehensive ~2012→, selected changes to 1976; 6 ticker-rename danglers WARNed and dropped. **India deferred** (NSE circulars are PDFs — own session; forward history accrues via universe_membership_snapshots). US EV-0 re-run now unblocked | Removes survivorship bias from EV-0 | New feed | M |
 | EV-2 | **Keep every weekly fundamentals snapshot** instead of overwriting, starting now | Builds the point-in-time history India lacks; costs nothing today, unrecoverable later | Schema: key snapshots by fetch date | S |
 
 ### Phase 1 — price-only signals (data on hand, testable immediately)
@@ -70,7 +70,7 @@ in the database.
 
 | ID | Signal | Evidence | Data | Effort |
 |---|---|---|---|---|
-| EV-9 | **More statement lines** in `stock_fundamentals.py`: total assets, gross profit, operating cash flow, current assets and liabilities, shares outstanding, dividends paid | Prerequisite for EV-10…EV-14 | Yahoo statements carry all of them; EDGAR for the US back to 2007 | M |
+| EV-9 | ✅ **DONE 2026-10-26** (`screener:v17`) — **more statement lines** in `stock_fundamentals.py`: total assets, gross profit, current assets and liabilities, shares outstanding, dividends paid (positive-outflow convention, `_norm`); OCF added to the Yahoo leg for `financial_facts` (accruals input). Canary 3/3 OK, all 6 metrics verified in both tables; full universe fills on the next weekly run (2026-10-31). Gross profit is sparse on EDGAR (many filers skip the `GrossProfit` tag — derive revenue−COGS if EV-10 needs more coverage) | Prerequisite for EV-10…EV-14 | Yahoo statements carry all of them; EDGAR for the US back to 2007 | M |
 | EV-10 | **Gross profitability**: gross profit ÷ total assets | Novy-Marx (2013). As strong as value, and negatively correlated with it, so the two combine well | EV-9 | S |
 | EV-11 | **Investment (asset growth)**: year-on-year growth in total assets, *lower is better* | Cooper, Gulen & Schill (2008); the investment factor in Fama & French (2015) | EV-9 | S |
 | EV-12 | **Accruals**: (net income − operating cash flow) ÷ total assets, lower is better | Sloan (1996) | EV-9 | S |

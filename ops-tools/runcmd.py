@@ -12,14 +12,22 @@ Notes:
 - Passwords come from the gitignored `.secrets.env` (PI_PASS / TX2_PASS, picked by
   host) via _creds.py; SSH_PASS in the environment overrides. Never put a
   password on the command line or in a doc.
-- Long commands (>~120s of no output, e.g. big untars) hit the exec timeout:
-  launch those detached with nohup and poll instead.
-- Host keys are auto-accepted on first connect (homelab LAN).
+- Long commands (>~120s of no output, e.g. big untars) hit the exec timeout
+  (reported as TIMEOUT, rc 5): launch those detached with nohup and poll instead.
+- Host keys: pinned against the gitignored .ssh_known_hosts when it exists
+  (ssh-keyscan each host once); otherwise auto-accepted (homelab LAN).
+- stdout is drained before stderr on one channel; a command spewing many MB of
+  stderr while stdout is still open can stall into the timeout — redirect 2>&1
+  remotely for such commands.
+
+Exit codes: 2 usage/no-password · 3 connect fail · 4 remote rc!=0 · 5 timeout.
 """
-import paramiko
+import socket
 import sys
 
-from _creds import expand, password_for, resolve_host
+import paramiko
+
+from _creds import expand, host_key_policy, password_for, resolve_host
 
 
 def main() -> int:
@@ -34,7 +42,7 @@ def main() -> int:
     cmd = expand(cmd, pw)
     host = resolve_host(host)
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    host_key_policy(client)
     try:
         # 30s auth/banner timeouts: pi2's PAM auth under load can exceed 10s,
         # which paramiko aborts as a generic "Authentication failed" —
@@ -51,6 +59,10 @@ def main() -> int:
         out = stdout.read().decode(errors="replace")
         err = stderr.read().decode(errors="replace")
         rc = stdout.channel.recv_exit_status()
+    except socket.timeout:
+        print("TIMEOUT: no channel data for 120s — long commands: launch with "
+              "nohup and poll (see docstring)", file=sys.stderr)
+        return 5
     finally:
         client.close()
     print(out, end="")

@@ -371,6 +371,11 @@ data:
     -- (ops-tools/sql/2026-10-18-merge-weekly-chunks.sql) -> 107 chunks, 34 ms planning.
     -- Idempotent: only affects chunks created from now on.
     SELECT set_chunk_time_interval('stock_prices', INTERVAL '365 days');
+    -- 2026-10-19: the history backfills (H-1..H-5) put decades into tables still on 7-day chunks
+    -- (bond_yields 1,921 / fx_rates 1,565 chunks; FRED's DFF from 1954 hit "out of shared memory").
+    -- Same fix: 1-year chunks; fx_rates/bond_yields 1990-2025 merged per year (rows + sums identical).
+    SELECT set_chunk_time_interval(t, INTERVAL '365 days')
+      FROM unnest(ARRAY['fx_rates', 'bond_yields', 'interest_rates', 'technical_indicators', 'stock_metrics_daily']) t;
   07-headline-intelligence.sql: |
     -- Headline entity/event extraction v1 (2026-10-09, findings Tier 1 #2;
     -- ADR 0010). Gazetteer-first: entities are INSTRUMENT-linked matches from
@@ -493,3 +498,35 @@ data:
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (ts, kind)
     );
+  13-news-embeddings.sql: |
+    -- ML-2 groundwork (2026-10-19, ADR 0024): headline embeddings from the shared llm-gateway (`embed`).
+    -- One row per raw_headlines.id; `model` = the exact embedding model (vectors are only ever compared within
+    -- one model). story_id = headline_id of the first headline of its story (manifests/llm/news_embed.py).
+    -- Plain table, exact search (~90 headlines/day; no ANN index needed — pgvector HNSW caps at 2000 dims).
+    CREATE EXTENSION IF NOT EXISTS vector;
+    CREATE TABLE IF NOT EXISTS headline_embeddings (
+      headline_id BIGINT PRIMARY KEY,
+      ts          TIMESTAMPTZ NOT NULL,
+      model       TEXT NOT NULL,
+      embedding   vector(2048) NOT NULL,
+      story_id    BIGINT,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_headline_embeddings_ts ON headline_embeddings (ts DESC);
+    CREATE INDEX IF NOT EXISTS idx_headline_embeddings_story ON headline_embeddings (story_id);
+  14-index-membership.sql: |
+    -- EV-1 (2026-10-26, ADR 0025): point-in-time index membership intervals,
+    -- reconstructed from public change histories (membership_history.py).
+    -- removed IS NULL = currently a member. added = 1900-01-01 means "member
+    -- since before the source's records" (clip backtests to covered windows).
+    CREATE TABLE IF NOT EXISTS index_membership (
+      universe TEXT NOT NULL,              -- 'SP500' ('NIFTY500' when a source lands)
+      symbol   TEXT NOT NULL,              -- universe_constituents.symbol form
+      added    DATE NOT NULL,
+      removed  DATE,                       -- NULL = still in the index
+      source   TEXT NOT NULL,              -- 'wikipedia'
+      PRIMARY KEY (universe, symbol, added)
+    );
+    -- Point-in-time lookup: members of a universe on a given day.
+    CREATE INDEX IF NOT EXISTS ix_index_membership_window
+      ON index_membership (universe, added, removed);

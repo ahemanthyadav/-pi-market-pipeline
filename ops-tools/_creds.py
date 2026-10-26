@@ -25,7 +25,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 ENV_FILE = REPO / ".secrets.env"
 HOSTS_FILE = REPO / ".hosts.env"
+KNOWN_HOSTS = REPO / ".ssh_known_hosts"
 ALIASES = {"pi0": "PI0_IP", "pi1": "PI1_IP", "pi2": "PI2_IP", "pi3": "PI3_IP", "tx2": "TX2_IP"}
+
+_truncation_warned: set = set()
 
 
 def _load(path: Path) -> dict:
@@ -41,7 +44,27 @@ def _load(path: Path) -> dict:
             except ValueError:
                 parts = [val]
             out[key.strip()] = parts[0] if parts else ""
+            # An unquoted value with spaces silently became its first word — the
+            # symptom is a baffling auth failure, so say it once, loudly.
+            if len(parts) > 1 and (path.name, key.strip()) not in _truncation_warned:
+                _truncation_warned.add((path.name, key.strip()))
+                print(f"WARN: {key.strip()} in {path.name} has unquoted whitespace — "
+                      "using only the first word; quote the value if that is wrong",
+                      file=sys.stderr)
     return out
+
+
+def host_key_policy(client) -> None:
+    """Pin SSH host keys when <repo>/.ssh_known_hosts exists (gitignored; create it
+    once with `ssh-keyscan <each-ip> >> .ssh_known_hosts`): unknown or changed keys
+    are then rejected instead of auto-accepted — password auth on a LAN deserves
+    that. Without the file, fall back to auto-accept (previous behavior)."""
+    import paramiko
+    if KNOWN_HOSTS.exists():
+        client.load_host_keys(str(KNOWN_HOSTS))
+        client.set_missing_host_key_policy(paramiko.RejectPolicy())
+    else:
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
 
 def resolve_host(host: str) -> str:

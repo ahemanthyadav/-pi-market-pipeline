@@ -36,8 +36,8 @@
   allow-list — ADR 0012), CronJobs `telegram-digest` (08:00 IST — the only job with an explicit timeZone) and `telegram-alerts` (02:45).
   Pinned so image imports are needed on one node only.
 - **Unpinned jobs:** eligible for any of the 18 unpinned CronJobs (§3.1) — **only if the image is imported on pi1** (no registry).
-  `telegram-digest:v13` (2026-10-19: AI digest note + forgiving symbol lookup) on pi1 only (pinned).
-  `screener:v15` (2026-10-18: data foundations, facts reader, NSE fundamentals) + `pipeline-health:v5` imported on pi1 and pi3 (v10–v14 + health v4 kept for rollback — remove old tags one by one, never `--prune`; pi2 skipped — cordoned). The NSE backfill Job runs on pi1/pi3 (network-bound, ~19 h). After the
+  `telegram-digest:v24` (2026-10-26: HTML-safe trim, getMe retry, rule-9 bounds, liveness heartbeat; non-root) on pi1 only (pinned).
+  `screener:v15` (2026-10-18: data foundations, facts reader, NSE fundamentals) + `pipeline-health:v6` (2026-10-19: llm_narrative + llm_gateway heartbeat feeds) imported on pi1 and pi3 (v10–v14 + health v4/v5 kept for rollback — remove old tags one by one, never `--prune`; pi2e, never `--prune`; pi2 skipped — cordoned). The NSE backfill Job runs on pi1/pi3 (network-bound, ~19 h). After the
   10-18 prune incident pi1 holds all 14 images its jobs need (incl. telegram-digest:v8), pi3 all 13 floating ones — verified against the manifests.
   The earlier image gap is closed: `yfinance-fetcher:v5`, `nse-fetcher:v4` and `screener:v10` (v9 kept) are imported on **both** pi1 and
   pi3 (verified with `ctr images ls` 2026-10-14 06:20 UTC) — and since then most floating jobs run here (§3.1).

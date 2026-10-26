@@ -33,6 +33,7 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          automountServiceAccountToken: false
           containers:
             - name: fetcher
               image: local/rbi-fetcher:v1

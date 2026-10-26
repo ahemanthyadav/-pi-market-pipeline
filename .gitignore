@@ -6,6 +6,8 @@
 # Local host inventory (real IPs) — tracked files carry node names/placeholders only
 .hosts.env
 !.hosts.env.example
+# Pinned SSH host keys for ops-tools (contains real IPs; see _creds.host_key_policy)
+.ssh_known_hosts
 manifests/**/secret.yaml
 **/secret.yaml
 *.env

@@ -22,9 +22,10 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          automountServiceAccountToken: false
           containers:
             - name: narrative
-              image: local/pipeline-health:v5
+              image: local/pipeline-health:v6
               imagePullPolicy: Never
               command: ["python", "/scripts/narrative.py"]
               env:
@@ -51,6 +52,72 @@ spec:
                       key: api-key
                 - name: LLM_CAPABILITY
                   value: fast-json
+              resources:
+                requests: {memory: 64Mi, cpu: 50m}
+                limits: {memory: 256Mi, cpu: 250m}
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: script
+              configMap:
+                name: llm-narrative-script
+---
+# ML-2 groundwork (ADR 0024) — headline embeddings + story grouping, 01:00 UTC (after news 23:45, sentiment
+# 00:15, NER 00:45). Code: manifests/llm/news_embed.py in the same ConfigMap (ops-tools/apply-llm.sh).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: news-embed
+  namespace: market-data
+spec:
+  schedule: "0 1 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 1200
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      ttlSecondsAfterFinished: 604800
+      template:
+        spec:
+          restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          containers:
+            - name: embed
+              image: local/pipeline-health:v6
+              imagePullPolicy: Never
+              command: ["python", "/scripts/news_embed.py"]
+              env:
+                - name: PGHOST
+                  value: timescaledb.market-data.svc.cluster.local
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+                - name: PGDATABASE
+                  value: postgres
+                - name: LLM_BASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: llm-gateway-key
+                      key: base-url
+                - name: LLM_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: llm-gateway-key
+                      key: api-key
+                # ADR 0024 amendment 2026-10-20: 0.86 only caught near-duplicates (49/1651 grouped).
+                # Measured NN-distance distribution + pair review: 0.10-0.16 band is same-story rewrites,
+                # 0.20+ unvalidated. 0.82 = cosine distance 0.18. Re-tune only with a fresh pair review.
+                - name: STORY_SIM
+                  value: "0.82"
               resources:
                 requests: {memory: 64Mi, cpu: 50m}
                 limits: {memory: 256Mi, cpu: 250m}

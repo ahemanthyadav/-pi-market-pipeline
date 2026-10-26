@@ -1,6 +1,7 @@
 # One-shot schema bootstrap. Waits for the DB (pg_isready loop), then applies
-# /schema/01-schema.sql with ON_ERROR_STOP. Safe to re-run (all DDL is
-# IF NOT EXISTS). Uses the same TimescaleDB image for matching psql client.
+# every /schema/*.sql in sorted order (01-schema … 13-*, including the 06x
+# interleaves) with ON_ERROR_STOP. Safe to re-run (all DDL is IF NOT EXISTS /
+# CREATE OR REPLACE). Uses the same TimescaleDB image for matching psql client.
 # Runs on any Ready Pi worker (no node pinning needed).
 apiVersion: batch/v1
 kind: Job
@@ -12,6 +13,7 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      automountServiceAccountToken: false
       containers:
         - name: schema
           image: timescale/timescaledb:2.30.1-pg16

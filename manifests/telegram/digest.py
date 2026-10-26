@@ -12,6 +12,9 @@ channel; the token/chat ID stay deployment config, never code.
 Since v9 (2026-10-18): an optional AI summary section from llm_narratives (ML-7a) when
 DIGEST_NARRATIVE=1 and today's note passed the number check; otherwise the digest is unchanged.
 
+Since 2026-10-25: an over-long digest is cut with stocks.trim_html (a raw slice mid-tag
+is a Telegram 400 — the digest would be lost), and headlines() is time-bounded (rule 9).
+
 Env: PGHOST, PGUSER, PGPASSWORD, PGDATABASE, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (the owner;
 other users come from the bot_users table — ADR 0012). One personalised message per user.
 Exit 0 only when the Bot API accepts the message (CronJob failure signal).
@@ -69,9 +72,12 @@ def sentiment(cur):
 
 
 def flows(cur):
+    # Rule 9: bound both scans — an unbounded max(ts) opens every chunk.
     cur.execute(
         "SELECT flow_type, amount FROM capital_flows "
-        "WHERE direction = 'net' AND ts = (SELECT max(ts) FROM capital_flows) "
+        "WHERE direction = 'net' AND ts >= now() - interval '90 days' "
+        "AND ts = (SELECT max(ts) FROM capital_flows "
+        "          WHERE ts >= now() - interval '90 days') "
         "ORDER BY flow_type"
     )
     return cur.fetchall()
@@ -88,8 +94,10 @@ def stale_feeds(cur):
 def headlines(cur):
     # Latest scored headlines, no relevance filter: ticker_relevance is a
     # sector/index keyword tag or 'general' (sentiment-score.py), not a level.
+    # Rule 9: ts >= bound so the planner prunes chunks (3d spans a weekend gap).
     cur.execute(
         "SELECT ts, headline, source FROM news_sentiment "
+        "WHERE ts >= now() - interval '3 days' "
         "ORDER BY ts DESC LIMIT %s",
         (TOP_HEADLINES,),
     )
@@ -174,10 +182,8 @@ def build_message(chat_id=None):
             ))
 
     conn.close()
-    text = "\n".join(lines)
-    if len(text) > TELEGRAM_LIMIT:
-        text = text[: TELEGRAM_LIMIT - 1] + "…"
-    return text
+    # Never slice raw HTML: a cut mid-tag is a Telegram 400 and the digest is lost.
+    return stocks.trim_html("\n".join(lines), TELEGRAM_LIMIT)
 
 
 def send(text: str, chat=None) -> bool:

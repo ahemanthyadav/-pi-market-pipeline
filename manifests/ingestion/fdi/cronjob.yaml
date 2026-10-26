@@ -22,6 +22,7 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          automountServiceAccountToken: false
           containers:
             - name: watch
               image: local/fdi-watch:v1

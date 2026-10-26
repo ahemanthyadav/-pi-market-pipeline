@@ -1,0 +1,176 @@
+# One-shot history backfills H-1..H-5 (2026-10-19) — script: history_backfill.py (see its header).
+# Ship the script, then apply the Jobs you want (each is independent and idempotent; only pre-live dates are written):
+#   kubectl -n market-data create configmap history-backfill --from-file=history_backfill.py=manifests/ingestion/history/history_backfill.py \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl apply -f manifests/ingestion/history/jobs.yaml           # or -l via: kubectl apply -f - <<< one document
+# Logs end with HISTORY-BACKFILL-OK mode=… rows=…  Delete the Jobs + ConfigMap afterwards (TTL removes Jobs after 7 days).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backfill-history-fx
+  namespace: market-data
+  labels: {app: history-backfill, mode: fx}
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 604800
+  template:
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      containers:
+        - name: backfill
+          image: local/fx-fetcher:v1
+          imagePullPolicy: Never
+          command: ["python", "/scripts/history_backfill.py"]
+          env:
+            - {name: MODE, value: "fx"}
+            - {name: PGHOST, value: timescaledb.market-data.svc.cluster.local}
+            - {name: PGUSER, value: postgres}
+            - {name: PGPASSWORD, valueFrom: {secretKeyRef: {name: timescaledb-auth, key: password}}}
+            - {name: PGDATABASE, value: postgres}
+          resources:
+            requests: {memory: 128Mi, cpu: 100m}
+            limits: {memory: 256Mi, cpu: 500m}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+      volumes:
+        - name: scripts
+          configMap: {name: history-backfill}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backfill-history-yields
+  namespace: market-data
+  labels: {app: history-backfill, mode: yields}
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 604800
+  template:
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      containers:
+        - name: backfill
+          image: local/fx-fetcher:v1
+          imagePullPolicy: Never
+          command: ["python", "/scripts/history_backfill.py"]
+          env:
+            - {name: MODE, value: "yields"}
+            - {name: PGHOST, value: timescaledb.market-data.svc.cluster.local}
+            - {name: PGUSER, value: postgres}
+            - {name: PGPASSWORD, valueFrom: {secretKeyRef: {name: timescaledb-auth, key: password}}}
+            - {name: PGDATABASE, value: postgres}
+          resources:
+            requests: {memory: 128Mi, cpu: 100m}
+            limits: {memory: 256Mi, cpu: 500m}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+      volumes:
+        - name: scripts
+          configMap: {name: history-backfill}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backfill-history-fred
+  namespace: market-data
+  labels: {app: history-backfill, mode: fred}
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 604800
+  template:
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      containers:
+        - name: backfill
+          image: local/rates-fetcher:v1
+          imagePullPolicy: Never
+          command: ["python", "/scripts/history_backfill.py"]
+          env:
+            - {name: MODE, value: "fred"}
+            - {name: PGHOST, value: timescaledb.market-data.svc.cluster.local}
+            - {name: PGUSER, value: postgres}
+            - {name: PGPASSWORD, valueFrom: {secretKeyRef: {name: timescaledb-auth, key: password}}}
+            - {name: PGDATABASE, value: postgres}
+            - {name: FRED_API_KEY, valueFrom: {secretKeyRef: {name: fred-api, key: api-key}}}
+          resources:
+            requests: {memory: 128Mi, cpu: 100m}
+            limits: {memory: 256Mi, cpu: 500m}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+      volumes:
+        - name: scripts
+          configMap: {name: history-backfill}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backfill-history-ta
+  namespace: market-data
+  labels: {app: history-backfill, mode: ta}
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 5400
+  ttlSecondsAfterFinished: 604800
+  template:
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      containers:
+        - name: backfill
+          image: local/ta-compute:v1
+          imagePullPolicy: Never
+          command: ["python", "/scripts/history_backfill.py"]
+          env:
+            - {name: MODE, value: "ta"}
+            - {name: PGHOST, value: timescaledb.market-data.svc.cluster.local}
+            - {name: PGUSER, value: postgres}
+            - {name: PGPASSWORD, valueFrom: {secretKeyRef: {name: timescaledb-auth, key: password}}}
+            - {name: PGDATABASE, value: postgres}
+          resources:
+            requests: {memory: 128Mi, cpu: 100m}
+            limits: {memory: 768Mi, cpu: 1000m}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+      volumes:
+        - name: scripts
+          configMap: {name: history-backfill}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backfill-history-metrics
+  namespace: market-data
+  labels: {app: history-backfill, mode: metrics}
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 14400
+  ttlSecondsAfterFinished: 604800
+  template:
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      containers:
+        - name: backfill
+          image: local/screener:v18
+          imagePullPolicy: Never
+          command: ["python", "/scripts/history_backfill.py"]
+          env:
+            - {name: MODE, value: "metrics"}
+            - {name: PGHOST, value: timescaledb.market-data.svc.cluster.local}
+            - {name: PGUSER, value: postgres}
+            - {name: PGPASSWORD, valueFrom: {secretKeyRef: {name: timescaledb-auth, key: password}}}
+            - {name: PGDATABASE, value: postgres}
+          resources:
+            requests: {memory: 128Mi, cpu: 100m}
+            limits: {memory: 1Gi, cpu: 1000m}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts, readOnly: true}
+      volumes:
+        - name: scripts
+          configMap: {name: history-backfill}

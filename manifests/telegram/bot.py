@@ -29,7 +29,11 @@ idempotent reads, so at worst a crash re-answers one message.
 
 Env: PGHOST, PGUSER, PGPASSWORD, PGDATABASE, TELEGRAM_BOT_TOKEN,
 TELEGRAM_CHAT_ID (the owner). Missing env exits 1 (k3s restarts); Telegram/DB blips are
-retried with capped backoff and never fatal.
+retried with capped backoff and never fatal — including the startup getMe (2026-10-25).
+
+Since 2026-10-25: over-long replies are cut with stocks.trim_html (a raw slice
+mid-tag is a Telegram 400 and the message is lost), and the poll loop touches
+/tmp/bot-alive each iteration for a future exec liveness probe.
 
 Validate manually:
   kubectl logs -n market-data deploy/telegram-bot -f   # expect "listening as @"
@@ -39,6 +43,7 @@ import html
 import os
 import sys
 import time
+from pathlib import Path
 
 import psycopg
 import requests
@@ -119,6 +124,7 @@ def _help_text() -> str:
         "/scores — screener top-5 today\n"
         "/stock TCS — price, trend, score, valuation, news for one stock\n"
         "/news TCS — tagged headlines + sentiment\n"
+        "/ask TCS outlook — question answered from stored facts only (numbers checked); AI off → facts table\n"
         "/top growth sp500 — best by value|quality|growth|momentum|risk\n"
         "/multibagger sp500 — small, fast-growing, high-return candidates\n"
         "/movers — who entered/left the screener top-20\n"
@@ -168,14 +174,18 @@ def cmd_index(text: str) -> str:
 
 
 def cmd_fii(_text: str) -> str:
+    # Rule 9: ts >= bound so the planner prunes chunks (90d covers the 5-session view).
     latest = query(
         "SELECT flow_type, amount FROM capital_flows "
-        "WHERE direction = 'net' AND ts = (SELECT max(ts) FROM capital_flows) "
+        "WHERE direction = 'net' AND ts >= now() - interval '90 days' "
+        "AND ts = (SELECT max(ts) FROM capital_flows "
+        "          WHERE ts >= now() - interval '90 days') "
         "ORDER BY flow_type"
     )
     trend = query(
         "SELECT ts::date, amount FROM capital_flows "
         "WHERE flow_type = 'FII' AND direction = 'net' "
+        "AND ts >= now() - interval '90 days' "
         "ORDER BY ts DESC LIMIT 5"
     )
     lines = [" · ".join(f"{f} <b>{a:,.0f}</b>" for f, a in latest) + " Rs cr"]
@@ -203,6 +213,14 @@ def cmd_stock(text: str) -> str:
 def cmd_news(text: str) -> str:
     row, problem, note = stocks.pick_one_ex(query, _arg(text))
     return problem or ((note + "\n") if note else "") + stocks.news_text(query, row)
+
+
+def cmd_ask(text: str) -> str:
+    import ask
+    arg = _arg(text)
+    if not arg:
+        return "Ask a question about a stock, index, FX, flows or recent news, e.g. <code>/ask TCS outlook</code>"
+    return ask.answer(query, arg)
 
 
 def cmd_top(text: str) -> str:
@@ -323,6 +341,7 @@ COMMANDS = {
     "digest": cmd_digest,
     "stock": cmd_stock,
     "news": cmd_news,
+    "ask": cmd_ask,
     "top": cmd_top,
     "movers": cmd_movers,
     "multibagger": cmd_multibagger,
@@ -343,8 +362,8 @@ COMMANDS = {
 # ---------------------------------------------------------------- transport
 
 def send(text: str, chat: str = None) -> None:
-    if len(text) > TELEGRAM_LIMIT:
-        text = text[: TELEGRAM_LIMIT - 1] + "…"
+    # Never slice raw HTML: a cut mid-tag is a Telegram 400 and the message is lost.
+    text = stocks.trim_html(text, TELEGRAM_LIMIT)
     r = requests.post(f"{API}/sendMessage",
                       json={"chat_id": str(chat or OWNER), "text": text, "parse_mode": "HTML"},
                       timeout=30)
@@ -391,6 +410,10 @@ def poll_forever() -> None:
     drain = True  # first fetch: skip the backlog, never replay old commands
     failures = 0
     while True:
+        try:   # heartbeat for a future exec liveness probe (file age = loop health)
+            Path("/tmp/bot-alive").touch()
+        except OSError:
+            pass   # best-effort: a full /tmp must never stop the loop
         params = {"timeout": 25}
         if offset is not None:
             params["offset"] = offset
@@ -426,6 +449,7 @@ MENU = [
     ("movers", "Entered / left the screener top-20"),
     ("track", "How the screener's picks have done"),
     ("news", "Tagged headlines + sentiment — /news TCS"),
+    ("ask", "Question answered from stored facts only — /ask TCS outlook"),
     ("world", "All world indices: day, 1m, YTD — /world asia"),
     ("index", "One index in depth — /index nikkei"),
     ("fx", "USD/INR and other currency pairs"),
@@ -454,7 +478,19 @@ def register_menu() -> None:
 
 
 def main() -> int:
-    me = requests.get(f"{API}/getMe", timeout=15).json().get("result", {})
+    me = {}
+    for attempt in (1, 2, 3):   # one network blip at pod start must not crash-loop the pod
+        try:
+            me = requests.get(f"{API}/getMe", timeout=15).json().get("result", {})
+            break
+        except (requests.RequestException, ValueError) as exc:
+            if attempt == 3:
+                print(f"ERROR getMe failed after {attempt} attempts "
+                      f"({exc.__class__.__name__})", flush=True)
+                return 1
+            print(f"WARN getMe attempt {attempt} failed ({exc.__class__.__name__}), "
+                  "retrying in 3s", flush=True)
+            time.sleep(3)
     register_menu()
     print(f"listening as @{me.get('username')} for owner chat {OWNER[:2]}*** "
           f"+ {len(REGISTRY.members())} member(s)", flush=True)

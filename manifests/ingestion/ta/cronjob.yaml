@@ -22,6 +22,7 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          automountServiceAccountToken: false
           containers:
             - name: compute
               image: local/ta-compute:v1

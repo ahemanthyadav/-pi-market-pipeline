@@ -58,8 +58,9 @@ skill); never commit credentials or IPs (rules 7–8; run the audit before any p
 
 - One-time per clone: `git config core.hooksPath .githooks` — pre-commit guard (gitleaks + exact local
   secret/address values + private-IP + forbidden-file checks; never prints a value).
-- Must pass: `python3 ops-tools/workloads.py --check` (docs agree with manifests),
-  `bash tests/test-precommit-hook.sh`, `bash tests/test-nodewatch.sh`, `python3 tests/test_creds.py`.
+- Must pass: `python3 ops-tools/workloads.py --check` (docs agree with manifests)
+  and `bash tests/run-all.sh` (every test in `tests/`, globbed — CI runs the same
+  entrypoint, so a new test file never needs registering anywhere).
 - Conventional commits (`commit-and-changelog` skill); push over SSH.
 
 ## DB access (read-only by default)
@@ -85,10 +86,14 @@ layer (2026-10-04): `universe_constituents`, `stock_prices`, `stock_fundamentals
 plus data foundations (2026-10-17/18): `corporate_actions`, `stock_prices.adj_close` (OUR total-return close —
 never Yahoo's Adj Close), `price_anomalies`, `financial_facts` (duration-keyed, first-filing point-in-time; sources `edgar`, `nse_cons`, `nse_sa`, `yfinance`),
 `universe_membership_snapshots`, `factor_returns` (empty), `job_runs` (empty until AR-2 adoption);
-plus `llm_narratives` (ML-7a AI notes; shown only when every number checked out).
+plus `llm_narratives` (ML-7a AI notes; shown only when every number checked out);
+plus `headline_embeddings` (ML-2, ADR 0024: pgvector 2048-dim headline vectors + story grouping; comparisons
+stay within one embedding model — never compare across models).
 
-LLM use (ADR 0022/0023): only through the shared gateway (`../llm-gateway`, Secret `llm-gateway-key`); never a scoring
-input; never acts on data from an unvalidated AI answer; only public market data goes out.
+LLM use (ADR 0022/0023/0024): only through the shared gateway (`../llm-gateway`, Secret `llm-gateway-key`);
+never a scoring input; never acts on data from an unvalidated AI answer; only public market data goes out.
+The number/direction check lives in `manifests/telegram/factcheck.py` (shared by narrative.py and the bot).
+Embedding requests run with `disable_fallbacks` and store the answering model with every vector.
 Non-SELECT SQL: propose it first and get approval before running.
 
 ## Analysis work

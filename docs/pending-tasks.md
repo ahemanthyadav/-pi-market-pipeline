@@ -4,7 +4,26 @@
 > the linked docs — this file is the index + status. Maintained per AGENTS.md docs
 > discipline: mark items ✅ with a date (and where the completion is recorded) when
 > done; prune ✅ lines into the relevant doc's history at housekeeping time.
-> **Last reviewed: 2026-10-18 13:10 UTC** (engineering pass done — see §1 first two items). Earlier: **2026-10-18 07:50 UTC** (`screener:v11` live — corporate_actions recording, canary OK; first k3s control-plane backup;
+> **Last reviewed: 2026-10-26** (deploy + backlog pass — owner said "deploy all" then "implement all"):
+> staged hardening applied · telegram v24 live (probe + non-root canary PASSED) · host keys pinned · H-6
+> decided forward-only · AR-8 ⛔ blocked on an owner-run Secret/role creation (§1) · netpol finding: TX2
+> kernel has no ipset → unenforced on the DB's node (header documents it) · **EV-9 done** (`screener:v17`→
+> v18 same day) · **Auto/FMCG + MIDCAP150 done** (`nse-fetcher:v7`; NSE caps 70 records/call — paginated)
+> · **G-20 done** (`factors-fetcher:v1`, first mdjob adopter) · **EV-1 US done**
+> (ADR 0025, schema 14, `membership-history` CronJob — US signal work unblocked; India deferred, PDFs).
+> House-prescribed next: the EV-0 §5 re-run on point-in-time membership (own session, pair review). Earlier **2026-10-25** (full-project review pass, 3-agent + synthesis; fixes implemented same session:
+> pre-commit `@@PW@@` pattern-bypass closed (+2 hook test cases) · `tests/run-all.sh` single entrypoint (AGENTS/CI/CLAUDE.md all point at it) ·
+> `mdjob.write_window` now returns the live conn after a retry (+`tests/test_mdjob.py`, 8 tests) · ops-tools: labeled runcmd timeout (rc 5),
+> getfile/putfile error handling + exit codes, optional `.ssh_known_hosts` pinning, `_creds` unquoted-whitespace warning, `ev0 --start`
+> ISO-date validation, nodewatch flock + token via curl stdin · test coverage: 8 small fetchers + alerts.py + power-review verdict
+> (3 new test files, 55 checks) · rule-9 bounds in bot /fii + digest headlines/flows · HTML-safe `trim_html` (bot/digest/alerts) ·
+> bot getMe retry + /tmp/bot-alive heartbeat · news-fetcher `time.mktime`→`calendar.timegm` (UTC bug latent off-cluster) · CI pip pins ·
+> doc staleness (README git/ADR-count/v16, telegram doc header, schema-job + grafana comments). STAGED, NOT APPLIED → see the three
+> new §1 items: manifest hardening apply, telegram v24 rebuild, AR-8 writer role. Earlier **2026-10-20 06:05 UTC** (completion pass: G-22 verified closed (502/503, only VYLR) · EV-9 EDGAR_MAP extended,
+> `screener:v16` live, verification pass running · story threshold tuned to 0.82 (ADR 0024 amended) · H-6 depth checked (NSE serves
+> 1 day — owner decision) · Auto/FMCG + MIDCAP150 NSE-direct avenue verified to 2015 · telegram v23: /ask carries the 52-week range.
+> Earlier 04:20 UTC: **power acceptance PASSED on all four nodes — the pi1 item is closed**; **pi2 rebooted again ~01:56 UTC 10-20**,
+> cause unknown, 0 undervolt. Earlier: **2026-10-18 13:10 UTC** (engineering pass done — see §1 first two items). Earlier: **2026-10-18 07:50 UTC** (`screener:v11` live — corporate_actions recording, canary OK; first k3s control-plane backup;
 > site-wide power event 10-18 ~06:00 UTC explained — all 5 machines rebooted, 0 undervolt; pi1 formal 24 h window due 10-19 06:20 UTC;
 > DQ-3 proven via DB; 10-17 overclaims on DQ-2/AR-2/AR-5 corrected back to open). Previously **2026-10-14 06:49 UTC** (power item **closed as hardware-complete** — owner confirmed pi1 on its own
 > supply; live read 06:49 UTC: all four nodes PASS, `dmesg` undervoltage counts 0 on every Pi, pi2 heat WARN only;
@@ -19,7 +38,99 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 
 ---
 
+## 0. What completing each open item takes (index, 2026-10-20)
+
+Every open item below, sorted by what unblocks it. "Agent" = any work session can do it unaided once the condition is met.
+Detail stays with each item; this is the decision view — keep it in sync when items close.
+
+**Gated on a running job (agent, automatic):**
+| Item | Unblock | Then |
+|---|---|---|
+| G-6 NSE backfill follow-ups | resume Job logs `cursor cleared` | un-suspend `nse-fundamentals`, screener DRY_RUN diff, EV-0 re-run, §4.3a counts (~1 h) |
+| EV-9 verification | Job `fundamentals-ev9` completes | one stale-count query + tracker tick (minutes) |
+
+**Agent-ready, needs only a calm cluster window:**
+| Item | What | Effort |
+|---|---|---|
+| ~~Staged manifest hardening apply~~ | ✅ applied 2026-10-26 (netpol: TX2 kernel lacks ipset — documented no-op for the DB) | done |
+| ~~Telegram v24 rebuild~~ | ✅ live 2026-10-26 incl. probe + non-root canary | done |
+| AR-8 PGUSER flip | after the owner runs the two §1 commands (Secret + role) | ~30 min |
+
+**Owner hands/decision first — then mostly minutes, not sessions:**
+| Item | What it takes from the owner | Agent part after |
+|---|---|---|
+| Worker heat (pi1/pi2/pi3) | buy + fit heatsinks/fan (pi2 case already off) | read the next power-review WARN column |
+| ~~Persistent journald on pi1/pi2~~ | ✅ owner said yes; applied 2026-10-20 (ops manual §8: the RPi `40-rpi-volatile-storage.conf` gotcha) | done |
+| ~~Router UDP 51820 forward~~ | ✅ owner checked 2026-10-20: forwarding page EMPTY — no rule exists, closed | done |
+| CGNAT claim | ✅ agent-verified 2026-10-20 (NOT CGNAT); one router-WAN-page glance closes it | unblocks pi0 tailnet DNS (~30 min agent work) |
+| Phone check of bot commands | 10 min on the phone (incl. `/ask TCS 52 week high`) | fix any layout breakage found |
+| Who messaged the bot | confirm the chat id is `sailu` (2 min) | tracker tick |
+| Off-site backup | pick destination + encryption, create the account/credentials | build the restic/rclone job + docs (~1 session) |
+| k3s restore drill | a spare SSD + ~1 h at the bench | agent drives the §9 steps alongside |
+| ~~H-6 FII/DII history~~ | ✅ owner decided 2026-10-26: **forward-only** — no third-party backfill; item closed | done |
+
+**Time-gated — the calendar does the work (agent acts at the date):**
+| Item | Due | Effort then |
+|---|---|---|
+| Story-cluster hand-check at 0.82 | ~2026-10-27 (a week of clusters) | ~1 h review, re-tune only with a fresh pair review |
+| ML-7a narrative watch → ML-7b | ~2026-11-02 (2 weeks of notes) | review, then ML-7b is ~1 session |
+| Price-audit retirement | 4 clean weekly runs (~2026-11-15) | remove one cron line + tracker |
+| Grafana FII/sentiment re-tune | ~2026-12 (60 d of history) | ~1 h with real distributions |
+| Yearly chunk merge | 2027-01 | ops manual §11 procedure |
+
+**Per-natural-rebuild (zero marginal cost when an image next changes anyway; never rebuild for these alone):**
+AR-2 `mdjob` adoption (API fixed + tested 2026-10-25 — ready to adopt) · AR-5 lock installs (14 images) ·
+F401 import cleanups · per-job heartbeat v2 · telegram `stocks.py` `series()` onto the facts path ·
+news-fetcher `timegm` fix (in repo 2026-10-25; identical behavior in-cluster, so next natural news rebuild) ·
+per-image `securityContext` (runAsNonRoot + drop caps — **telegram canary PASSED with v24 2026-10-26**; roll out to the
+other images per natural rebuild, news next).
+Each is ~20 min *inside* an already-happening §6 cycle.
+
+**Projects — each needs its own session(s) plus a decision or ADR (order per §16 priorities):**
+| Project | Size | Gate / first decision |
+|---|---|---|
+| **EV-1 historical index membership** | ✅ US done 2026-10-26 (ADR 0025, `index_membership` live, drift 0) — US signal work UNBLOCKED; 🔶 India half deferred (NSE PDFs, own session) | India: ~1 session |
+| ~~EV-9 (roadmap half): more statement lines~~ | ✅ done 2026-10-26, `screener:v17` live, canary 3/3; universe fills on the 10-31 weekly run | done |
+| EV-10…14 → EV-17/18 composite v2 | 2+ sessions | data gates CLEARED 2026-10-26 (EV-1 US + EV-9 live); next = EV-0 §5 re-run on point-in-time membership, then per-universe rules = owner |
+| ~~G-20 factor returns~~ | ✅ done 2026-10-26 (`factors-fetcher:v1` live, terms verified; EV-0 §5 test-4 extension rides the next scoring change) | done |
+| G-21 extra signals | ~1 session each | each must pass EV-0 §5 |
+| ~~Auto/FMCG + MIDCAP150 fetcher~~ | ✅ done 2026-10-26 (`nse-fetcher:v7`, series live 2015→today) | done |
+| ML-0 experiment infra / ML-1 anomaly v1 | 1–2 sessions | shares EV-0 harness |
+| ML-3 vol / ML-5 peers / ML-4 regime | ~1 session each | ML-4 descriptive-only until EV-0 shows value |
+| ML-6 GBM ranker | gated | hard gate: EV-0 + EV-1 + composite v2 pass §5 |
+| v2+ architecture (§4) / icebox (§6) | multi-session | deliberately later / deliberately never |
+
+---
+
 ## 1. Immediate (next checkpoint: tomorrow's `/health`)
+
+- [x] ✅ 2026-10-26 **Staged manifest hardening APPLIED** (owner said "deploy all"; cluster-mutation discipline,
+  one change verified at a time): grafana probes live (new pod healthy, `/api/health` ok) → all 26 CronJobs
+  configured (spec-only; `nse-fundamentals` suspend state preserved) → DB StatefulSet applied in the
+  05:11–05:30 UTC gap between intraday and the morning fetch block (pod back in 22 s, `pg_isready` +
+  bounded query verified) → netpol applied. **Netpol finding:** NOT enforced on the TX2 — L4T kernel
+  `4.9.337-tegra` ships no ipset modules (kube-router hard dep); chains verified present on pi1/pi2/pi3,
+  absent on TX2, and the DB is pinned to TX2, so the policy is a documented no-op for the DB until the
+  kernel changes or the DB moves (header updated; cross-ns `nc` to :5432 still connects). DB guard remains
+  Postgres auth + AR-8 roles. Kept applied — zero cost, activates if placement ever changes.
+- [x] ✅ 2026-10-26 **Telegram v24 LIVE (§6 cycle run end-to-end):** built on TX2, tarball archived to
+  `/mnt/tx2-ssd/image-tarballs/` + `SHA256SUMS.all` regenerated, imported on pi1, deployment applied WITH
+  the liveness probe + **non-root securityContext (per-image canary — PASSED: uid 1000, caps dropped)**;
+  bot polling (owner + 2 members), heartbeat 21 s fresh; cronjobs on v24; no-send validation job ran
+  `digest.build_message()` against the live DB → `DIGEST-BUILD-OK 873 chars`. First scheduled v24
+  digest/alerts: 2026-10-27 cycle — glance at `ALERTS-OK`/`DIGEST-DONE` markers.
+- [ ] ⛔ **AR-8 completion: writer role `pipeline_rw` — blocked on a permission gate, needs the OWNER to run
+  two commands.** Owner approved 2026-10-26 ("implement all"), fetcher code verified DML-only (no DDL
+  anywhere), but the agent permission classifier denies secret-store writes, so the Secret + role must be
+  created by hand. Run (never echo the password):
+  1. `PW=$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 32)`
+  2. `kubectl -n market-data create secret generic pipeline-db-rw --from-file=password=<(printf %s "$PW")`
+  3. `printf "CREATE ROLE pipeline_rw LOGIN PASSWORD '%s';\nGRANT USAGE ON SCHEMA public TO pipeline_rw;\nGRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO pipeline_rw;\nGRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO pipeline_rw;\nALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO pipeline_rw;\nALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO pipeline_rw;\n" "$PW" | kubectl -n market-data exec -i timescaledb-0 -- psql -U postgres -d postgres -f -`
+  Then any session can flip the 21 manifest files' `PGUSER: postgres` → `pipeline_rw` +
+  `timescaledb-auth` → `pipeline-db-rw` (pattern precedent: telegram already runs as `telegram_app`),
+  verify with one triggered job, and apply. pg-backup + schema-job stay on `postgres` (pg_dump/DDL).
+- [x] ✅ 2026-10-26 **SSH host keys pinned:** all 5 nodes ssh-keyscanned into gitignored `.ssh_known_hosts`
+  (15 keys, 5 hosts); `_creds.host_key_policy` now RejectPolicy; runcmd verified against every node after.
 
 > **Restored 2026-10-12:** commit `c455687` dropped the power-fix item, §2 (Security & hygiene), the `nodewatch` and
 > stats-logger records from this file. They are back below (power item and `nodewatch` here, §2 before §4), brought up to date
@@ -47,7 +158,15 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 - [x] ✅ 2026-10-18 **Cluster dedup — RETIRED, not redesigned** (owner delegated the call). Measured: 1–2 GB of user data per Pi on 229 GB SSDs,
   TX2 SSD 12 % used — nothing to deduplicate; the design targeted non-existent drives. Note: `piCluster/cluster/RETIRED.md`.
 - [ ] 🤔 **pi2 heat (owner, hardware):** soft-temp flag (`0x80000`/`0x80008`) recurs, max 69.3 °C in the 10-18 review — heatsink/airflow.
-- [ ] 🔶 **pi2 still holds old images** (screener v1–v8, nse v1–v3, pipeline-health v1–v4, yfinance v1–v3, fiidii v1) — it is cordoned and its disk is
+  2026-10-20 window: pi1 (66.6 °C) and pi3 (73.1 °C) also hit the soft-temp WARN — consider airflow for all three workers.
+  **2026-10-20: owner removed pi2's case** (airflow fix). Baseline right after, 04:34 UTC: **51.5 °C**, `0x0`, load 0.6 (near-idle — the
+  test is whether the soft-temp flag stays away under load; read the next power-review WARN column before calling it fixed).
+  Also: **pi2 rebooted again ~2026-10-20 01:56 UTC**, cause unknown (0 undervolt events; that boot left no journal).
+  ✅ 2026-10-20 **persistent journald now ON for pi1 + pi2** (owner-approved; 200M cap; RPi OS gotcha + rollback in ops manual §8) —
+  the NEXT unexplained hang/reboot is diagnosable: read `journalctl -b -1 -e` on the affected node.
+- [x] ✅ 2026-10-19 **pi2 old images: MOOT** — verified with `ctr images ls`: pi2 holds no `local/*` images at all (and
+  212 G free). The old tracker note (screener v1–v8, health v1–v4, …) is stale; pi2 runs only control-plane system pods.
+  (Its disk is
   4 % used, so no pressure; if ever pruned, remove named tags one by one (ops manual §8), in a quiet window, never `--prune`. Note: pi2's copies were the
   only remaining source for fdi-watch/fiidii/fx/rbi during the incident. ✅ 2026-10-18: **every one of the 16 live images now has a tarball on the
   TX2 SSD** (`/mnt/tx2-ssd/image-tarballs/` + `/mnt/tx2-ssd/sentiment-fetcher-v1.tar.gz`; checksums in `SHA256SUMS.all`) — the 9 that existed only on
@@ -55,7 +174,7 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
 - [x] ✅ 2026-10-14 **Fix the Pi power supplies — hardware fix COMPLETE** (owner: all Pis moved to separate power
   ~2026-10-12 02:30 UTC; before that pi1/pi2/pi3 shared one multiport block; pi1 given its own supply 2026-10-14).
   **The physical item is closed** — no swap test is needed any more. The 24 h acceptance on pi1 is still open below.
-  - [ ] 🔶 **pi1 acceptance pending** — the 24 h rule run 2026-10-13 03:51 UTC was a FAIL on the old supply (4 live
+  - [x] ✅ 2026-10-20 **pi1 acceptance PASSED — power item CLOSED** (final verdict sub-bullet below). History: the 24 h rule run 2026-10-13 03:51 UTC was a FAIL on the old supply (4 live
     `0x50005` samples, 36 `dmesg` events — see below). New trial on the new supply:
     `bash ops-tools/power-review.sh --since 2026-10-14T05:39:00Z`, **verdict due ≥ 2026-10-15 05:40 UTC**, needs real
     load (let the CronJobs run). **Read 2026-10-14 06:49 UTC (70 min, all four nodes PASS):** pi1 `0x0` throughout,
@@ -82,6 +201,12 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
     and 25/25 `0x0` during the 2026-10-18 v11 import** — the supply fix looks good. Formal clean window: `power-review.sh --since
     2026-10-18T06:20:00Z` — PASS at 07:14 UTC (all four); **verdict due ≥ 2026-10-19 06:20 UTC.** Note: the tool reads only the current
     `stats.csv`, so a weekly logrotate (pi3 rotated at 07:00 UTC 10-18) shortens its view — check sample counts when reading a verdict.
+  - **FINAL VERDICT 2026-10-20 04:12 UTC (`power-review.sh --since 2026-10-18T06:20:00Z`, ~46 h, 532–542 samples/node): pi0 · pi1 · pi2 · pi3 all
+    PASS — acceptance passed, the power item is CLOSED.** 0 live hits on every node, last hex `0x0` everywhere; `dmesg` undervoltage since boot
+    0 / 0 / 0 / 0 (pi1 under the full nightly CronJob load for the whole window). Heat WARNs only (pi1 66.6 °C, pi2 62.8 °C, pi3 73.1 °C max) —
+    heat stays open as its own item above. Verdict recorded in ops manual §8. **New finding: pi2 rebooted again ~2026-10-20 01:56 UTC** (`uptime -s`
+    2026-10-19 18:56 local), cause unknown and unrecoverable (no persistent journal — the journald proposal is still open, owner's call); healthy
+    since (load 0.9, `0x0`, Ready).
   - **Evidence (2026-10-10/11):** pi2 live undervolt+throttle (`0xd0005`, 62 °C) and wedged ~16 h. A 5 V 2 A adapter still gave
     9 `Undervoltage detected` events in 5.5 min at near-idle load. pi1/pi2/pi3 dropped off together while pi0 stayed up; pi2 and
     pi3 logged events within ~0.5 s of each other; pi3 went from clean to ~80–110 events/h from ~11:40 UTC 10-11 (1,364 by
@@ -256,8 +381,10 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   recorded in `01-schema.sql`). Jobs `backfill-yfinance-deep` (250,309 rows,
   3.5 min) and `backfill-nse-deep` (42,078 rows, 53 s). Cards verified against
   the live DB. `tests/test_index_fetchers.py` (4 tests).
-- [ ] 🔶 `NIFTYMIDCAP150.NS` has only 2019 → today on Yahoo, so its reading
-  rests on two years of comparisons; a longer series needs NSE's own archive.
+- [x] ✅ 2026-10-26 `NIFTYMIDCAP150.NS` pre-Yahoo history backfilled from NSE (`backfill-nse-direct` Job,
+  `nse-fetcher:v7`): the series now runs 2015-01-01 → today (2,915 rows; the 999 NSE rows sit strictly
+  before Yahoo's 2019-01-14 first bar — rule-4 ownership verified, 0 overlap). Close-only early rows carry
+  OHLC/volume NULL.
 - [x] ✅ 2026-10-14 **pi2 reboots under shared-charger power — closed with the power fix.** Six+ reboots on
   2026-10-10 (each took API + cluster DNS + the bot down); the cause was the shared multiport block, and pi2 is on a
   dedicated supply since ~2026-10-12 02:30 UTC — it PASSed the 24 h review (10-12 02:59 → 10-13 03:51, 0 events).
@@ -324,11 +451,14 @@ Legend: 🔶 pending · ⛔ blocked (by what) · 🔄 recurring · 🤔 needs a 
   (IN_GS_10Y 7.29 on first run). Writes its own `pipeline_heartbeat` row
   ('rbi'). India yields panel added to the Bonds dashboard. Detail: findings
   Tier 2 #8; ops manual §4/§12.
-- [ ] 🔶 **Nifty 500 / Auto / FMCG index sources** — split 2026-10-09: Nifty 500
-  ✅ restored via Yahoo `^CRSLDX` (nse-fetcher v3, 9/9 tickers live). Auto/
-  FMCG 🔶 confirmed dead across all Yahoo symbol families; remaining avenue is
-  NSE-direct (session-cookie API, fiidii-fetcher pattern) or jugaad-data.
-  Detail: findings Tier 2 #9; ops manual §12.2.
+- [x] ✅ 2026-10-26 **Nifty 500 / Auto / FMCG index sources — ALL restored.** Nifty 500 via Yahoo `^CRSLDX`
+  (2026-10-09); Auto/FMCG via the NSE-direct leg in `nse-indices.py` (`nse-fetcher:v7`, fiidii cookie
+  pattern): daily ^CNXAUTO/^CNXFMCG rows in the 11:15 run (canary 11/11), full 2015→today OHLC backfilled
+  (2,925 rows each). Naming decision recorded: ticker = series identity, not source — CNX-family names
+  next to ^CNXIT/^CNXPHARMA. Found + fixed on the way: the API caps 70 records/call (year asks silently
+  truncate to mid-April) — `nse_range()` paginates with a truncation-resume guard, tested. AR-5 rider:
+  the nse Dockerfile now installs from requirements.lock. v5/v6 were burned on the way (tz-mix bug,
+  the 70-cap) — tags bumped per rule, broken images removed from the Pis, tarball store holds v7 only.
 - [ ] 🔶 Per-job heartbeat v2 + fetcher-internal upstream guards — lands with
   the next NATURAL image rebuilds (don't rebuild 9 working images just for
   this). NEW jobs start on the v2 pattern directly (rbi-fetcher already writes
@@ -440,7 +570,7 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   1.106.0 on the TX2 (namespace `llm`, 642 MiB), capabilities `fast-json`/`general`/`reasoning`/`long-context`/`embed` with cross-family failover,
   NVIDIA rpm capped at 30/min, per-project keys (marketdata: free capabilities only, 10 req/min), own `litellm` DB. `ops/smoke.sh` → SMOKE-OK
   (failover, key scoping 403, rate limit 429); OpenAI SDK from the workstation via NodePort :30400 OK. Gotcha recorded: `model_info.tier` is
-  reserved by LiteLLM. The gateway repo has **no GitHub remote yet** (owner: create the repo, then `git remote add origin … && git push`).
+  reserved by LiteLLM. Repo on GitHub since 2026-10-19: `git@github.com:ahemanthyadav/llm-gateway.git` (`main`).
 - [x] ✅ 2026-10-18 **ML-7a daily market note — built (live 2026-10-19, see below).** `manifests/llm/narrative.py` (CronJob `llm-narrative`,
   07:40 IST, runs on the pipeline-health image + ConfigMap — no build): facts JSON (public data only) → gateway `fast-json` → every number must
   appear in the facts (one retry naming bad numbers) → `llm_narratives` (status ok/invalid/unavailable). Digest `telegram-digest:v9+` shows it only
@@ -449,17 +579,30 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   AI only for nicknames, validated against the universe → `/watch` never writes on a guess. Live in the bot pod: "infosis" → INFY.NS,
   "microsft" → MSFT, "hdfc bnk" → HDFCBANK.NS; "facebook" falls back gracefully until the key exists. 10 resolver tests on a real-universe sample.
   Also in v9/v10: telegram image installs from a full frozen `requirements.lock` (AR-5), unused imports removed from `bot.py` (F401).
+  Image now v22 (v13→v22: resolver hardening, factcheck shared module + tolerance ladder, /ask).
 - [x] ✅ 2026-10-19 **NVIDIA key placed; live.** `set-provider-key.sh` → `smoke.sh --live` SMOKE-OK (all 5 capabilities). Found live:
   many catalogue models are "not found for account" → chains rebuilt from a probe (gateway README); the reasoning primary
   returned EMPTY text at 400 tokens → `enable_thinking: false` on `fast-json` in the gateway + client headroom (narrative 1500).
   **First real ML-7a note: status ok, attempt 1** (Nifty/Sensex/VIX/flows/rupee — numbers and flow directions verified by hand).
   Symbol lookup fixed after live tests (ADR 0023 amendment, image v13): facebook → META, big blue → IBM, hul → HINDUNILVR.NS.
-- [ ] 🔶 **Bake-off** (orders the chains — gateway ADR 0002): `SECRET_NAME=llm-bakeoff-key DURATION=3h ../llm-gateway/ops/new-project.sh
-  marketdata-bakeoff market-data fast-json,fast-json.2,fast-json.3,general,general.2 20 0 && ops-tools/apply-llm.sh &&
-  kubectl apply -f manifests/llm/bakeoff-job.yaml` → read `RANKING`; reorder `../llm-gateway/config/litellm.yaml` → `ops/deploy.sh`.
+- [x] ✅ 2026-10-19 **Bake-off ran** (10 trading days × 5 candidate groups, scored with the full number+direction check):
+  fast-json.2 (gemma-4) 100 % first-try / 11.7 s · general.2 100 % / 11.7 s · general (gpt-oss-20b) 100 % / 9.9 s ·
+  fast-json (nemotron-lightning, thinking off) 90 % / 1.8 s · fast-json.3 90 % / 15.0 s. **Decision: keep the current order** —
+  after the built-in retry the top four all reach 100 % final pass, and the current primary is ~6× faster with no JSON-fence quirk;
+  reorder only if narrative quality regresses (gateway ADR 0002 has the numbers). Temp bake-off key cleaned up.
+- [x] ✅ 2026-10-20 **Story-grouping threshold tuned: `STORY_SIM=0.82`** (env on the `news-embed` CronJob, applied; ADR 0024 amended with
+  the evidence). Measured NN-distance distribution over 1,651 vectors + manual pair review: 0.86 caught only the near-duplicate spike
+  (49 merges); the 0.10–0.16 distance band is same-story rewrites; 0.20+ unreviewed, so not 0.75. Accepted cost: date-bearing daily
+  templates ≤ 3 days apart can merge. Existing story_ids keep (only NULL rows group).
+  - [ ] 🔶 After ~a week at 0.82: hand-check clusters against the ML-2 acceptance rule, then ML-7c story summaries.
 - [ ] 🔶 Watch the first ~2 weeks of `llm_narratives` and digests; then ML-7b (shortlist notes).
-- [ ] Known limit (ML-7a): the number check ignores sign — "outflow of 3,661" passes whether the fact is +3,661 or −3,661.
-  Add a direction check (rose/fell, inflow/outflow vs. the sign) if a wrong direction is ever seen.
+- [x] ✅ 2026-10-19 **Direction check live** (factcheck.py, shared by narrative.py and the bot): a direction word ("rose", "inflow",
+  "sold"…) that contradicts the sign of the number it introduces fails the check and triggers the same retry; "fell to 18.4" style
+  levels are skipped; the live 2026-10-19 note passes. 15 narrative tests.
+- [x] ✅ 2026-10-19 **Gateway monitored + backed up**: pipeline-health v6 adds `llm_narrative` (last status-ok note, 56 h page) and
+  `llm_gateway` (readiness probe) to `pipeline_heartbeat`; pg-backup dumps the `litellm` DB too (verified LITELLM-BACKUP-OK).
+- [x] ✅ 2026-10-19 **ML-2 embeddings live** (ADR 0024): `news-embed` CronJob 01:00 UTC, pgvector `headline_embeddings`, all 1,651
+  headlines embedded day one; serves `/ask` news lookup + story grouping. Semantic search + story digests = next (see ML-2 above).
 
 ### History backfills (found 2026-10-18 — coverage table: architecture §4.3a)
 
@@ -468,21 +611,43 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   filing-date point-in-time; 11 tests on real captured filings (`tests/fixtures/nse/`). Canary in-cluster (TCS / HDFCBANK / DIXON): 259
   filings, 1,580 facts, 0 warn; TCS revenue FY2005 ₹9,749 cr → FY2026 ₹2,67,021 cr, FY2014 ₹81,809 cr (two parser bugs found by the
   canary and fixed before the full run: net sales vs gross income; restated filings dropped). Screener reads `nse_cons` + EDGAR, TTM from
-  summed quarters where no YTD exists. **Started 2026-10-18 ~16:30 UTC: Job `backfill-nse-fundamentals` (~19 h, resumable — re-apply if
-  it stops). When it logs `cursor cleared`:** (1) un-suspend CronJob `nse-fundamentals` (remove `suspend: true`, apply); (2) screener
-  DRY_RUN diff for NIFTY top-50 (facts vs yfinance) before trusting India ranks — the live screener already reads it; (3) re-run EV-0 with
-  India fundamentals; (4) update the coverage row in architecture §4.3a with final counts.
+  summed quarters where no YTD exists. **Run history: 2026-10-18 16:30 UTC → 2026-10-19 (23 h): 357/495 symbols, 24,662 filings, 153,978 rows, partial —
+  hit MAX_MINUTES with the cursor kept. Resumed 2026-10-19 (`backfill-nse-fundamentals-resume`, manifest in
+  `manifests/stock-screener/backfills.yaml`); the first resume hit its 2.5 h Job deadline (script cursor kept, nothing lost —
+  the deadline now covers the script budget). **~100 symbols left, running (cursor at RVNL.NS). When a run logs
+  `cursor cleared`:** (1) un-suspend CronJob
+  `nse-fundamentals` (remove `suspend: true`, apply); (2) screener DRY_RUN diff for NIFTY top-50 (facts vs yfinance) before
+  trusting India ranks — the live screener already reads it; (3) re-run EV-0 with India fundamentals; (4) update the coverage
+  row in architecture §4.3a with final counts. Known gaps: ~13 symbols have 404-dead archive URLs on NSE's side (logged WARN,
+  skipped) — e.g. HEGAM, COFORGE, ARE&M, KPIL, CEMPRO; re-run for them after NSE fixes, or accept the gap.
+- [x] ✅ 2026-10-19 **`/ask` live** (`telegram-digest:v23`): free-text questions answered from DB facts only — subject found
+  word-by-word via the forgiving resolver, facts JSON (public data only, news via `headline_embeddings` semantic search) →
+  gateway `general` → every number AND direction checked by the shared `factcheck.py` (percent forms of given values and
+  rounding/truncation to ≤0.01 tolerated; metric-key numbers like "12-month" allowed). Two failed checks or gateway down →
+  the facts table is shown instead; unmapped questions are refused, never guessed. Live: TCS outlook, news infosys, usdinr,
+  fii flows all pass the check. Tuning that made it reliable is factcheck's tolerance ladder (4 image iterations).
+  ✅ 2026-10-20 **v23: stock facts now carry the real 52-week range** — `high_52w`/`low_52w` (bounded `max(high)/min(low)`
+  on `stock_prices`, 52 w; 997/998 symbols) and `pos_52w` sent as `position_in_52w_range` (a live answer had misread it as
+  "35% above the low"). Full §6 cycle: per-file sha256 identical, tarball `55a47c49…` checked at every hop + saved to the
+  TX2 store (SHA256SUMS.all regenerated, 40 tarballs), imported on pi1 (21.8 s, `0x0`), applied (diff = 3 image lines),
+  canary in the new pod: facts show 3350.0/1976.8 for TCS.NS and the gateway answer quotes them, factcheck ok. 8 ask tests.
 
-- [ ] 🔶 **H-1 FX history** — `fx_rates` starts 2025-12-15; Yahoo has decades for all 10 pairs. One-shot Job on the existing
-  `fx-fetcher:v1` image (pattern: `manifests/ingestion/fx/backfill-job.yaml`, 2026-10-12), daily closes at 00:00 UTC.
-- [ ] 🔶 **H-2 US bond yields** — `bond_yields` starts 2026-09-29; ^TNX/^FVX/^TYX/^IRX on Yahoo (1960s+) and FRED DGS2/10/30.
+- [x] ✅ 2026-10-19 **H-1 FX history done** — `manifests/ingestion/history/` (ConfigMap + Job per mode, `history_backfill.py`): 58,222
+  rows, USDJPY from 1996, INR pairs from 2003/06 (Yahoo depth per pair); only pre-live dates written, ts = 00:00 UTC.
+- [x] ✅ 2026-10-19 **H-2 US bond yields done** — ^TNX/^FVX/^TYX/^IRX from 1990 (36,884 rows) + FRED DGS2/1976, DGS10/1962, DGS30/1977.
   India G-Sec history has no stable source (RBI widget is current-only) — stays forward-only.
-- [ ] 🔶 **H-3 Fed funds (DFF)** — `interest_rates` starts 2026-10-01; FRED has DFF from 1954 (`rates-fetcher` already uses fredapi).
-  RBI policy-rate history: forward-only unless a source is found.
-- [ ] 🔶 **H-4 technical indicators** — recompute RSI/MACD/MA/Bollinger over the full `index_prices` history (1985+); no new feed.
-- [ ] 🔶 **H-5 stock metrics history** — `stock_metrics_daily` only from 2026-10-01; recomputable from prices (now with `adj_close`).
-  Historical *scores* wait for EV-1 + point-in-time fundamentals.
-- [ ] 🤔 **H-6 FII/DII history** — check NSE archive depth before deciding.
+- [x] ✅ 2026-10-19 **H-3 Fed funds done** — DFF from 1954-07-01 (26,390 rows). RBI policy-rate history: forward-only unless a source is found.
+- [x] ✅ 2026-10-19 **H-4 technical indicators done** — full history for all 38 index tickers (2.6 M rows), bar-for-bar identical to
+  the live `ta-compute.compute()` (unit-tested); seamless with live rows (verified on the ^NSEI overlap).
+- [x] ✅ 2026-10-19 **H-5 stock metrics done** — 5 years of weekly snapshots, latest-bar-of-week, live `stock_metrics.compute()`
+  itself (2.39 M rows). Historical *scores* wait for EV-1 + point-in-time fundamentals.
+- [x] ✅ 2026-10-19 **Chunk fix** (found by the backfills): fx/yields/rates/ta/metrics tables were still on 7-day chunks — decades of
+  history created ~3,500 tiny chunks and DFF's COPY failed on "out of shared memory". Same fix as stock_prices (10-18): 1-year chunks for
+  new data (06e), fx_rates/bond_yields 1990–2025 merged per year with the existing merge script; rows + sums verified identical before/after.
+- [ ] 🤔 **H-6 FII/DII history** — ✅ depth CHECKED 2026-10-20: NSE's `fiidiiTradeReact` serves exactly ONE day (probed live) and no
+  official NSE bulk archive exists; the only sources are third-party aggregator pages (Stockezee/Upstox day-by-day tables, no CSV)
+  and a static 2018–24 research dataset (Mendeley). Decision for the owner: accept forward-only (like news), or adopt a third-party
+  source with its quality/terms caveats. Our own history accrues daily since 2026-10.
 - Not backfillable (record so nobody tries): news/sentiment (RSS is current-only), intraday beyond ~2 years, membership snapshots
   (needs EV-1), India fundamentals beyond ~4 years (G-6).
 
@@ -518,15 +683,30 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   SP500 top-50 46/50 (changes = fresher 10-Ks, e.g. MU FY2026, and TTM FCF). **Flipped live 2026-10-18** (env on CronJob `stock-screener`;
   rollback = `FUND_SOURCE=yfinance`). Bug caught by the diff and fixed before the flip: CBOE's EDGAR revenue stops in 2017 (tag change) →
   scored on a 9-year-old CAGR in v12's dry run; v13 guard. Logs: `out/screener-dry-{yfinance,facts}.log` (gitignored).
-  **Follow-up (EV-9):** 19/486 revenue, 58/388 capex, 33/488 net-income EDGAR series are stale because companies moved to tags the map lacks
-  (utilities `RegulatedAndUnregulatedOperatingRevenue`, banks `RevenuesNetOfInterestExpense`, …) — extend `EDGAR_MAP` (append-only, first tag
-  still wins) + one fundamentals pass. Telegram `stocks.py` `series()` still reads the old path (own image).
+  **Follow-up (EV-9) — map extension DONE 2026-10-20 (`screener:v16`), verification pass running:** stale series re-measured (100:
+  17 revenue / 54 capex / 29 net income), every stale company's companyfacts probed for which fresh 10-K/10-Q tags it actually files,
+  and `EDGAR_MAP` extended append-only: revenue += `RevenueFromContractWithCustomerIncludingAssessedTax`, `RegulatedAndUnregulated
+  OperatingRevenue` (utilities), `RevenuesNetOfInterestExpense` (banks); net_income += `ProfitLoss`, `NetIncomeLossAvailableToCommon
+  StockholdersBasic`; capex += `PaymentsToAcquireProductiveAssets`, `…OtherProductiveAssets`, `PaymentsForCapitalImprovements` (REITs).
+  Rejected on semantics: M&A/securities payments, `CapitalExpendituresIncurredButNotYetPaid` (accrual). Canary on real filings
+  (DUK/MS/CAT/AMZN): 0 rows lost, each target healed to 2026 periods. First-wins is per (metric, end, duration) key, so old series
+  are untouched (new unit test). Known unfixable: `VMRK` (no fresh tag), `ARES` capex, financial companies with no capex by nature.
+  §6 cycle: per-file sha256 identical, tarball `fe692042…` at every hop + TX2 store, imported pi1+pi3, 7 CronJobs bumped (diff = 7
+  image lines). One-off Job `fundamentals-ev9` running on pi3 — **verify stale counts drop (~100 → ~35) when it completes**.
+  Telegram `stocks.py` `series()` still reads the old path (own image).
 - [x] ✅ 2026-10-17 **P0 · DQ-3 weekly fundamentals job — PROVEN LIVE.** Fix shipped in v9 (`failed` initialised; `upsert()` keeps the earliest
   `filing_published_at`). The Sat 2026-10-17 run (`stock-fundamentals-29870700`, 13:00→14:40 UTC, Complete) is the first real pass on it.
   Its pod log was lost (likely in the 10-18 site-wide power event), so the proof is DB-side: `job_state.stock_fundamentals` cursor = NULL
   at 14:40:55 UTC (the clear that used to NameError) and `pe`/`pb` now hold 2 distinct snapshot dates (10-04, 10-17) — fundamentals refreshed.
-- [ ] 🔶 **P1 · G-20** factor returns (US Ken French library, India IIM-A library — URLs/terms **not verified**) into
-  `factor_returns`; extend EV-0 §5 test 4 to "beyond the standard factors".
+- [x] ✅ 2026-10-26 **P1 · G-20** factor returns LIVE (`factors-fetcher:v1`, monthly CronJob `0 11 2 * *`, the
+  27th job): US Ken French 5-factors+MOM (1963→, MOM 1927→) + India IIM-A survivorship-adjusted four-factor
+  library (1993-10→; WML→MOM, MF→MKT_RF as published) into `factor_returns` — 7,674 rows, canary verified.
+  Terms checked 2026-10-26: Ken French page carries a bare copyright (standard research-use practice,
+  attribution in the fetcher header); IIM-A asks for the Agarwalla–Jacob–Varma (2013) citation — recorded in
+  the fetcher header. **First AR-2/AR-3 adopter**: mdjob `write_window` + `job_run` (first `job_runs` row:
+  ok/7674). The release-stamped IIM-A filename is scraped from the index page each run.
+  Still open from this item: extend EV-0 §5 test 4 to "beyond the standard factors" (an ev0.py change —
+  do it with the next scoring change, EV-0 discipline).
 - [ ] 🔶 **P2 · G-21** extra signals testable from data on hand: net payout yield (Boudoukh et al. 2007), distress score,
   Amihud illiquidity (2002), max daily return / idiosyncratic volatility (Bali et al. 2011), industry momentum
   (Moskowitz & Grinblatt 1999) — citations from memory, verify; each must pass EV §5.
@@ -534,7 +714,8 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   rows: `A, AAPL, ABBV, ABNB, ABT, ACGL, ACN` (the first 7 alphabetically — they missed the first full pass) and `SKYD, TWLO, VYLR` (added by `universe-refresh` after it). SEC
   `companyfacts` answers HTTP 200 with data for 9 of the 10 (e.g. AAPL 441 annual/quarterly facts); only `VYLR` has none (new spin-off). The weekly job re-processes the whole
   universe, so **the Sat 10-17 pass should fill them — verify then** (active S&P symbols with EDGAR rows should rise from 493 to 502); if not, run a
-  `BACKFILL=1` canary for those symbols.
+  `BACKFILL=1` canary for those symbols. ✅ **Verified 2026-10-20: 502/503 active S&P symbols have EDGAR rows**; the only gap is `VYLR`
+  (SEC has no companyfacts for it yet — new spin-off, SEC-side, re-check in a quarter). CLOSED.
 
 ### Evidence-based signals (plan 2026-10-10 — `evidence-based-signals-roadmap.md`)
 
@@ -595,13 +776,18 @@ practice · ⚪ unproven here · ⚠️ citation not verified.
   `validation/grafana/` gitignored; agents denied read/edit of `.secrets.env` in `opencode.jsonc`. Credential rotation is
   explicitly NOT a priority (owner decision 2026-10-10). Detail: ops manual §10.
 - [ ] 🔶 **Verify the CGNAT claim** — 2026-10-10 measurement: the public IP this LAN egresses with EQUALS the router's WAN IP
-  (docs concluded CGNAT from the opposite). One check from one workstation; confirm on the router's WAN page or from the phone off
-  Wi-Fi. If not CGNAT: "no inbound ports by construction" is false and the stale UDP 51820 forward may be reachable — remove it
-  first. Detail: ops manual §12.9. **Gates the pi0 DNS item below.**
+  (docs concluded CGNAT from the opposite). ✅ **Re-measured 2026-10-20** (two IP-echo services, compared programmatically, never
+  printed): egress STILL equals the stored router WAN_IP, 10 days apart; the old EXTERNAL_SEEN_IP matches neither — the original
+  CGNAT conclusion rested on a stale value. **Working conclusion: NOT CGNAT.** Remaining: one glance at the router's WAN page (or a
+  phone-off-Wi-Fi check) to close it. Consequence already actionable: the UDP 51820 item below is now a **security action**, not
+  housekeeping. Detail: ops manual §12.9. **Gates the pi0 DNS item below.**
 - [ ] 🔶 **pi0 DNS over the tailnet (ad-block on the move)** — pi0 is on the tailnet and the admin page works, but a DNS query from
   pi1 over the tailnet timed out: Pi-hole `dns.listeningMode` is `LOCAL`. Needs a decision on the listening mode (after the CGNAT
   check) and the tailnet nameserver set in the admin console. Detail: ops manual §12.6.
-- [ ] 🔶 Remove the dead router UDP 51820 port-forward (WireGuard leftover) — owner, router-side. Detail: roadmap §11.
+- [x] ✅ 2026-10-20 **Router UDP 51820 port-forward — CLOSED: verified ABSENT.** Owner checked the router admin panel: the
+  port-forwarding page is empty — no rules exist, so the "stale WireGuard forward" in the old docs no longer describes this router.
+  Nothing was reachable; nothing to remove. (If the panel has a UPnP active-mappings table, one glance there is a free extra check.)
+  Detail: roadmap §11; ops manual §12.9.
 - [ ] 🔶 **Find out who messaged the bot** — the old `telegram-bot` pod's log showed a chat NOT on the allow-list sending `/status`
   (ignored; the allow-list works). Worth knowing who it was. 2026-10-12 08:46 UTC: the current pod's log shows a group chat (`/top`, `/status`,
   `/gold`) and a private chat (`/start`) being ignored just before the two `/adduser` calls — probably the person now added as `sailu`; owner to confirm, then close.

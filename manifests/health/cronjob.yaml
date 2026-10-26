@@ -23,9 +23,10 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          automountServiceAccountToken: false
           containers:
             - name: health
-              image: local/pipeline-health:v5
+              image: local/pipeline-health:v6
               imagePullPolicy: Never
               env:
                 - name: PGHOST

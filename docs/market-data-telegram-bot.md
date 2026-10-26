@@ -3,7 +3,14 @@
 > **Purpose:** everything about the Marketfredbot Telegram channel — how the
 > deployed digest + alert pipeline is wired, how to operate and change it, and
 > the tiered menu of two-way/next-step upgrades with their real constraints.
-> **Last verified: 2026-10-12 08:46 UTC** (live: Deployment + both CronJobs on `local/telegram-digest:v8` — multi-user, ADR 0012;
+> **Repo + live state 2026-10-26:** `local/telegram-digest:v24` LIVE (deployment + both
+> CronJobs): HTML-safe truncation, getMe retry, rule-9 bounds, `/tmp/bot-alive` liveness
+> heartbeat + exec probe, non-root securityContext (the per-image canary — passed).
+> Deploy-verified same day: bot polling on pi1 (owner + 2 members), heartbeat fresh,
+> uid 1000, and a no-send validation job built the digest from the live DB
+> (`DIGEST-BUILD-OK 873 chars`). First scheduled v24 digest/alerts: 2026-10-27 cycle.
+> Commands still unverified from the phone since v8 — see pending-tasks.
+> **Last live-verified: 2026-10-12 08:46 UTC** (live: Deployment + both CronJobs on `local/telegram-digest:v8` — multi-user, ADR 0012;
 > bot Running on pi1; `bot_users` holds 2 member rows added by the owner at 08:31/08:32 UTC — one private chat, one group chat, same
 > name; `watchlist` still empty; `telegram-alerts` first scheduled run 09:45 UTC OK (`ALERTS-OK 3 message(s) for 3 user(s)` — owner + both member rows). Index cards validated
 > against the live DB with 40 years of history; commands not yet checked from the phone).
@@ -299,6 +306,15 @@ Outbound-only, survives CGNAT, no VPS.
 5 letters is never auto-picked), AI (shared gateway, `general`) for nicknames — its ticker AND company name must agree
 with the universe (live: facebook → META, big blue → IBM, hul → HINDUNILVR.NS, coke → KO); `/watch` never writes on a corrected symbol — it asks for
 the exact one. Switch: `BOT_AI_RESOLVE` on the Deployment.
+
+### /ask — questions answered from stored facts only (2026-10-19, ML-7d family, image v14–v23)
+`/ask TCS outlook`, `/ask news infosys`, `/ask usdinr`, `/ask fii flows`. Flow: find the subject (stock via the forgiving
+resolver — word-by-word, so "TCS outlook" is about TCS; index/FX/flows/news by keyword), gather a small facts JSON (public
+data only; news via semantic search over `headline_embeddings`, ADR 0024), gateway `general` answers, and the answer ships
+only if every number and direction checks out (`factcheck.py`, shared with ML-7a; percent forms of given values allowed,
+rounding/truncation to ≤0.01 tolerated, metric-key numbers like "12-month" allowed). Two failed checks or gateway down →
+the bot shows the facts table instead; a question mapping to no facts is refused, never guessed. 12–60 s per answer
+(NVIDIA queueing varies); never a scoring input.
 
 ### AI market note in the digest (2026-10-18, ML-7a, image v9+; first real note 2026-10-19)
 `llm-narrative` (07:40 IST) writes `llm_narratives`; the 08:00 digest adds a "Summary (AI-written; every number checked)"

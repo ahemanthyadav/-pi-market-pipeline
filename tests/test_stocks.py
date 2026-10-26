@@ -116,6 +116,82 @@ class FormatTest(unittest.TestCase):
         self.assertIsNone(stocks.spread_bp(y, "^TNX", "IN_GS_10Y"))
 
 
+def tag_balanced(text):
+    """True when every <pre>/<b>/<i>/<code> opened is closed in order."""
+    stack = []
+    for m in re.finditer(r"<(/?)(pre|b|i|code)>", text):
+        if m.group(1):
+            if not stack or stack.pop() != m.group(2):
+                return False
+        else:
+            stack.append(m.group(2))
+    return not stack
+
+
+def entities_whole(text):
+    """True when every & starts a complete entity — nothing was cut mid-entity."""
+    return all(re.match(r"&(?:#\d+|#x[0-9a-fA-F]+|[a-zA-Z]+);", text[i:])
+               for i, ch in enumerate(text) if ch == "&")
+
+
+class TrimHtmlTest(unittest.TestCase):
+    def test_under_and_at_limit_unchanged(self):
+        self.assertEqual(stocks.trim_html("short", 100), "short")
+        self.assertEqual(stocks.trim_html("exact", 5), "exact")
+        self.assertEqual(stocks.trim_html("<pre>x</pre>", 12), "<pre>x</pre>")
+
+    def test_plain_text_over_limit(self):
+        out = stocks.trim_html("abcdefghij", 5)
+        self.assertEqual(out, "abcd…")
+        self.assertLessEqual(len(out), 5)
+
+    def test_cut_inside_pre_closes_it(self):
+        text = "<pre>" + "a" * 100 + "</pre>"
+        out = stocks.trim_html(text, 20)
+        self.assertLessEqual(len(out), 20)
+        self.assertTrue(out.endswith("…</pre>"))          # ellipsis inside the scope
+        self.assertTrue(tag_balanced(out), out)
+        self.assertEqual(out, "<pre>" + "a" * 8 + "…</pre>")
+
+    def test_cut_inside_nested_b_within_pre(self):
+        text = "<pre>head <b>" + "x" * 100 + "</b></pre>"
+        out = stocks.trim_html(text, 30)
+        self.assertLessEqual(len(out), 30)
+        self.assertTrue(out.endswith("…</b></pre>"))
+        self.assertTrue(tag_balanced(out), out)
+
+    def test_never_cuts_mid_tag(self):
+        text = "aaaa<pre>bb</pre>"
+        for limit in range(1, len(text)):
+            out = stocks.trim_html(text, limit)
+            self.assertNotRegex(out, r"<[^>]*$")          # no half-open tag at the end
+            self.assertTrue(tag_balanced(out), f"limit={limit}: {out}")
+
+    def test_never_cuts_mid_entity(self):
+        out = stocks.trim_html("aa&amp;bb", 5)            # naive slice would give 'aa&a…'
+        self.assertEqual(out, "aa…")
+        text = "P&amp;L is &lt;fine&gt; &#8212; yes, really quite fine"
+        for limit in range(1, len(text)):
+            out = stocks.trim_html(text, limit)
+            self.assertLessEqual(len(out), limit)
+            self.assertTrue(entities_whole(out.rstrip("…")), f"limit={limit}: {out}")
+
+    def test_every_limit_fits_and_balances_on_a_realistic_message(self):
+        text = ("<b>Market digest</b>  <i>09 Oct</i>\n"
+                "<pre>S&amp;P 500 7,765.4 -0.5%\nNifty 22,534 +1.4%</pre>\n"
+                "Try <code>/watch add TCS</code> — P&amp;L shown per chat")
+        for limit in range(1, len(text) + 2):
+            out = stocks.trim_html(text, limit)
+            self.assertLessEqual(len(out), limit, f"limit={limit}")
+            self.assertTrue(tag_balanced(out), f"limit={limit}: {out}")
+            self.assertTrue(entities_whole(out), f"limit={limit}: {out}")
+
+    def test_tiny_limits(self):
+        self.assertEqual(stocks.trim_html("abc", 0), "")
+        self.assertEqual(stocks.trim_html("abc", 1), "…")
+        self.assertEqual(stocks.trim_html("<pre>abc</pre>", 2), "…")   # no room for </pre>
+
+
 class WorldFxTest(unittest.TestCase):
     def test_change(self):
         self.assertAlmostEqual(stocks.change(110.0, 100.0), 0.10)

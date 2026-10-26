@@ -1,6 +1,6 @@
-# Frozen 2026-10-12 from the running image local/nse-fetcher:v4 (`ctr run --rm … pip freeze`) — what is actually deployed.
-# Not yet consumed by the Dockerfile (AR-5 step 1: record). A rebuild should `pip install -r requirements.lock`
-# so it reproduces this set instead of resolving latest. Re-freeze after any rebuild.
+# Frozen 2026-10-12 from the running image local/nse-fetcher:v4 (`ctr run --rm … pip freeze`).
+# CONSUMED by the Dockerfile since v5 (AR-5, 2026-10-26) — the build reproduces this set.
+# Re-freeze after any rebuild.
 beautifulsoup4==4.15.0
 certifi==2026.7.22
 cffi==2.1.1

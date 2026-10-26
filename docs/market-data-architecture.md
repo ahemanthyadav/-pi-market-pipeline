@@ -2,7 +2,7 @@
 
 > **Status:** live in production on the home k3s cluster. Updated 2026-10-18 (screener v12, health v5, roles,
 > chunk merge, data foundations — plan: `engineering-plan-2026-10-18.md`). Reconciled with `manifests/` 2026-10-10
-> (25 CronJobs since 2026-10-18; `ops-tools/workloads.py --check` keeps the tables honest). **Live state re-verified
+> (28 CronJobs since 2026-10-26; `ops-tools/workloads.py --check` keeps the tables honest). **Live state re-verified
 > 2026-10-17: all 4 k8s nodes Ready (pi2 control-plane cordoned), every CronJob then deployed (23) active, TimescaleDB,
 > Grafana, and Telegram bot all Running.** (see ops manual §8 and pending-tasks for known gaps).
 > Doc map: this file = **architecture** (what the system is);
@@ -78,7 +78,7 @@ flowchart LR
     end
 
     subgraph K8S["k3s cluster · namespace market-data · Tailscale-only perimeter"]
-        JOBS["25 CronJobs + 2 Deployments<br/>(fetchers · scorers · screener chain · telegram)"]
+        JOBS["28 CronJobs + 2 Deployments<br/>(fetchers · scorers · screener chain · telegram)"]
         TSDB[("TimescaleDB 2.30.1-pg16<br/>single instance · TX2 sda4 SSD")]
         GRAF["Grafana 12 (pi3)<br/>6 dashboards · 3 alert rules"]
         TGB["Telegram digest CronJob +<br/>two-way listener Deployment (pi1)"]
@@ -255,7 +255,7 @@ whole DB via `pg_dump`.*
 |---|---|---|
 | Orchestration | k3s (server v1.36.4+k3s1; TX2 agent pinned v1.35.3+k3s1) | Whole cluster |
 | DNS | Pi-hole v6.4.3 + unbound | pi0 |
-| Scheduling | k3s CronJobs (25 live); no workflow engine by design (pi2 RAM) | Pi workers / TX2 |
+| Scheduling | k3s CronJobs (28 live); no workflow engine by design (pi2 RAM) | Pi workers / TX2 |
 | Storage | TimescaleDB 2.30.1-pg16 (Postgres 16.15) | TX2, sda4 SSD |
 | Ingestion | Python 3.12-slim images: `yfinance`, `pandas`, `psycopg[binary]`, `feedparser`, `fredapi` | Pi workers |
 | Sentiment/NLP | FinBERT on CPU (TX2 inference needs no GPU at this volume) | TX2 only |
@@ -405,13 +405,13 @@ live (2026-09-29). Query used: `min(ts)/max(ts)/count(*)/count(DISTINCT key)` pe
 
 | Data | From | Backfillable? |
 |---|---|---|
-| `fx_rates` (10 pairs) | 2025-12-15 (backfill) | **yes** — Yahoo has decades |
-| `bond_yields` (15 instruments) | 2026-09-29 | **US yes** (Yahoo ^TNX/^FVX/^TYX/^IRX, FRED DGS*); India: RBI widget is current-only |
-| `interest_rates` (8) | 2026-10-01 | **DFF yes** (FRED from 1954); RBI policy rates: current-only feed |
-| `technical_indicators` (38 tickers) | 2026-09-29 | **yes** — computable from `index_prices` history |
+| `fx_rates` (10 pairs) | **2003+** (H-1 backfill 2026-10-19; pairs differ — USDJPY 1996, GBP/EUR/AUD vs INR 2003/06) | ~~yes~~ **done** |
+| `bond_yields` (15 instruments) | **US 1962+/1976+** (H-2/H-3 backfill 2026-10-19: ^TNX/^FVX/^TYX/^IRX from 1990, DGS2 1976, DGS10 1962, DGS30 1977); India: RBI widget is current-only | ~~US yes~~ **done (US)**; India forward-only |
+| `interest_rates` (8) | **DFF 1954+** (H-3 backfill 2026-10-19, 26,390 rows); RBI policy rates: current-only feed | ~~DFF yes~~ **done**; RBI forward-only |
+| `technical_indicators` (38 tickers) | **1985+** (H-4 backfill 2026-10-19, 2.6 M rows; bar-for-bar identical to the live compute — tested) | ~~yes~~ **done** |
 | `capital_flows` (FII/DII) | 2026-09-29 | partly — NSE archive depth unverified |
 | `raw_headlines` / `news_sentiment` / `headline_*` | 2026-09-29 | no — RSS serves current items only |
-| `stock_metrics_daily`, `stock_scores`, `stock_reports` | 2026-10-01/04 | metrics yes (from prices); historical scores only meaningful with point-in-time fundamentals (US) and EV-1 membership |
+| `stock_metrics_daily`, `stock_scores`, `stock_reports` | metrics **2021+ weekly** (H-5 backfill 2026-10-19, 2.4 M rows; latest-bar compute per week); historical scores only meaningful with point-in-time fundamentals (US) and EV-1 membership | metrics ~~yes~~ **done (5y weekly)**; scores wait for EV-1 |
 | `intraday_prices` (4) | 2026-10-01 | limited — Yahoo keeps hourly bars ~2 years |
 | `universe_membership_snapshots` | 2026-10-18 | no — the past needs EV-1 (historical index changes) |
 | `commodity_prices` | empty by design | futures live in `index_prices` |
@@ -608,8 +608,10 @@ layer (JOINs on ticker/symbol), not in DDL.*
 
 | CronJob | Schedule | Image | Writes to |
 |---|---|---|---|
-| nse-fetcher | 15 11 * * * | local/nse-fetcher:v4 | index_prices (9 Indian indices incl. ^CRSLDX) |
+| nse-fetcher | 15 11 * * * | local/nse-fetcher:v7 | index_prices (11 Indian indices: 9 Yahoo + ^CNXAUTO/^CNXFMCG NSE-direct since 2026-10-26) |
 | fiidii-fetcher | 0 14 * * * | local/fiidii-fetcher:v2 | capital_flows (FII/DII net) |
+| factors-fetcher | 0 11 2 * * | local/factors-fetcher:v1 | factor_returns (US Ken French 5F+MOM, IN IIM-A four-factor — G-20; first mdjob/job_runs adopter) |
+| membership-history | 30 11 2 * * | local/screener:v18 | index_membership (EV-1, ADR 0025: point-in-time S&P 500 intervals from Wikipedia; full idempotent rebuild) |
 | yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v5 | index_prices (29 tickers) |
 | fx-fetcher | 0 23 * * * | local/fx-fetcher:v1 | fx_rates (10 pairs) |
 | yields-fetcher | 15 23 * * * | local/yields-fetcher:v1 | bond_yields (^TNX/^FVX/^TYX/^IRX) |
@@ -619,19 +621,20 @@ layer (JOINs on ticker/symbol), not in DDL.*
 | ta-compute | 30 0 * * * | local/ta-compute:v1 | technical_indicators |
 | headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (ADR 0010) |
 | rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (IN_* policy rates) + bond_yields (IN_GS_*) |
-| telegram-digest | 0 8 * * * (Asia/Kolkata) | local/telegram-digest:v13 (pinned pi1) | Telegram digest (read-only) |
-| telegram-alerts | 45 2 * * * (node-local) | local/telegram-digest:v13, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only; silent when nothing changed) |
-| llm-narrative | 40 7 * * * (Asia/Kolkata) | local/pipeline-health:v5 | llm_narratives — ML-7a AI market note via the shared llm-gateway (ADR 0022); digest shows it only if every number checks out |
+| telegram-digest | 0 8 * * * (Asia/Kolkata) | local/telegram-digest:v24 (pinned pi1) | Telegram digest (read-only) |
+| telegram-alerts | 45 2 * * * (node-local) | local/telegram-digest:v24, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only; silent when nothing changed) |
+| llm-narrative | 40 7 * * * (Asia/Kolkata) | local/pipeline-health:v6 | llm_narratives — ML-7a AI market note via the shared llm-gateway (ADR 0022); digest shows it only if every number checks out |
+| news-embed | 0 1 * * * | local/pipeline-health:v6 | headline_embeddings — ML-2: embeds new headlines via the gateway `embed` capability, groups near-duplicates into stories (ADR 0024) |
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | pi3 SSD dumps |
-| pipeline-health | 45 1 * * * | local/pipeline-health:v5 | pipeline_heartbeat (14 feeds incl. rbi; stock prices/scores 96 h since v5) |
+| pipeline-health | 45 1 * * * | local/pipeline-health:v6 | pipeline_heartbeat (14 feeds incl. rbi; stock prices/scores 96 h since v5) |
 | intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
-| universe-refresh | 0 9 * * 0 | local/screener:v15 | universe_constituents + ticker_names (998) |
-| stock-prices | 30 23 * * * | local/screener:v15 | stock_prices (5d window) |
-| stock-fundamentals | 0 6 * * 6 | local/screener:v15 | stock_fundamentals (EDGAR US + yfinance NSE) |
-| stock-metrics | 0 2 * * * | local/screener:v15 | stock_metrics_daily |
-| stock-screener | 15 2 * * * | local/screener:v15 | stock_scores + screening_runs |
-| stock-report | 30 2 * * * | local/screener:v15 | stock_reports (top-25/universe + digest) |
-| nse-fundamentals | 0 10 * * 0 | local/screener:v15 | financial_facts `nse_cons`/`nse_sa` — India results filings (G-6, ADR 0021); **suspended until the first backfill completes** |
+| universe-refresh | 0 9 * * 0 | local/screener:v18 | universe_constituents + ticker_names (998) |
+| stock-prices | 30 23 * * * | local/screener:v18 | stock_prices (5d window) |
+| stock-fundamentals | 0 6 * * 6 | local/screener:v18 | stock_fundamentals (EDGAR US + yfinance NSE) |
+| stock-metrics | 0 2 * * * | local/screener:v18 | stock_metrics_daily |
+| stock-screener | 15 2 * * * | local/screener:v18 | stock_scores + screening_runs |
+| stock-report | 30 2 * * * | local/screener:v18 | stock_reports (top-25/universe + digest) |
+| nse-fundamentals | 0 10 * * 0 | local/screener:v18 | financial_facts `nse_cons`/`nse_sa` — India results filings (G-6, ADR 0021); **suspended until the first backfill completes** |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only → manual INSERT |
 
 **Schedules are node-local PDT, not UTC** (verified 2026-10-04 — the "02:00-02:30"
@@ -727,6 +730,12 @@ One-shot Jobs (kept as manifests, run on demand): `backfill-yfinance-1y`, `backf
 - **ML-7a** `llm-narrative` (07:40 IST) → `llm_narratives`; the digest shows the note only if every number matches its facts.
 - **Symbol lookup** in the bot: fuzzy correction first, AI only for nicknames, validated against the universe; `/watch`
   never writes on a guess.
+- **ML-2 groundwork (ADR 0024):** `news-embed` (01:00 UTC) embeds new headlines (`embed` capability, fallbacks
+  disabled — vectors are only ever compared within one model) into `headline_embeddings` and groups near-duplicates
+  into stories. Serves semantic news lookup and story-level digests later; never a scoring input.
+- **Gateway monitored + backed up (2026-10-19):** pipeline-health v6 adds `llm_narrative` (last ok note, 56 h) and
+  `llm_gateway` (readiness probe) feeds to `pipeline_heartbeat`; pg-backup also dumps the gateway's `litellm` DB
+  daily (best effort).
 - Rules: public market data only; never a scoring input (ADR 0018); every feature degrades silently when the gateway is down.
 
 ### 5.10 Sequence diagrams (operational flows)

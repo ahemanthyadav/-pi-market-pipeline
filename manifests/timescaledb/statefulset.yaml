@@ -20,6 +20,8 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/hostname: ahytx2-desktop
+      # Applying this line restarts the single DB pod — quiet window only (§7).
+      automountServiceAccountToken: false   # uses no k8s API
       tolerations:
         - key: gpu
           operator: Equal

@@ -1,7 +1,8 @@
 # Grafana (Phase 7). Single replica pinned to pi3 (kept off the fragile pi2
-# control-plane; TX2 is tainted for GPU work). Stateless by design: dashboards
-# and datasource are file-provisioned from ConfigMaps, so pod restarts lose
-# nothing but unsaved UI edits. Reach it tailnet-only via:
+# control-plane; TX2 is tainted for GPU work). Dashboards and datasource are
+# file-provisioned from ConfigMaps; runtime state (sqlite: dashboard versions,
+# users, alert silences) lives on the pi3 hostPath /var/lib/market-data/grafana,
+# so pod restarts lose only unsaved UI edits. Reach it tailnet-only via:
 #   kubectl port-forward -n market-data svc/grafana 3000:3000
 apiVersion: apps/v1
 kind: Deployment
@@ -20,12 +21,26 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/hostname: pi3
+      automountServiceAccountToken: false   # uses no k8s API
       containers:
         - name: grafana
           image: grafana/grafana:12.2.0
           ports:
             - containerPort: 3000
               name: http
+          # Readiness gates the Service; liveness is deliberately generous so a
+          # heavy-dashboard memory squeeze (512Mi cap on a 1 GB Pi) is never
+          # restart-killed by a slow probe — same philosophy as the DB (AR-4).
+          readinessProbe:
+            httpGet: {path: /api/health, port: 3000}
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /api/health, port: 3000}
+            initialDelaySeconds: 90
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 5
           env:
             - name: GF_SECURITY_ADMIN_USER
               valueFrom:
