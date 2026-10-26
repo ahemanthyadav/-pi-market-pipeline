@@ -4,7 +4,15 @@
 > the linked docs — this file is the index + status. Maintained per AGENTS.md docs
 > discipline: mark items ✅ with a date (and where the completion is recorded) when
 > done; prune ✅ lines into the relevant doc's history at housekeeping time.
-> **Last reviewed: 2026-10-20 06:05 UTC** (completion pass: G-22 verified closed (502/503, only VYLR) · EV-9 EDGAR_MAP extended,
+> **Last reviewed: 2026-10-25** (full-project review pass, 3-agent + synthesis; fixes implemented same session:
+> pre-commit `@@PW@@` pattern-bypass closed (+2 hook test cases) · `tests/run-all.sh` single entrypoint (AGENTS/CI/CLAUDE.md all point at it) ·
+> `mdjob.write_window` now returns the live conn after a retry (+`tests/test_mdjob.py`, 8 tests) · ops-tools: labeled runcmd timeout (rc 5),
+> getfile/putfile error handling + exit codes, optional `.ssh_known_hosts` pinning, `_creds` unquoted-whitespace warning, `ev0 --start`
+> ISO-date validation, nodewatch flock + token via curl stdin · test coverage: 8 small fetchers + alerts.py + power-review verdict
+> (3 new test files, 55 checks) · rule-9 bounds in bot /fii + digest headlines/flows · HTML-safe `trim_html` (bot/digest/alerts) ·
+> bot getMe retry + /tmp/bot-alive heartbeat · news-fetcher `time.mktime`→`calendar.timegm` (UTC bug latent off-cluster) · CI pip pins ·
+> doc staleness (README git/ADR-count/v16, telegram doc header, schema-job + grafana comments). STAGED, NOT APPLIED → see the three
+> new §1 items: manifest hardening apply, telegram v24 rebuild, AR-8 writer role. Earlier **2026-10-20 06:05 UTC** (completion pass: G-22 verified closed (502/503, only VYLR) · EV-9 EDGAR_MAP extended,
 > `screener:v16` live, verification pass running · story threshold tuned to 0.82 (ADR 0024 amended) · H-6 depth checked (NSE serves
 > 1 day — owner decision) · Auto/FMCG + MIDCAP150 NSE-direct avenue verified to 2015 · telegram v23: /ask carries the 52-week range.
 > Earlier 04:20 UTC: **power acceptance PASSED on all four nodes — the pi1 item is closed**; **pi2 rebooted again ~01:56 UTC 10-20**,
@@ -34,6 +42,12 @@ Detail stays with each item; this is the decision view — keep it in sync when 
 | G-6 NSE backfill follow-ups | resume Job logs `cursor cleared` | un-suspend `nse-fundamentals`, screener DRY_RUN diff, EV-0 re-run, §4.3a counts (~1 h) |
 | EV-9 verification | Job `fundamentals-ev9` completes | one stale-count query + tracker tick (minutes) |
 
+**Agent-ready, needs only a calm cluster window (added 2026-10-25):**
+| Item | What | Effort |
+|---|---|---|
+| Staged manifest hardening apply | automount-token off, Grafana probes, netpol (DB pod restart last) | ~30 min, §7 window |
+| Telegram v24 rebuild | §6 cycle; liveness probe applies WITH v24, never before | ~30 min |
+
 **Owner hands/decision first — then mostly minutes, not sessions:**
 | Item | What it takes from the owner | Agent part after |
 |---|---|---|
@@ -57,8 +71,11 @@ Detail stays with each item; this is the decision view — keep it in sync when 
 | Yearly chunk merge | 2027-01 | ops manual §11 procedure |
 
 **Per-natural-rebuild (zero marginal cost when an image next changes anyway; never rebuild for these alone):**
-AR-2 `mdjob` adoption · AR-5 lock installs (14 images) · F401 import cleanups · per-job heartbeat v2 ·
-telegram `stocks.py` `series()` onto the facts path. Each is ~20 min *inside* an already-happening §6 cycle.
+AR-2 `mdjob` adoption (API fixed + tested 2026-10-25 — ready to adopt) · AR-5 lock installs (14 images) ·
+F401 import cleanups · per-job heartbeat v2 · telegram `stocks.py` `series()` onto the facts path ·
+news-fetcher `timegm` fix (in repo 2026-10-25; identical behavior in-cluster, so next natural news rebuild) ·
+per-image `securityContext` (runAsNonRoot + drop caps — needs a canary per image, start with telegram/news).
+Each is ~20 min *inside* an already-happening §6 cycle.
 
 **Projects — each needs its own session(s) plus a decision or ADR (order per §16 priorities):**
 | Project | Size | Gate / first decision |
@@ -77,6 +94,28 @@ telegram `stocks.py` `series()` onto the facts path. Each is ~20 min *inside* an
 ---
 
 ## 1. Immediate (next checkpoint: tomorrow's `/health`)
+
+- [ ] 🔶 **Apply the staged manifest hardening (2026-10-25) — calm window, `cluster-mutation` discipline.**
+  In the repo but NOT applied to the cluster: `automountServiceAccountToken: false` on every pod spec
+  (verified: no pod uses the k8s API — all kubectl refs are comments/log text; **the StatefulSet line restarts
+  the DB pod**, so that one goes in a §7 quiet window), Grafana readiness+liveness probes
+  (`grafana/deployment.yaml`), and `manifests/network-policies.yaml` (DB ingress limited to the market-data
+  namespace — verify kube-router netpol is enabled on pi2 first; apply+verify steps in the file header).
+  Order: grafana → cronjobs (spec-only, no pod impact until next run) → netpol → DB StatefulSet last.
+- [ ] 🔶 **Telegram image v23→v24 rebuild (§6 cycle)** — picks up: HTML-safe `trim_html` in bot/digest/alerts
+  (a cut mid-`<pre>` made Telegram 400 and the message was lost), getMe startup retry, rule-9 bounds
+  (/fii + digest headlines/flows — after >90 d dead capital_flows /fii shows empty; headlines >3 d old drop out),
+  factcheck comment fix, `/tmp/bot-alive` heartbeat. **The staged liveness probe in `telegram/deployment.yaml`
+  must be applied together with (never before) v24** — on v23 the heartbeat file doesn't exist and the pod
+  would restart-loop. factcheck.py also ships in the llm-narrative ConfigMap (`apply-llm.sh`) — re-apply
+  optional (comment-only). No new deps, no schema change.
+- [ ] 🤔 **AR-8 completion: writer role `pipeline_rw` (owner approval needed — non-SELECT SQL).** Jobs still
+  connect as the `postgres` superuser. Proposal: `CREATE ROLE pipeline_rw LOGIN PASSWORD <new Secret>;
+  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO pipeline_rw;` + default privileges,
+  new Secret `pipeline-db-rw`, then flip job manifests' PGUSER per natural rebuild (superuser stays for
+  migrations/backups). Say the word and an agent drafts the exact SQL + manifest diffs for review.
+- [ ] 🔶 *(optional, 5 min)* **Pin SSH host keys:** `ssh-keyscan <each node ip> >> .ssh_known_hosts` (gitignored)
+  — ops-tools then reject unknown/changed keys instead of auto-accepting (`_creds.host_key_policy`).
 
 > **Restored 2026-10-12:** commit `c455687` dropped the power-fix item, §2 (Security & hygiene), the `nodewatch` and
 > stats-logger records from this file. They are back below (power item and `nodewatch` here, §2 before §4), brought up to date
