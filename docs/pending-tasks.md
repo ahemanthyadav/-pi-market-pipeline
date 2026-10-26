@@ -85,7 +85,7 @@ Each is ~20 min *inside* an already-happening §6 cycle.
 **Projects — each needs its own session(s) plus a decision or ADR (order per §16 priorities):**
 | Project | Size | Gate / first decision |
 |---|---|---|
-| **EV-1 historical index membership** | 1–2 sessions | source choice (S&P change history; NSE circulars) — **blocks all US signal work** |
+| **EV-1 historical index membership** | ✅ US done 2026-10-26 (ADR 0025, `index_membership` live, drift 0) — US signal work UNBLOCKED; 🔶 India half deferred (NSE PDFs, own session) | India: ~1 session |
 | ~~EV-9 (roadmap half): more statement lines~~ | ✅ done 2026-10-26, `screener:v17` live, canary 3/3; universe fills on the 10-31 weekly run | done |
 | EV-10…14 → EV-17/18 composite v2 | 2+ sessions | gated on EV-1 + EV-9; per-universe rules = owner |
 | ~~G-20 factor returns~~ | ✅ done 2026-10-26 (`factors-fetcher:v1` live, terms verified; EV-0 §5 test-4 extension rides the next scoring change) | done |

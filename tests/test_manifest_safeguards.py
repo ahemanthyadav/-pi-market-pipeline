@@ -24,7 +24,7 @@ def cronjobs():
 
 class Safeguards(unittest.TestCase):
     def test_found_all(self):
-        self.assertEqual(len(list(cronjobs())), 27)  # … +news-embed (ML-2) 10-19; +factors-fetcher (G-20) 10-26
+        self.assertEqual(len(list(cronjobs())), 28)  # … +factors-fetcher (G-20), +membership-history (EV-1) 10-26
 
     def test_each_cronjob(self):
         for path, cj in cronjobs():

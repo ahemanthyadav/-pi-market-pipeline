@@ -1,5 +1,5 @@
 # Stock-screener CronJobs (Phases B-G). All use the single toolkit image
-# local/screener:v17 (imagePullPolicy: Never — import on pi1/pi2/pi3 first).
+# local/screener:v18 (imagePullPolicy: Never — import on pi1/pi2/pi3 first).
 # Schedules slot into the existing UTC chain without disturbing it:
 #   Sun 09:00 universe · daily 23:30 prices · Sat 06:00 fundamentals ·
 #   daily 02:00 metrics → 02:15 screener → 02:30 report
@@ -27,7 +27,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: universe
-              image: local/screener:v17
+              image: local/screener:v18
               imagePullPolicy: Never
               command: ["python", "universe_refresh.py"]
               env:
@@ -68,7 +68,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: prices
-              image: local/screener:v17
+              image: local/screener:v18
               imagePullPolicy: Never
               command: ["python", "stock_prices.py"]
               env:
@@ -109,7 +109,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: fundamentals
-              image: local/screener:v17
+              image: local/screener:v18
               imagePullPolicy: Never
               command: ["python", "stock_fundamentals.py"]
               env:
@@ -152,7 +152,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: metrics
-              image: local/screener:v17
+              image: local/screener:v18
               imagePullPolicy: Never
               command: ["python", "stock_metrics.py"]
               env:
@@ -193,7 +193,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: screener
-              image: local/screener:v17
+              image: local/screener:v18
               imagePullPolicy: Never
               command: ["python", "stock_screener.py"]
               env:
@@ -239,7 +239,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: report
-              image: local/screener:v17
+              image: local/screener:v18
               imagePullPolicy: Never
               command: ["python", "stock_report.py"]
               env:
@@ -290,7 +290,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: nse-fundamentals
-              image: local/screener:v17
+              image: local/screener:v18
               imagePullPolicy: Never
               command: ["python", "nse_fundamentals.py"]
               env:
@@ -309,4 +309,50 @@ spec:
                   value: postgres
               resources:
                 requests: {memory: 128Mi, cpu: 50m}
+                limits: {memory: 512Mi, cpu: 500m}
+---
+# EV-1 (ADR 0025): monthly point-in-time S&P 500 membership rebuild from
+# Wikipedia's constituents + changes tables into index_membership. Idempotent
+# full replace of the (SP500, wikipedia) slice; validates against
+# universe_constituents before writing. Monthly is plenty — index changes are
+# announced in batches, and universe_membership_snapshots accrues daily anyway.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: membership-history
+  namespace: market-data
+spec:
+  schedule: "30 11 2 * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 604800
+      template:
+        spec:
+          restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          containers:
+            - name: membership
+              image: local/screener:v18
+              imagePullPolicy: Never
+              command: ["python", "membership_history.py"]
+              env:
+                - name: PGHOST
+                  value: timescaledb.market-data.svc.cluster.local
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: timescaledb-auth
+                      key: password
+                - name: PGDATABASE
+                  value: postgres
+              resources:
+                requests: {memory: 128Mi, cpu: 100m}
                 limits: {memory: 512Mi, cpu: 500m}

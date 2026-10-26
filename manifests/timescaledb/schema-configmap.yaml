@@ -514,3 +514,19 @@ data:
     );
     CREATE INDEX IF NOT EXISTS idx_headline_embeddings_ts ON headline_embeddings (ts DESC);
     CREATE INDEX IF NOT EXISTS idx_headline_embeddings_story ON headline_embeddings (story_id);
+  14-index-membership.sql: |
+    -- EV-1 (2026-10-26, ADR 0025): point-in-time index membership intervals,
+    -- reconstructed from public change histories (membership_history.py).
+    -- removed IS NULL = currently a member. added = 1900-01-01 means "member
+    -- since before the source's records" (clip backtests to covered windows).
+    CREATE TABLE IF NOT EXISTS index_membership (
+      universe TEXT NOT NULL,              -- 'SP500' ('NIFTY500' when a source lands)
+      symbol   TEXT NOT NULL,              -- universe_constituents.symbol form
+      added    DATE NOT NULL,
+      removed  DATE,                       -- NULL = still in the index
+      source   TEXT NOT NULL,              -- 'wikipedia'
+      PRIMARY KEY (universe, symbol, added)
+    );
+    -- Point-in-time lookup: members of a universe on a given day.
+    CREATE INDEX IF NOT EXISTS ix_index_membership_window
+      ON index_membership (universe, added, removed);
