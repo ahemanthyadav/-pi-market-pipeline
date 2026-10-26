@@ -3,7 +3,10 @@
 Per symbol (resumable via job_state cursor):
 - US (CIK present): SEC EDGAR companyfacts XBRL — official statement history
   (~2009→ structured). Metrics: revenue, net income, operating income, EPS,
-  equity, long-term debt, OCF, capex → FCF. filing_published_at = EDGAR 'filed'.
+  equity, long-term debt, OCF, capex → FCF; since EV-9 2026-10-26 also total
+  assets, gross profit, current assets/liabilities, shares outstanding and
+  dividends paid (stored as a POSITIVE outflow from both sources — Yahoo files
+  it negative, see _norm). filing_published_at = EDGAR 'filed'.
 - NSE (no CIK): yfinance annual statements — same metric names.
 - All symbols: yfinance info live ratios (pe, pb, ev_ebitda, roe,
   operating_margin, market_cap) stamped ts=fetch date (last-write-wins).
@@ -48,6 +51,14 @@ EDGAR_MAP = {
               "PaymentsToAcquireProductiveAssets",
               "PaymentsToAcquireOtherProductiveAssets",
               "PaymentsForCapitalImprovements"],                   # REITs: HST, INVH, WY
+    # EV-9 full extension 2026-10-26 (roadmap: prerequisites of EV-10…EV-14).
+    "total_assets": ["Assets"],                                    # instant
+    "gross_profit": ["GrossProfit"],
+    "current_assets": ["AssetsCurrent"],                           # instant
+    "current_liabilities": ["LiabilitiesCurrent"],                 # instant
+    "shares_outstanding": ["CommonStockSharesOutstanding",         # instant count first,
+                           "WeightedAverageNumberOfDilutedSharesOutstanding"],  # per-period fallback
+    "dividends_paid": ["PaymentsOfDividendsCommonStock", "PaymentsOfDividends"],
 }
 # yfinance statement row -> metric. yfinance 1.7 renamed rows to CamelCase
 # (e.g. "NetIncome"); candidate lists cover both 0.2.x spaced names and 1.7+.
@@ -59,6 +70,23 @@ YF_MAP = {
     "shareholder_equity": ["Stockholders Equity", "StockholdersEquity"],
     "total_debt": ["Total Debt", "TotalDebt"],
     "fcf": ["Free Cash Flow", "FreeCashFlow"],
+    # EV-9 full extension 2026-10-26; candidates cover 0.2.x spaced and 1.7+ camel names.
+    "total_assets": ["Total Assets", "TotalAssets"],
+    "gross_profit": ["Gross Profit", "GrossProfit"],
+    "current_assets": ["Current Assets", "CurrentAssets",
+                       "Total Current Assets", "TotalCurrentAssets"],
+    "current_liabilities": ["Current Liabilities", "CurrentLiabilities",
+                            "Total Current Liabilities", "TotalCurrentLiabilities"],
+    "shares_outstanding": ["Ordinary Shares Number", "OrdinarySharesNumber",
+                           "Share Issued", "ShareIssued"],
+    "dividends_paid": ["Cash Dividends Paid", "CashDividendsPaid",
+                       "Common Stock Dividend Paid", "CommonStockDividendPaid",
+                       "Dividends Paid"],
+    # ocf feeds financial_facts only (accruals, EV-12, for NSE names); like the
+    # EDGAR leg it stays out of the stock_fundamentals "latest" view.
+    "ocf": ["Operating Cash Flow", "OperatingCashFlow",
+            "Total Cash From Operating Activities",
+            "CashFlowFromContinuingOperatingActivities"],
 }
 INFO_RATIOS = {
     "pe": "trailingPE", "pb": "priceToBook", "ev_ebitda": "enterpriseToEbitda",
@@ -85,7 +113,16 @@ def upsert(cur, symbol, ts, metric, value, source, published):
     return 1
 
 
-FLOW = {"total_revenue", "net_income", "operating_income", "eps", "ocf", "capex", "fcf"}
+FLOW = {"total_revenue", "net_income", "operating_income", "eps", "ocf", "capex", "fcf",
+        "gross_profit", "dividends_paid"}   # the rest are balance-sheet instants (duration 0)
+# Kept out of the stock_fundamentals "latest" view on BOTH legs (raw inputs; fcf derived).
+EXCLUDE_LATEST = {"ocf", "capex"}
+
+
+def _norm(metric, value):
+    """dividends_paid: EDGAR files it as a positive cash outflow, Yahoo as a negative
+    line — store the positive magnitude from both sources (EV-9, 2026-10-26)."""
+    return abs(value) if metric == "dividends_paid" and value is not None else value
 
 
 def _days(a, b):
@@ -109,7 +146,7 @@ def edgar_fact_rows(facts):
         for tag in tags:
             mine = set()
             for unit, entries in ((facts.get(tag) or {}).get("units", {})).items():
-                if unit not in ("USD", "USD/shares"):
+                if unit not in ("USD", "USD/shares", "shares"):   # shares: shares_outstanding (EV-9)
                     continue
                 for e in entries:
                     if e.get("form") not in ("10-K", "10-Q") or not e.get("end") \
@@ -122,7 +159,8 @@ def edgar_fact_rows(facts):
                         continue  # an earlier tag already owns this key
                     mine.add(key)
                     by_key.setdefault(key, []).append(
-                        (e["filed"], e.get("accn") or "", float(e["val"]), start, e["form"]))
+                        (e["filed"], e.get("accn") or "", _norm(metric, float(e["val"])),
+                         start, e["form"]))
             seen |= mine
     rows = []
     for (metric, end, dur), entries in by_key.items():
@@ -184,7 +222,7 @@ def edgar_facts(cik, symbol, cur):
             # companyfacts nesting: facts.{namespace}.{tag}.units.{unit}[]
             units = (facts.get(tag) or {}).get("units", {})
             for unit, entries in units.items():
-                if unit not in ("USD", "USD/shares"):
+                if unit not in ("USD", "USD/shares", "shares"):   # shares: shares_outstanding (EV-9)
                     continue
                 for e in entries:
                     if e.get("form") not in ("10-K", "10-Q") or not e.get("end"):
@@ -192,7 +230,7 @@ def edgar_facts(cik, symbol, cur):
                     key = (metric, e["end"])
                     filed = e.get("filed", "")
                     if key not in best or filed > best[key][1]:
-                        best[key] = (float(e["val"]), filed)
+                        best[key] = (_norm(metric, float(e["val"])), filed)
     rows = 0
     ends = {end for (_m, end) in best}
     for end in ends:
@@ -201,7 +239,7 @@ def edgar_facts(cik, symbol, cur):
         if ocf and capex:
             best[("fcf", end)] = (ocf[0] - capex[0], max(ocf[1], capex[1]))
     for (metric, end), (val, filed) in best.items():
-        if metric in ("ocf", "capex"):
+        if metric in EXCLUDE_LATEST:
             continue  # raw inputs kept out of the metric table (fcf derived)
         rows += upsert(cur, symbol, f"{end}T00:00:00Z", metric, val,
                        "edgar", f"{filed}T00:00:00Z" if filed else None)
@@ -237,8 +275,10 @@ def yf_statements(symbol, cur, fetch_date):
             for col in frame.columns:
                 v = frame.loc[hit, col]
                 if v is not None and v == v:
-                    rows += upsert(cur, symbol, col, metric, v, "yfinance", fetch_date)
-                    facts.append((metric, str(getattr(col, "date", lambda: col)())[:10], float(v)))
+                    v = _norm(metric, float(v))
+                    if metric not in EXCLUDE_LATEST:
+                        rows += upsert(cur, symbol, col, metric, v, "yfinance", fetch_date)
+                    facts.append((metric, str(getattr(col, "date", lambda: col)())[:10], v))
             break
     write_yf_facts(cur, symbol, facts, fetch_date[:10])
     return rows

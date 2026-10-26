@@ -86,7 +86,7 @@ Each is ~20 min *inside* an already-happening §6 cycle.
 | Project | Size | Gate / first decision |
 |---|---|---|
 | **EV-1 historical index membership** | 1–2 sessions | source choice (S&P change history; NSE circulars) — **blocks all US signal work** |
-| EV-9 (roadmap half): more statement lines | ~1 session | none — extends the same map + readers |
+| ~~EV-9 (roadmap half): more statement lines~~ | ✅ done 2026-10-26, `screener:v17` live, canary 3/3; universe fills on the 10-31 weekly run | done |
 | EV-10…14 → EV-17/18 composite v2 | 2+ sessions | gated on EV-1 + EV-9; per-universe rules = owner |
 | G-20 factor returns | ~1 session | verify Ken French / IIM-A terms first |
 | G-21 extra signals | ~1 session each | each must pass EV-0 §5 |

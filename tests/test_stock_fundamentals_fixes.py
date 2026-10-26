@@ -96,5 +96,48 @@ class FullYearOnly(unittest.TestCase):
         self.assertEqual([v for _ts, v in out["MSFT"]], [3.0, 2.0, 1.0])
 
 
+class Ev9Extension(unittest.TestCase):
+    """EV-9 full extension (2026-10-26): new statement lines flow end to end."""
+
+    NEW = {"total_assets", "gross_profit", "current_assets", "current_liabilities",
+           "shares_outstanding", "dividends_paid"}
+
+    def test_new_metrics_mapped_on_both_legs(self):
+        self.assertTrue(self.NEW <= set(sf.EDGAR_MAP))
+        self.assertTrue(self.NEW <= set(sf.YF_MAP))
+        self.assertIn("ocf", sf.YF_MAP)   # accruals input for NSE names (EV-12)
+
+    def test_flow_vs_instant_classification(self):
+        self.assertTrue({"gross_profit", "dividends_paid"} <= sf.FLOW)
+        for instant in ("total_assets", "current_assets", "current_liabilities",
+                        "shares_outstanding"):
+            self.assertNotIn(instant, sf.FLOW)
+
+    def test_dividends_paid_stored_positive_from_either_sign(self):
+        self.assertEqual(sf._norm("dividends_paid", -1250.0), 1250.0)
+        self.assertEqual(sf._norm("dividends_paid", 1250.0), 1250.0)
+        self.assertEqual(sf._norm("net_income", -7.0), -7.0)  # losses keep their sign
+
+    def test_edgar_rows_accept_shares_unit_and_instant_assets(self):
+        facts = {
+            "Assets": {"units": {"USD": [
+                {"form": "10-K", "end": "2025-12-31", "filed": "2026-02-10", "val": 5e9}]}},
+            "CommonStockSharesOutstanding": {"units": {"shares": [
+                {"form": "10-Q", "end": "2025-09-30", "filed": "2025-11-01", "val": 1.1e8}]}},
+            "PaymentsOfDividends": {"units": {"USD": [
+                {"form": "10-K", "start": "2025-01-01", "end": "2025-12-31",
+                 "filed": "2026-02-10", "val": 4.2e8}]}},
+        }
+        rows = sf.edgar_fact_rows(facts)
+        by_metric = {r[0]: r for r in rows}
+        self.assertEqual(by_metric["total_assets"][3], 0)            # instant: duration 0
+        self.assertEqual(by_metric["shares_outstanding"][4], 1.1e8)  # shares unit accepted
+        self.assertEqual(by_metric["dividends_paid"][3], 364)        # dated flow
+        self.assertEqual(by_metric["dividends_paid"][4], 4.2e8)
+
+    def test_ocf_stays_out_of_the_latest_view(self):
+        self.assertEqual(sf.EXCLUDE_LATEST, {"ocf", "capex"})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

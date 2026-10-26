@@ -70,7 +70,7 @@ in the database.
 
 | ID | Signal | Evidence | Data | Effort |
 |---|---|---|---|---|
-| EV-9 | **More statement lines** in `stock_fundamentals.py`: total assets, gross profit, operating cash flow, current assets and liabilities, shares outstanding, dividends paid | Prerequisite for EV-10…EV-14 | Yahoo statements carry all of them; EDGAR for the US back to 2007 | M |
+| EV-9 | ✅ **DONE 2026-10-26** (`screener:v17`) — **more statement lines** in `stock_fundamentals.py`: total assets, gross profit, current assets and liabilities, shares outstanding, dividends paid (positive-outflow convention, `_norm`); OCF added to the Yahoo leg for `financial_facts` (accruals input). Canary 3/3 OK, all 6 metrics verified in both tables; full universe fills on the next weekly run (2026-10-31). Gross profit is sparse on EDGAR (many filers skip the `GrossProfit` tag — derive revenue−COGS if EV-10 needs more coverage) | Prerequisite for EV-10…EV-14 | Yahoo statements carry all of them; EDGAR for the US back to 2007 | M |
 | EV-10 | **Gross profitability**: gross profit ÷ total assets | Novy-Marx (2013). As strong as value, and negatively correlated with it, so the two combine well | EV-9 | S |
 | EV-11 | **Investment (asset growth)**: year-on-year growth in total assets, *lower is better* | Cooper, Gulen & Schill (2008); the investment factor in Fama & French (2015) | EV-9 | S |
 | EV-12 | **Accruals**: (net income − operating cash flow) ÷ total assets, lower is better | Sloan (1996) | EV-9 | S |
