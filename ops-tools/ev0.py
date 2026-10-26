@@ -38,6 +38,8 @@ def export(start):
     cmd = os.environ.get("PSQL_CMD")
     if not cmd:
         sys.exit("set PSQL_CMD (see module docstring)")
+    # start is interpolated into SQL run as postgres — accept only a real ISO date
+    start = str(dt.date.fromisoformat(str(start)))
     sql = ("COPY (SELECT p.symbol, p.ts::date AS d, p.close, p.adj_close, p.volume, u.universe "
            "FROM stock_prices p JOIN universe_constituents u USING (symbol) "
            f"WHERE p.ts >= '{start}' ORDER BY 1, 2) TO STDOUT WITH CSV HEADER")

@@ -20,7 +20,7 @@ import time
 
 import paramiko
 
-from _creds import password_for, resolve_host
+from _creds import host_key_policy, password_for, resolve_host
 
 HOST, USER, REMOTE_DIR = "pi3", "pi3", "/var/lib/market-data/backups"
 
@@ -72,7 +72,7 @@ def main() -> int:
     os.makedirs(a.dest, exist_ok=True)
 
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    host_key_policy(client)   # pins via .ssh_known_hosts when present
     client.connect(resolve_host(HOST), username=USER, password=password_for(HOST, USER), timeout=15)
     sftp = client.open_sftp()
     attrs = {e.filename: e for e in sftp.listdir_attr(REMOTE_DIR)}

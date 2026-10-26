@@ -24,6 +24,12 @@ HERE="$(cd "$(dirname "$0")" && pwd)"; REPO="$(cd "$HERE/.." && pwd)"
 HOSTS="${NODEWATCH_HOSTS_FILE:-}"; [ -z "$HOSTS" ] && { [ -f "$REPO/.hosts.env" ] && HOSTS="$REPO/.hosts.env" || HOSTS=/etc/nodewatch.hosts; }
 SECRETS="${NODEWATCH_SECRETS_FILE:-}"; [ -z "$SECRETS" ] && { [ -f "$REPO/.secrets.env" ] && SECRETS="$REPO/.secrets.env" || SECRETS=/etc/nodewatch.secrets; }
 STATE="${NODEWATCH_STATE_DIR:-/var/tmp/nodewatch}"; mkdir -p "$STATE"
+# Single instance: a slow run (ping timeouts) overlapping the next */5 cron fire
+# must not interleave reads/writes of $STATE/last|sent (double-send / lost change).
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$STATE/.lock"
+  flock -n 9 || { echo "nodewatch: another run holds the lock — exiting"; exit 0; }
+fi
 DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1
 
 get() { grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2- | tr -d "'\""; }   # get <file> <key>
@@ -55,8 +61,10 @@ if [ -n "$msg" ]; then
     echo "(not sent: dry-run)"
   elif [ -z "$TOKEN" ] || [ -z "$CHAT" ]; then
     echo "(not sent: no Telegram credentials configured)"; handled=1
-  elif curl -fsS -m 15 "https://api.telegram.org/bot${TOKEN}/sendMessage" --data-urlencode "chat_id=${CHAT}" \
-         --data-urlencode "text=${msg}" >/dev/null; then
+  # Token/chat id go to curl via --config on stdin, never argv — `ps` on this host
+  # must not show them while the call runs (same class as AGENTS rule 10).
+  elif printf 'url = "https://api.telegram.org/bot%s/sendMessage"\ndata-urlencode = "chat_id=%s"\ndata-urlencode = "text=%s"\n' \
+         "$TOKEN" "$CHAT" "$msg" | curl -fsS -m 15 --config - >/dev/null; then
     echo "sent"; handled=1
   else
     echo "send FAILED — state left unchanged, will retry next run" >&2
