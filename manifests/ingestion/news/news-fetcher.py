@@ -9,9 +9,9 @@ Env: PGHOST, PGUSER, PGPASSWORD, PGDATABASE. FEEDS optionally overrides the
 default feed list (comma-separated name|url pairs).
 """
 
+import calendar
 import os
 import sys
-import time
 from datetime import datetime, timezone
 
 import feedparser
@@ -56,8 +56,10 @@ def parse_feeds() -> list:
                     continue
                 published = entry.get("published_parsed") or entry.get("updated_parsed")
                 if published:
+                    # feedparser's struct_time is UTC: timegm, never time.mktime
+                    # (mktime reads it as LOCAL time — only correct on a UTC host).
                     ts = datetime.fromtimestamp(
-                        time.mktime(published), tz=timezone.utc)
+                        calendar.timegm(published), tz=timezone.utc)
                 else:
                     ts = datetime.now(timezone.utc)
                 items.append((title[:500], name, ts))
