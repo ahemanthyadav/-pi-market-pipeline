@@ -58,8 +58,9 @@ skill); never commit credentials or IPs (rules 7–8; run the audit before any p
 
 - One-time per clone: `git config core.hooksPath .githooks` — pre-commit guard (gitleaks + exact local
   secret/address values + private-IP + forbidden-file checks; never prints a value).
-- Must pass: `python3 ops-tools/workloads.py --check` (docs agree with manifests),
-  `bash tests/test-precommit-hook.sh`, `bash tests/test-nodewatch.sh`, `python3 tests/test_creds.py`.
+- Must pass: `python3 ops-tools/workloads.py --check` (docs agree with manifests)
+  and `bash tests/run-all.sh` (every test in `tests/`, globbed — CI runs the same
+  entrypoint, so a new test file never needs registering anywhere).
 - Conventional commits (`commit-and-changelog` skill); push over SSH.
 
 ## DB access (read-only by default)
