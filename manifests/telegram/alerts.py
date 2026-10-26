@@ -45,7 +45,7 @@ def main() -> int:
         if not lines:
             return None
         text = "<b>Changes since the last run</b>\n" + "\n".join(lines)
-        return text[: TELEGRAM_LIMIT - 1] + "…" if len(text) > TELEGRAM_LIMIT else text
+        return stocks.trim_html(text, TELEGRAM_LIMIT)   # never cut mid-tag (2026-10-25)
 
     rc = users.deliver(recipients, owner, make_text, send)
     sent = sum(1 for chat, _ in recipients if common + personal.get(chat, []))

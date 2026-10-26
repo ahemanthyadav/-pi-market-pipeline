@@ -20,6 +20,10 @@ instruments are a bold headline plus label/value blocks (`kv`).
 Chunk pruning: stock_prices has ~3,400 chunks. Its time bounds must be
 parameters or now() arithmetic — a date_trunc() or sub-select bound planned
 for 11 s / ran 79 s on 2026-10-10. Keep bounds computed in Python.
+
+trim_html (2026-10-25): every send path cuts an over-long message with
+trim_html, never a raw slice — a cut mid-tag makes Telegram's HTML parser
+return 400 and the whole message is lost.
 """
 
 import html
@@ -111,6 +115,49 @@ def esc(s):
 def clip(s, width):
     s = str(s)
     return s if len(s) <= width else s[: width - 1] + "…"
+
+
+# Tags our messages use (module docstring) and the atomic units a cut must not split.
+TRIM_TAGS = {"pre", "b", "i", "code"}
+_TOKEN = re.compile(r"</?[a-zA-Z][^>]*>|&(?:#\d+|#x[0-9a-fA-F]+|[a-zA-Z]+);")
+
+
+def _html_tokens(text):
+    """text as a list of atomic pieces: whole tags, whole entities, single chars."""
+    tokens, pos = [], 0
+    for m in _TOKEN.finditer(text):
+        tokens += list(text[pos:m.start()])
+        tokens.append(m.group(0))
+        pos = m.end()
+    tokens += list(text[pos:])
+    return tokens
+
+
+def trim_html(text, limit):
+    """Cut Telegram-HTML text to <= limit chars, appending '…' inside the current
+    scope, without ever splitting a tag or entity; tags still open at the cut
+    (TRIM_TAGS) are closed so the Bot API accepts the result."""
+    if len(text) <= limit:
+        return text
+    if limit < 1:
+        return ""
+    out, stack, used = [], [], 0
+    for tok in _html_tokens(text):
+        new_stack = stack
+        if tok.startswith("</"):
+            if stack and stack[-1] == tok[2:-1].strip().lower():
+                new_stack = stack[:-1]
+        elif tok.startswith("<") and tok.endswith(">"):
+            name = tok[1:-1].split()[0].lower()
+            if name in TRIM_TAGS:
+                new_stack = stack + [name]
+        # reserve room for '…' plus a </tag> per still-open tag
+        if used + len(tok) + 1 + sum(len(t) + 3 for t in new_stack) > limit:
+            break
+        out.append(tok)
+        used += len(tok)
+        stack = new_stack
+    return "".join(out) + "…" + "".join(f"</{t}>" for t in reversed(stack))
 
 
 def table(header, rows, align):

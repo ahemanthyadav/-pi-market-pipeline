@@ -7,9 +7,9 @@ and in the llm-narrative ConfigMap (ops-tools/apply-llm.sh).
 """
 import re
 
-SMALL_INTS = set(range(0, 11))
+SMALL_INTS = set(range(0, 11))       # "two indices", "3 sectors" — harmless counts
 NUM = re.compile(r"(?<![\w.])[-+−–]?\d[\d,]*(?:\.\d+)?")   # − and – (models use both for negatives)
-KEYNUM = re.compile(r"\d+")          # numbers inside metric-key names (ret_12m, sma50_ratio) — NUM's lookbehind misses them          # "two indices", "3 sectors" — harmless counts
+KEYNUM = re.compile(r"\d+")          # numbers inside metric-key names (ret_12m, sma50_ratio) — NUM's lookbehind misses them
 
 
 def allowed_numbers(facts):
