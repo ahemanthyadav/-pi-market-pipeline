@@ -2,7 +2,7 @@
 
 > **Status:** live in production on the home k3s cluster. Updated 2026-10-18 (screener v12, health v5, roles,
 > chunk merge, data foundations — plan: `engineering-plan-2026-10-18.md`). Reconciled with `manifests/` 2026-10-10
-> (26 CronJobs since 2026-10-19; `ops-tools/workloads.py --check` keeps the tables honest). **Live state re-verified
+> (27 CronJobs since 2026-10-26; `ops-tools/workloads.py --check` keeps the tables honest). **Live state re-verified
 > 2026-10-17: all 4 k8s nodes Ready (pi2 control-plane cordoned), every CronJob then deployed (23) active, TimescaleDB,
 > Grafana, and Telegram bot all Running.** (see ops manual §8 and pending-tasks for known gaps).
 > Doc map: this file = **architecture** (what the system is);
@@ -78,7 +78,7 @@ flowchart LR
     end
 
     subgraph K8S["k3s cluster · namespace market-data · Tailscale-only perimeter"]
-        JOBS["26 CronJobs + 2 Deployments<br/>(fetchers · scorers · screener chain · telegram)"]
+        JOBS["27 CronJobs + 2 Deployments<br/>(fetchers · scorers · screener chain · telegram)"]
         TSDB[("TimescaleDB 2.30.1-pg16<br/>single instance · TX2 sda4 SSD")]
         GRAF["Grafana 12 (pi3)<br/>6 dashboards · 3 alert rules"]
         TGB["Telegram digest CronJob +<br/>two-way listener Deployment (pi1)"]
@@ -255,7 +255,7 @@ whole DB via `pg_dump`.*
 |---|---|---|
 | Orchestration | k3s (server v1.36.4+k3s1; TX2 agent pinned v1.35.3+k3s1) | Whole cluster |
 | DNS | Pi-hole v6.4.3 + unbound | pi0 |
-| Scheduling | k3s CronJobs (26 live); no workflow engine by design (pi2 RAM) | Pi workers / TX2 |
+| Scheduling | k3s CronJobs (27 live); no workflow engine by design (pi2 RAM) | Pi workers / TX2 |
 | Storage | TimescaleDB 2.30.1-pg16 (Postgres 16.15) | TX2, sda4 SSD |
 | Ingestion | Python 3.12-slim images: `yfinance`, `pandas`, `psycopg[binary]`, `feedparser`, `fredapi` | Pi workers |
 | Sentiment/NLP | FinBERT on CPU (TX2 inference needs no GPU at this volume) | TX2 only |
@@ -610,6 +610,7 @@ layer (JOINs on ticker/symbol), not in DDL.*
 |---|---|---|---|
 | nse-fetcher | 15 11 * * * | local/nse-fetcher:v7 | index_prices (11 Indian indices: 9 Yahoo + ^CNXAUTO/^CNXFMCG NSE-direct since 2026-10-26) |
 | fiidii-fetcher | 0 14 * * * | local/fiidii-fetcher:v2 | capital_flows (FII/DII net) |
+| factors-fetcher | 0 11 2 * * | local/factors-fetcher:v1 | factor_returns (US Ken French 5F+MOM, IN IIM-A four-factor — G-20; first mdjob/job_runs adopter) |
 | yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v5 | index_prices (29 tickers) |
 | fx-fetcher | 0 23 * * * | local/fx-fetcher:v1 | fx_rates (10 pairs) |
 | yields-fetcher | 15 23 * * * | local/yields-fetcher:v1 | bond_yields (^TNX/^FVX/^TYX/^IRX) |

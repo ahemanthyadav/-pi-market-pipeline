@@ -88,7 +88,7 @@ Each is ~20 min *inside* an already-happening §6 cycle.
 | **EV-1 historical index membership** | 1–2 sessions | source choice (S&P change history; NSE circulars) — **blocks all US signal work** |
 | ~~EV-9 (roadmap half): more statement lines~~ | ✅ done 2026-10-26, `screener:v17` live, canary 3/3; universe fills on the 10-31 weekly run | done |
 | EV-10…14 → EV-17/18 composite v2 | 2+ sessions | gated on EV-1 + EV-9; per-universe rules = owner |
-| G-20 factor returns | ~1 session | verify Ken French / IIM-A terms first |
+| ~~G-20 factor returns~~ | ✅ done 2026-10-26 (`factors-fetcher:v1` live, terms verified; EV-0 §5 test-4 extension rides the next scoring change) | done |
 | G-21 extra signals | ~1 session each | each must pass EV-0 §5 |
 | ~~Auto/FMCG + MIDCAP150 fetcher~~ | ✅ done 2026-10-26 (`nse-fetcher:v7`, series live 2015→today) | done |
 | ML-0 experiment infra / ML-1 anomaly v1 | 1–2 sessions | shares EV-0 harness |
@@ -694,8 +694,15 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   `filing_published_at`). The Sat 2026-10-17 run (`stock-fundamentals-29870700`, 13:00→14:40 UTC, Complete) is the first real pass on it.
   Its pod log was lost (likely in the 10-18 site-wide power event), so the proof is DB-side: `job_state.stock_fundamentals` cursor = NULL
   at 14:40:55 UTC (the clear that used to NameError) and `pe`/`pb` now hold 2 distinct snapshot dates (10-04, 10-17) — fundamentals refreshed.
-- [ ] 🔶 **P1 · G-20** factor returns (US Ken French library, India IIM-A library — URLs/terms **not verified**) into
-  `factor_returns`; extend EV-0 §5 test 4 to "beyond the standard factors".
+- [x] ✅ 2026-10-26 **P1 · G-20** factor returns LIVE (`factors-fetcher:v1`, monthly CronJob `0 11 2 * *`, the
+  27th job): US Ken French 5-factors+MOM (1963→, MOM 1927→) + India IIM-A survivorship-adjusted four-factor
+  library (1993-10→; WML→MOM, MF→MKT_RF as published) into `factor_returns` — 7,674 rows, canary verified.
+  Terms checked 2026-10-26: Ken French page carries a bare copyright (standard research-use practice,
+  attribution in the fetcher header); IIM-A asks for the Agarwalla–Jacob–Varma (2013) citation — recorded in
+  the fetcher header. **First AR-2/AR-3 adopter**: mdjob `write_window` + `job_run` (first `job_runs` row:
+  ok/7674). The release-stamped IIM-A filename is scraped from the index page each run.
+  Still open from this item: extend EV-0 §5 test 4 to "beyond the standard factors" (an ev0.py change —
+  do it with the next scoring change, EV-0 discipline).
 - [ ] 🔶 **P2 · G-21** extra signals testable from data on hand: net payout yield (Boudoukh et al. 2007), distress score,
   Amihud illiquidity (2002), max daily return / idiosyncratic volatility (Bali et al. 2011), industry momentum
   (Moskowitz & Grinblatt 1999) — citations from memory, verify; each must pass EV §5.
