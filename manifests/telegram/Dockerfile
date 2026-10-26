@@ -6,8 +6,8 @@
 # multi-user layer (owner + bot_users members, per-user fan-out — ADR 0012).
 # Same build/distribute pattern (native TX2 docker build, tarball import —
 # pinned node pi1 only, see cronjob.yaml/deployment.yaml):
-#   docker build -t local/telegram-digest:v24 .
-#   docker save local/telegram-digest:v24 | gzip > telegram-digest-v24.tar.gz
+#   docker build -t local/telegram-digest:v25 .
+#   docker save local/telegram-digest:v25 | gzip > telegram-digest-v25.tar.gz
 FROM python:3.12-slim
 WORKDIR /app
 # requirements.lock (AR-5): installed from the lock since v9 (2026-10-18).

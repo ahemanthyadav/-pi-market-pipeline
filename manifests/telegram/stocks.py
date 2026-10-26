@@ -737,6 +737,19 @@ def stock_card(q, row):
              else share(f["operating_margin"])),
             ("Debt / equity", f"{debt / equity:.2f}"
              if debt is not None and equity and equity > 0 else None)])]
+        # Deterministic fair-value panel (ADR 0026) — labelled, never advice.
+        try:
+            fv = q("SELECT fair_value, upside_pct, methods FROM stock_valuations "
+                   "WHERE symbol = %s AND ts >= now() - interval '7 days' "
+                   "ORDER BY ts DESC LIMIT 1", (symbol,))
+        except Exception as exc:  # noqa: BLE001 - only the missing-table case is expected
+            if not table_missing(exc):
+                raise
+            fv = []
+        if fv and fv[0][0] is not None:
+            fair, up, nm = fv[0]
+            out += [f"Fair value <b>{num(fair)}</b> ({up:+.0f}% vs close, "
+                    f"median of {nm} methods — <i>ADR 0026, not advice</i>)"]
     if annual:
         year = max(v[2] for v in annual.values())
         block = kv([("Revenue", yoy(annual, "total_revenue")), ("EPS", yoy(annual, "eps")),
@@ -1422,13 +1435,107 @@ def crosses(metric_rows, now=None):
 
 
 def alert_common(q, now=None):
-    """Shared change-alert lines (screener entries/exits) — identical for every user."""
+    """Shared change-alert lines (screener entries/exits + valuation watch) —
+    identical for every user."""
     lines = []
     for universe in ("NIFTY500", "SP500"):
         result = movers(q, universe)
         if result and is_fresh(result[0], now):
             lines += movers_lines(universe, result, ytd_map(q, [e[0] for e in result[2]]))
+    lines += alert_valuation(q, now)
     return lines
+
+
+# Valuation-watch gates (ADR 0026 amendment, owner-approved 2026-10-26).
+VAL_MIN_UPSIDE = 25.0     # median-fair-value upside, percent
+VAL_MIN_METHODS = 4       # methods that produced a number
+VAL_MIN_ABOVE = 3         # methods INDIVIDUALLY above the close (agreement)
+VAL_MAX_RANK = 50         # screener quality gate
+VAL_MAX_LINES = 5         # per run, across both universes
+
+VAL_CAND_SQL = (
+    "SELECT v.ts, v.symbol, v.universe, v.close, v.fair_value, v.upside_pct, v.methods, "
+    "(CASE WHEN v.graham          > v.close THEN 1 ELSE 0 END + "
+    " CASE WHEN v.peer_multiple   > v.close THEN 1 ELSE 0 END + "
+    " CASE WHEN v.fcf_yield       > v.close THEN 1 ELSE 0 END + "
+    " CASE WHEN v.dcf             > v.close THEN 1 ELSE 0 END + "
+    " CASE WHEN v.ddm             > v.close THEN 1 ELSE 0 END + "
+    " CASE WHEN v.epv             > v.close THEN 1 ELSE 0 END + "
+    " CASE WHEN v.residual_income > v.close THEN 1 ELSE 0 END + "
+    " CASE WHEN v.peg_lynch       > v.close THEN 1 ELSE 0 END) AS above "
+    "FROM stock_valuations v "
+    "WHERE v.ts >= now() - interval '4 days' "
+    "AND v.upside_pct >= %s AND v.methods >= %s ORDER BY v.ts DESC")
+
+VAL_CTX_SQL = (
+    "SELECT s.symbol, s.rank, s.composite, c.name, c.sector, st.note "
+    "FROM (SELECT DISTINCT ON (symbol) symbol, rank, composite, eligible "
+    "      FROM stock_scores WHERE symbol = ANY(%s) "
+    "      AND ts >= now() - interval '14 days' ORDER BY symbol, ts DESC) s "
+    "JOIN universe_constituents c ON c.symbol = s.symbol "
+    "LEFT JOIN sector_styles st ON st.sector = c.sector "
+    "WHERE s.eligible AND s.rank IS NOT NULL AND s.rank <= %s")
+
+
+def alert_valuation(q, now=None):
+    """Valuation-watch lines: a name ENTERING the high-agreement value set —
+    screener rank <= 50 AND fair-value upside >= 25% with >= 4 methods, >= 3 of
+    them individually above the close (ADR 0026 amendment: deterministic data
+    echo with the reasoning in the line; clearly labelled, never advice).
+    Stateless like every alert here: compares today's valuation run with the
+    previous one, so a name alerts once on entry, not daily."""
+    try:
+        rows = q(VAL_CAND_SQL, (VAL_MIN_UPSIDE, VAL_MIN_METHODS))
+    except Exception as exc:  # noqa: BLE001 - only the missing-table case is expected
+        if not table_missing(exc):
+            raise
+        return []
+    if not rows:
+        return []
+    latest = max(r[0] for r in rows)
+    if not is_fresh(latest, now):
+        return []
+    today = {r[1]: r for r in rows if r[0] == latest and r[7] >= VAL_MIN_ABOVE}
+    prior = {r[1] for r in rows if r[0] != latest and r[7] >= VAL_MIN_ABOVE}
+    entered = [s for s in today if s not in prior]
+    if not entered:
+        return []
+    ctx = {r[0]: r for r in q(VAL_CTX_SQL, (entered, VAL_MAX_RANK))}
+    lines = []
+    for sym in sorted(ctx, key=lambda s: -today[s][5])[:VAL_MAX_LINES]:
+        _ts, _s, _u, close, fair, up, nm, above = today[sym]
+        _sym, rank, comp, name, sector, note = ctx[sym]
+        reason = (f"fair <b>{num(fair)}</b> vs close {num(close)} ({up:+.0f}%, "
+                  f"{above}/{nm} methods above close); screener rank <b>#{rank}</b>, "
+                  f"composite {num(comp, 0)}")
+        lens = f" {esc(sector)}: <i>{esc(note)}</i>." if note else ""
+        lines.append(f"🟢 <b>{esc(name)}</b> ({esc(bare(sym))}) entered the "
+                     f"valuation watch — {reason}.{lens} "
+                     f"<i>ADR 0026 — not advice.</i>")
+    return lines
+
+
+def sectors_card(q, text=""):
+    """/sectors [sp500|nifty] — latest sector aggregates, cheapest first."""
+    universe = "SP500" if "sp" in (text or "").lower() else "NIFTY500"
+    rows = q(
+        "SELECT m.sector, m.members, m.median_pe, m.median_upside_pct, st.note "
+        "FROM (SELECT DISTINCT ON (sector) * FROM sector_metrics "
+        "      WHERE universe = %s AND ts >= now() - interval '7 days' "
+        "      ORDER BY sector, ts DESC) m "
+        "LEFT JOIN sector_styles st ON st.sector = m.sector "
+        "ORDER BY m.median_upside_pct DESC NULLS LAST", (universe,))
+    if not rows:
+        return f"No sector data for {universe} yet."
+    width = max(len(s) for s, *_ in rows)
+    body = [f"{'Sector':<{width}}  {'n':>3}  {'P/E':>6}  {'Upside':>7}"]
+    for sector, n, pe, up, _note in rows:
+        body.append(f"{sector:<{width}}  {n:>3}  "
+                    f"{num(pe, 1) if pe is not None else '–':>6}  "
+                    f"{f'{up:+.0f}%' if up is not None else '–':>7}")
+    return (f"<b>Sectors — {universe}</b>  <i>median fair-value gap, ADR 0026</i>\n"
+            f"<pre>{esc(chr(10).join(body))}</pre>\n"
+            f"<i>Lens per sector: /stock &lt;symbol&gt; shows what matters. Not advice.</i>")
 
 
 def alert_sections(q, now=None, chat_id=None):

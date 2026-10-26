@@ -128,6 +128,7 @@ def _help_text() -> str:
         "/top growth sp500 — best by value|quality|growth|momentum|risk\n"
         "/multibagger sp500 — small, fast-growing, high-return candidates\n"
         "/movers — who entered/left the screener top-20\n"
+        "/sectors sp500 — sector medians + fair-value gap (ADR 0026)\n"
         "/track — how the screener's picks have done\n"
         "/watch — YOUR watchlist + holdings P&amp;L (add/rm); private to this chat\n"
         "/world — every index: close, day, 1m, YTD (/world asia)\n"
@@ -239,6 +240,10 @@ def cmd_movers(_text: str) -> str:
     return stocks.movers_text(query)
 
 
+def cmd_sectors(text: str) -> str:
+    return stocks.sectors_card(query, text)
+
+
 def cmd_track(_text: str) -> str:
     return stocks.track_text(query)
 
@@ -344,6 +349,7 @@ COMMANDS = {
     "ask": cmd_ask,
     "top": cmd_top,
     "movers": cmd_movers,
+    "sectors": cmd_sectors,
     "multibagger": cmd_multibagger,
     "mb": cmd_multibagger,
     "track": cmd_track,

@@ -533,6 +533,7 @@ class StockCardTest(unittest.TestCase):
                 ("fcf", "yfinance", fy(2026), 55e9),
                 ("total_debt", "yfinance", fy(2026), 50.0),
                 ("shareholder_equity", "yfinance", fy(2026), 200.0)]),
+            ("FROM stock_valuations", [(1800.0, -18.2, 6)]),
             ("FROM headline_entities", [(day(8), "TCS Q2 <live>", "ET", -0.82, "results")]),
         ])
 
@@ -942,6 +943,7 @@ class AlertTest(unittest.TestCase):
     def test_sections_silent_without_watchlist_or_changes(self):
         db = FakeDB([("GROUP BY ts", [(day(9),), (day(8),)]),
                      ("s.rank <=", [(day(9), "A", "Alpha", 1), (day(8), "A", "Alpha", 1)]),
+                     ("FROM stock_valuations", []),
                      ("FROM watchlist", []), ("FROM stock_prices", [])])
         self.assertEqual(stocks.alert_sections(db, self.NOW), [])
 
@@ -954,6 +956,7 @@ class AlertTest(unittest.TestCase):
             ("FROM stock_metrics_daily", [("TCS.NS", "sma200_ratio", day(9), 1.01),
                                           ("TCS.NS", "sma200_ratio", day(8), 0.98)]),
             ("FROM headline_events", [("TCS.NS", "results", "TCS Q2 profit up <8%>", day(9))]),
+            ("FROM stock_valuations", []),
             ("FROM stock_prices", []),                                   # ytd lookups
         ])
         text = "\n".join(stocks.alert_sections(db, self.NOW))
@@ -967,7 +970,7 @@ class AlertTest(unittest.TestCase):
     def test_stale_screener_run_is_not_re_announced(self):
         db = FakeDB([("GROUP BY ts", [(day(7),), (day(6),)]),
                      ("s.rank <=", [(day(7), "NEW", "Newco", 3), (day(6), "OLD", "Oldco", 4)]),
-                     ("FROM watchlist", [])])
+                     ("FROM stock_valuations", []), ("FROM watchlist", [])])
         self.assertEqual(stocks.alert_sections(db, self.NOW), [])
 
     def test_missing_watchlist_table_degrades(self):
@@ -977,8 +980,101 @@ class AlertTest(unittest.TestCase):
         def boom(_args):
             raise UndefinedTable("relation watchlist does not exist")
 
-        db = FakeDB([("GROUP BY ts", []), ("FROM watchlist", boom)])
+        db = FakeDB([("GROUP BY ts", []), ("FROM stock_valuations", []),
+                     ("FROM watchlist", boom)])
         self.assertEqual(stocks.alert_sections(db, self.NOW), [])
+
+
+class ValuationWatchTest(unittest.TestCase):
+    """ADR 0026 amendment (owner-approved 2026-10-26): buy-watch alert lines."""
+    NOW = datetime(2026, 10, 10, 9, 45, tzinfo=timezone.utc)
+
+    @staticmethod
+    def cand(ts, sym, close=100.0, fair=140.0, up=40.0, methods=6, above=5,
+             universe="SP500"):
+        return (ts, sym, universe, close, fair, up, methods, above)
+
+    def db(self, cands, ctx):
+        return FakeDB([("FROM stock_valuations v", cands),
+                       ("sector_styles st", ctx)])
+
+    def test_entry_fires_with_reasoning_and_lens(self):
+        db = self.db([self.cand(day(9), "CHEAP"), self.cand(day(8), "OTHER")],
+                     [("CHEAP", 12, 71.0, "Cheap & Co <L>", "Financials",
+                       "Banks: leverage is the business model")])
+        lines = stocks.alert_valuation(db, self.NOW)
+        self.assertEqual(len(lines), 1)
+        line = lines[0]
+        self.assertIn("Cheap &amp; Co &lt;L&gt;", line)          # escaped
+        self.assertIn("fair <b>140.00</b> vs close 100.00 (+40%", line)
+        self.assertIn("5/6 methods above close", line)
+        self.assertIn("rank <b>#12</b>", line)
+        self.assertIn("Financials", line)
+        self.assertIn("not advice", line)
+
+    def test_already_in_the_set_yesterday_stays_silent(self):
+        db = self.db([self.cand(day(9), "CHEAP"), self.cand(day(8), "CHEAP")],
+                     [("CHEAP", 12, 71.0, "Cheap", "Financials", None)])
+        self.assertEqual(stocks.alert_valuation(db, self.NOW), [])
+
+    def test_stale_valuation_run_never_fires(self):
+        db = self.db([self.cand(day(6), "CHEAP")], [])
+        self.assertEqual(stocks.alert_valuation(db, self.NOW), [])
+
+    def test_rank_gate_names_outside_top50_dropped(self):
+        db = self.db([self.cand(day(9), "CHEAP")], [])   # ctx query returns nothing
+        self.assertEqual(stocks.alert_valuation(db, self.NOW), [])
+
+    def test_agreement_gate_needs_three_methods_above_close(self):
+        db = self.db([self.cand(day(9), "CHEAP", above=2)], [])
+        self.assertEqual(stocks.alert_valuation(db, self.NOW), [])
+
+    def test_capped_at_five_lines_best_upside_first(self):
+        cands = [self.cand(day(9), f"S{i}", up=20.0 + i) for i in range(1, 8)]
+        ctx = [(f"S{i}", i, 60.0, f"Name{i}", "Energy", None) for i in range(1, 8)]
+        lines = stocks.alert_valuation(self.db(cands, ctx), self.NOW)
+        self.assertEqual(len(lines), stocks.VAL_MAX_LINES)
+        self.assertIn("Name7", lines[0])                 # highest upside leads
+
+    def test_missing_table_degrades_silently(self):
+        class UndefinedTable(Exception):
+            pass
+
+        def boom(_args):
+            raise UndefinedTable("relation stock_valuations does not exist")
+
+        db = FakeDB([("FROM stock_valuations v", boom)])
+        self.assertEqual(stocks.alert_valuation(db, self.NOW), [])
+
+
+class SectorsCardTest(unittest.TestCase):
+    ROWS = [("Energy", 21, 18.7, -42.0, "Earnings follow the commodity price cycle"),
+            ("Financials", 76, 14.2, -24.0, None)]
+
+    def test_card_lists_sectors_with_upside(self):
+        db = FakeDB([("FROM sector_metrics", list(reversed(self.ROWS)))])
+        text = stocks.sectors_card(db, "/sectors sp500")
+        self.assertIn("<b>Sectors — SP500</b>", text)
+        self.assertIn("<pre>", text)
+        self.assertIn("Financials", text)
+        self.assertIn("-24%", text)
+        self.assertIn("not advice", text.lower())
+
+    def test_default_universe_is_nifty(self):
+        db = FakeDB([("FROM sector_metrics", self.ROWS)])
+        self.assertIn("NIFTY500", stocks.sectors_card(db, "/sectors"))
+
+    def test_empty_table_says_so(self):
+        db = FakeDB([("FROM sector_metrics", [])])
+        self.assertIn("No sector data", stocks.sectors_card(db, "/sectors sp500"))
+
+
+class CardFairValueTest(StockCardTest):
+    def test_card_carries_the_fair_value_line(self):
+        text = stocks.stock_card(self.db(), self.ROW)
+        self.assertIn("Fair value <b>1,800.00</b> (-18% vs close, "
+                      "median of 6 methods", text)
+        self.assertIn("ADR 0026, not advice", text)
 
 
 if __name__ == "__main__":

@@ -94,16 +94,18 @@ F401 import cleanups · per-job heartbeat v2 · telegram `stocks.py` `series()` 
 news-fetcher `timegm` fix (in repo 2026-10-25; identical behavior in-cluster, so next natural news rebuild) ·
 per-image `securityContext` (runAsNonRoot + drop caps — **telegram canary PASSED with v24 2026-10-26**; roll out to the
 other images per natural rebuild, news next) ·
-telegram v25 riders: `/stock` card gains the ADR 0026 fair-value line + sector lens, a `/sectors` command
-reading `sector_metrics`, and `stocks.py series()` onto the facts path (all queued for the next natural
-telegram rebuild — the data is already live and queryable).
+~~telegram v25 riders~~ → **v25 SHIPPED 2026-10-26**: valuation-watch buy alert (ADR 0026 amendment,
+owner-approved — entering names, reasoning in the line, ≤5/run; first live lines land with the next
+02:45 alerts run), `/sectors` command, fair-value line on `/stock` (16 new tests, 120 in the file;
+no-send validation green). Still queued for v26: `stocks.py series()` onto the facts path ·
+marketview deep-links from the card (needs the owner's exposure decision first).
 Each is ~20 min *inside* an already-happening §6 cycle.
 
 **Projects — each needs its own session(s) plus a decision or ADR (order per §16 priorities):**
 | Project | Size | Gate / first decision |
 |---|---|---|
 | **EV-1 historical index membership** | ✅ US done 2026-10-26 (ADR 0025, `index_membership` live, drift 0) — US signal work UNBLOCKED; 🔶 India half deferred (NSE PDFs, own session) | India: ~1 session |
-| **UI / Analysis Explorer** (`ui-implementation-plan.md`, owner asked 2026-10-26) | Phase 1 Grafana dashboards: agent-ready NOW (grants verified, dashboards are code); Phase 2 FastAPI explorer: 1–2 sessions + §6 cycle + ADR 0027 + owner exposure choice | P1 ~1 session · P2 1–2 sessions |
+| ~~**UI / Analysis Explorer**~~ | ✅ BOTH PHASES LIVE 2026-10-26: 4 new Grafana dashboards (24 queries validated as grafana_ro pre-apply; 11 total) + the **marketview** web app in its own repo (ADR 0027, `local/marketview:v1` on pi1, all routes canaried 200, bad input 404s) — port-forward exposure; NodePort/`tailscale serve` = 🤔 owner choice | done |
 | ~~EV-9 (roadmap half): more statement lines~~ | ✅ done 2026-10-26, `screener:v17` live, canary 3/3; universe fills on the 10-31 weekly run | done |
 | EV-10…14 → EV-17/18 composite v2 | 2+ sessions | data gates CLEARED 2026-10-26 (EV-1 US + EV-9 live); next = EV-0 §5 re-run on point-in-time membership, then per-universe rules = owner |
 | ~~G-20 factor returns~~ | ✅ done 2026-10-26 (`factors-fetcher:v1` live, terms verified; EV-0 §5 test-4 extension rides the next scoring change) | done |

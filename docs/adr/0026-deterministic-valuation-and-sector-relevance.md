@@ -48,3 +48,14 @@ panel of the classic deterministic methods with every assumption pinned.
   with it line by line, and upserts on re-apply.
 - Dividend coverage (DDM) and reported-share counts complete with the EV-9 weekly pass
   (2026-10-31); until then DDM speaks for few names and shares are implied.
+
+## Amendment (2026-10-26, owner-approved): the valuation watch alert
+
+The owner asked for notifications "when a high-confidence stock makes sense to buy, with
+reasoning". This amends consequence #6 for ALERTS ONLY — scores/composite/multibagger
+remain EV-0-gated. `stocks.alert_valuation` (telegram v25) adds shared lines to the daily
+change alert when a name ENTERS the set: screener-eligible, rank ≤ 50, fair-value upside
+≥ 25% from ≥ 4 methods with ≥ 3 methods individually above the close (agreement, not just
+a skewed median). Stateless entry detection (today's valuation run vs the previous one),
+≤ 5 lines per run, each line carrying the reasoning as a data echo (fair vs close, method
+agreement, rank, composite, sector lens) and the "not advice" label.
