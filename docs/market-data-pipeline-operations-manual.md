@@ -159,7 +159,7 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 
 | CronJob | Schedule | Image (node-local, Never pull) | Writes to |
 |---|---|---|---|
-| nse-fetcher | 15 11 * * * | local/nse-fetcher:v4 (commits per calendar year) | index_prices (9 Indian indices incl. ^CRSLDX Nifty 500, restored 2026-10-09; history from each index's Yahoo start — Sensex 1997, Nifty 50 2007) |
+| nse-fetcher | 15 11 * * * | local/nse-fetcher:v7 (commits per calendar year) | index_prices (11 Indian indices: 9 via Yahoo incl. ^CRSLDX Nifty 500 + ^CNXAUTO/^CNXFMCG via NSE-direct indicesHistory since 2026-10-26 — the API caps 70 records/call, the fetcher paginates; MIDCAP150 pre-2019 history backfilled from NSE, Yahoo owns 2019-01-14→) |
 | fiidii-fetcher | 0 14 * * * | local/fiidii-fetcher:v2 | capital_flows (FII/DII net) |
 | yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v5 (commits per calendar year) | index_prices (29 tickers — `^RUI` Russell 1000 added 2026-10-10; **history from 1985** backfilled 2026-10-10 for all 38 index tickers: 292,387 rows, 299 chunks — 262 weekly for 2021-10 → 2026-10 plus one-year chunks for everything created since `set_chunk_time_interval('index_prices', '365 days')`; see `yfinance/backfill-job.yaml`) |
 | fx-fetcher | 0 23 * * * | local/fx-fetcher:v1 | fx_rates (10 pairs) |

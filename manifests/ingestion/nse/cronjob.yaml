@@ -24,7 +24,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: fetcher
-              image: local/nse-fetcher:v4
+              image: local/nse-fetcher:v7
               imagePullPolicy: Never
               env:
                 - name: PGHOST

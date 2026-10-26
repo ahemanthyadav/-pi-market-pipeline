@@ -90,7 +90,7 @@ Each is ~20 min *inside* an already-happening §6 cycle.
 | EV-10…14 → EV-17/18 composite v2 | 2+ sessions | gated on EV-1 + EV-9; per-universe rules = owner |
 | G-20 factor returns | ~1 session | verify Ken French / IIM-A terms first |
 | G-21 extra signals | ~1 session each | each must pass EV-0 §5 |
-| Auto/FMCG + MIDCAP150 fetcher | ~1 session | `index_prices` ticker naming (avenue verified 2026-10-20) |
+| ~~Auto/FMCG + MIDCAP150 fetcher~~ | ✅ done 2026-10-26 (`nse-fetcher:v7`, series live 2015→today) | done |
 | ML-0 experiment infra / ML-1 anomaly v1 | 1–2 sessions | shares EV-0 harness |
 | ML-3 vol / ML-5 peers / ML-4 regime | ~1 session each | ML-4 descriptive-only until EV-0 shows value |
 | ML-6 GBM ranker | gated | hard gate: EV-0 + EV-1 + composite v2 pass §5 |
@@ -377,10 +377,10 @@ Each is ~20 min *inside* an already-happening §6 cycle.
   recorded in `01-schema.sql`). Jobs `backfill-yfinance-deep` (250,309 rows,
   3.5 min) and `backfill-nse-deep` (42,078 rows, 53 s). Cards verified against
   the live DB. `tests/test_index_fetchers.py` (4 tests).
-- [ ] 🔶 `NIFTYMIDCAP150.NS` has only 2019 → today on Yahoo, so its reading
-  rests on two years of comparisons; a longer series needs NSE's own archive.
-  ✅ Avenue verified 2026-10-20: NSE `api/historicalOR/indicesHistory?indexType=NIFTY%20MIDCAP%20150` serves daily EOD records back to
-  at least Jan 2015 (close-only in the early years, OHLC None). Backfill = a one-shot Job on the session-cookie pattern — build decision open.
+- [x] ✅ 2026-10-26 `NIFTYMIDCAP150.NS` pre-Yahoo history backfilled from NSE (`backfill-nse-direct` Job,
+  `nse-fetcher:v7`): the series now runs 2015-01-01 → today (2,915 rows; the 999 NSE rows sit strictly
+  before Yahoo's 2019-01-14 first bar — rule-4 ownership verified, 0 overlap). Close-only early rows carry
+  OHLC/volume NULL.
 - [x] ✅ 2026-10-14 **pi2 reboots under shared-charger power — closed with the power fix.** Six+ reboots on
   2026-10-10 (each took API + cluster DNS + the bot down); the cause was the shared multiport block, and pi2 is on a
   dedicated supply since ~2026-10-12 02:30 UTC — it PASSed the 24 h review (10-12 02:59 → 10-13 03:51, 0 events).
@@ -447,14 +447,14 @@ Each is ~20 min *inside* an already-happening §6 cycle.
   (IN_GS_10Y 7.29 on first run). Writes its own `pipeline_heartbeat` row
   ('rbi'). India yields panel added to the Bonds dashboard. Detail: findings
   Tier 2 #8; ops manual §4/§12.
-- [ ] 🔶 **Nifty 500 / Auto / FMCG index sources** — split 2026-10-09: Nifty 500
-  ✅ restored via Yahoo `^CRSLDX` (nse-fetcher v3, 9/9 tickers live). Auto/
-  FMCG 🔶 confirmed dead across all Yahoo symbol families; remaining avenue is
-  NSE-direct (session-cookie API, fiidii-fetcher pattern) or jugaad-data.
-  ✅ Avenue VERIFIED 2026-10-20: `api/historicalOR/indicesHistory` answers for `NIFTY AUTO` and `NIFTY FMCG` (served as "CNX AUTO"/
-  "CNX FMCG") with full daily OHLC back to at least Jan 2015. Remaining = build the fetcher/backfill (ticker naming decision for
-  `index_prices` included) — a one-session task on the fiidii cookie pattern.
-  Detail: findings Tier 2 #9; ops manual §12.2.
+- [x] ✅ 2026-10-26 **Nifty 500 / Auto / FMCG index sources — ALL restored.** Nifty 500 via Yahoo `^CRSLDX`
+  (2026-10-09); Auto/FMCG via the NSE-direct leg in `nse-indices.py` (`nse-fetcher:v7`, fiidii cookie
+  pattern): daily ^CNXAUTO/^CNXFMCG rows in the 11:15 run (canary 11/11), full 2015→today OHLC backfilled
+  (2,925 rows each). Naming decision recorded: ticker = series identity, not source — CNX-family names
+  next to ^CNXIT/^CNXPHARMA. Found + fixed on the way: the API caps 70 records/call (year asks silently
+  truncate to mid-April) — `nse_range()` paginates with a truncation-resume guard, tested. AR-5 rider:
+  the nse Dockerfile now installs from requirements.lock. v5/v6 were burned on the way (tz-mix bug,
+  the 70-cap) — tags bumped per rule, broken images removed from the Pis, tarball store holds v7 only.
 - [ ] 🔶 Per-job heartbeat v2 + fetcher-internal upstream guards — lands with
   the next NATURAL image rebuilds (don't rebuild 9 working images just for
   this). NEW jobs start on the v2 pattern directly (rbi-fetcher already writes

@@ -608,7 +608,7 @@ layer (JOINs on ticker/symbol), not in DDL.*
 
 | CronJob | Schedule | Image | Writes to |
 |---|---|---|---|
-| nse-fetcher | 15 11 * * * | local/nse-fetcher:v4 | index_prices (9 Indian indices incl. ^CRSLDX) |
+| nse-fetcher | 15 11 * * * | local/nse-fetcher:v7 | index_prices (11 Indian indices: 9 Yahoo + ^CNXAUTO/^CNXFMCG NSE-direct since 2026-10-26) |
 | fiidii-fetcher | 0 14 * * * | local/fiidii-fetcher:v2 | capital_flows (FII/DII net) |
 | yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v5 | index_prices (29 tickers) |
 | fx-fetcher | 0 23 * * * | local/fx-fetcher:v1 | fx_rates (10 pairs) |
