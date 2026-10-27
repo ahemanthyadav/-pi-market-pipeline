@@ -139,7 +139,7 @@ Each is ~20 min *inside* an already-happening §6 cycle.
   `telegram-digest:v27` universe aliases, `marketview:v5` benchmark map). Fill-in sequence (watch over
   the next days): (1) universe-refresh run → 2,251 active, 100% US CIK coverage via SEC fallback;
   (2) corporate-actions backfill for the ~1,250 new symbols (SYMBOLS env) — BEFORE prices so adj_close
-  computes right; (3) `backfill-stock-prices-max` with `ONLY_MISSING=1` (~12h resumable, detached);
+  computes right; (3) ✅ prices backfill COMPLETE 2026-10-28: 1,276/1,289 symbols, 7.2M rows, 5.56M adj_closes, 0 anomalies — all five universes now have deep history (SP400/SP600 to 1962, microcap to 1996); stock_prices 2.3GB;
   (4) Saturday 2026-10-31 weekly stock-fundamentals fills statements (deadline raised to 9h);
   (5) daily chain (metrics → scores → valuations → reports → predictions) covers the new universes
   automatically the morning after prices exist. Mark ✅ when `/screener?universe=SP600` shows ranked
