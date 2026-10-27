@@ -3,7 +3,7 @@
 > **What this repo is:** a home-lab market-data platform on a 5-node k3s cluster
 > (Pi workers + Jetson TX2) ingesting ~1,000 instruments daily — indices, FX,
 > commodities, yields, rates, news, FinBERT sentiment, FII/DII flows, technicals,
-> and a 998-stock fundamental screener (Nifty 500 + S&P 500) — into TimescaleDB,
+> and a 2,251-stock fundamental screener (S&P 1500 + Nifty Total Market, ADR 0029) — into TimescaleDB,
 > with Grafana dashboards, Tailscale-only access, and no container registry.
 > **Status 2026-10-26 — healthy; hardening + valuation/membership layer deployed.** Pod hardening applied
 > (SA tokens off everywhere, probes, non-root canary passed; netpol applied but unenforced on the TX2 — kernel
@@ -16,7 +16,7 @@
 > (`sector_metrics`) — all descriptive, never in the composite without EV-0 (amended 2026-10-26: the owner-approved VALUATION WATCH alert may fire from it — telegram v25). **UI live:** 11 provisioned Grafana dashboards + the `marketview` web explorer (sibling repo, ADR 0027 — dossiers, comparison charts, sector views, rendered reports, watchlist + scorecard pages; `kubectl -n market-data port-forward svc/marketview 8080:8080`). **Accountability layer live 2026-10-27 (ADR 0028):** prediction scorecard (write-once snapshots, 30/91/182d benchmark-relative outcomes), weekly earnings calendar (digest section, dossier badge, valuation-watch 3-day earnings gate), regime traffic light (digest + /regime + home page; descriptive only), weekly DQ-5 accuracy job (`__accuracy__` report; first run ALL CLEAN, 10/10 FRED cross-checks). AI layer live (shared
 > `llm-gateway`, NVIDIA free tier: daily AI market note, every number checked — ADR 0022/0023).
 > 4 nodes Ready (pi2 cordoned control plane), 32 CronJobs (nse-fundamentals suspended until its first backfill completes), the others
-> active, DB `Guaranteed` QoS with readiness probe. Images: screener toolkit `local/screener:v24`, telegram `local/telegram-digest:v26`, health monitor
+> active, DB `Guaranteed` QoS with readiness probe. Images: screener toolkit `local/screener:v25`, telegram `local/telegram-digest:v27`, health monitor
 > `local/pipeline-health:v6`. Least-privilege DB roles for Grafana and the Telegram bot. Daily second copies of the DB dump
 > and the k3s control-plane datastore on the workstation. A mains power loss on 10-18 rebooted everything — recovered on
 > its own; no UPS by decision. Work order and reasoning: `engineering-plan-2026-10-18.md`; open items: `pending-tasks.md`.

@@ -134,6 +134,17 @@ Each is ~20 min *inside* an already-happening §6 cycle.
   If `serve` asks for HTTPS certs, enable MagicDNS + HTTPS in the Tailscale admin console first.
   ClusterIPs survive pod restarts but not Service recreation — re-run the block if a svc is ever
   recreated (`tailscale serve status` shows the config; `tailscale serve reset` clears it).
+- [ ] 🔄 2026-10-27 **Universe expansion IN FLIGHT (ADR 0029): S&P 1500 + Nifty Total Market = 2,251
+  names** (`screener:v25`, `yfinance-fetcher:v6` with ^SP400/^SP600/NIFTY_MICROCAP250.NS benchmarks,
+  `telegram-digest:v27` universe aliases, `marketview:v5` benchmark map). Fill-in sequence (watch over
+  the next days): (1) universe-refresh run → 2,251 active, 100% US CIK coverage via SEC fallback;
+  (2) corporate-actions backfill for the ~1,250 new symbols (SYMBOLS env) — BEFORE prices so adj_close
+  computes right; (3) `backfill-stock-prices-max` with `ONLY_MISSING=1` (~12h resumable, detached);
+  (4) Saturday 2026-10-31 weekly stock-fundamentals fills statements (deadline raised to 9h);
+  (5) daily chain (metrics → scores → valuations → reports → predictions) covers the new universes
+  automatically the morning after prices exist. Mark ✅ when `/screener?universe=SP600` shows ranked
+  rows with valuations. Full-market (~8–11k) deliberately NOT planned — needs a bulk EOD provider +
+  fetcher sharding (see ADR 0029 consequences).
 - [x] ✅ 2026-10-27 **Feature wave 1–8 deployed (ADR 0028):** prediction scorecard (schema 18,
   `prediction-tracker` 02:40 daily — first canary wrote 1,419 snapshots; outcomes from 2026-11-26),
   earnings calendar (schema 19, weekly Sunday; canary 40 symbols → 25 dates; AAPL Mon 02 Nov on the

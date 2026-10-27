@@ -3,7 +3,7 @@
 > **Purpose:** everything about the Marketfredbot Telegram channel — how the
 > deployed digest + alert pipeline is wired, how to operate and change it, and
 > the tiered menu of two-way/next-step upgrades with their real constraints.
-> **Repo + live state 2026-10-27 (v26):** `local/telegram-digest:v26` LIVE — adds the REGIME
+> **Repo + live state 2026-10-27 (v26):** `local/telegram-digest:v27` LIVE — adds the REGIME
 > line in the digest + /regime command (breadth / benchmark-trend / factor-momentum traffic
 > light per market, descriptive only), the "Earnings this week" digest section (watchlist +
 > top-25, schema 19), and a new valuation-watch gate: entries reporting within 3 days are

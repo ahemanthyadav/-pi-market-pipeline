@@ -21,7 +21,8 @@ from datetime import datetime, timedelta, timezone
 from mdjob import connect, job_run
 
 HORIZONS = (30, 91, 182)
-BENCH = {"SP500": "^GSPC", "NIFTY500": "^CRSLDX"}
+BENCH = {"SP500": "^GSPC", "NIFTY500": "^CRSLDX", "SP400": "^SP400",
+         "SP600": "^SP600", "NIFTYMICROCAP250": "NIFTY_MICROCAP250.NS"}
 
 SNAP_SCORES_SQL = """
     SELECT s.symbol, s.universe, s.rank::float, s.composite, p.adj_close

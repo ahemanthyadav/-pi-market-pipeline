@@ -41,14 +41,19 @@ TERMINAL_G = 0.025                          # terminal growth, decimal
 TAX = 0.25                                  # EPV normalized tax rate
 DCF_YEARS = 5
 JPB_CAP = 8.0                               # residual-income multiple cap
-FALLBACK_10Y = {"SP500": 4.5, "NIFTY500": 7.0}
-TENOR = {"SP500": "DGS10", "NIFTY500": "IN_GS_10Y"}
+# Rates are per MARKET, not per universe (ADR 0029: five universes, two markets).
+FALLBACK_10Y = {"US": 4.5, "IN": 7.0}
+TENOR = {"US": "DGS10", "IN": "IN_GS_10Y"}
+
+
+def market(universe):
+    return "IN" if universe.startswith("NIFTY") else "US"
 HIST_METRICS = ("total_revenue", "eps", "dividends_paid", "ocf", "capex",
                 "operating_income", "fcf")
 
 
 def discount_rates(cur):
-    """{universe: decimal rate} from the latest 10y print (rule-9 bounded)."""
+    """{market: decimal rate} from the latest 10y print (rule-9 bounded)."""
     out = {}
     for universe, instrument in TENOR.items():
         cur.execute("SELECT yield FROM bond_yields WHERE instrument=%s "
@@ -176,7 +181,7 @@ def value_one(d, hist, medians, styles, weights, rates):
         return None
     style = styles.get(d["sector"], "default")
     w = lambda metric: weights.get((style, metric), weights.get(("default", metric), 2))  # noqa: E731
-    r = rates[d["universe"]]
+    r = rates[market(d["universe"])]
     med = medians.get((d["universe"], d["sector"]), {})
 
     mcap, eps, equity = d.get("market_cap"), d.get("eps"), d.get("shareholder_equity")

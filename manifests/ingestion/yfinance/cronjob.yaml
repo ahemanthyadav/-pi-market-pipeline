@@ -25,7 +25,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: fetcher
-              image: local/yfinance-fetcher:v5
+              image: local/yfinance-fetcher:v6
               imagePullPolicy: Never
               env:
                 - name: PGHOST

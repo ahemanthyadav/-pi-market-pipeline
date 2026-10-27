@@ -28,7 +28,7 @@ spec = importlib.util.spec_from_file_location("valuation", SCRIPT)
 va = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(va)
 
-RATES = {"SP500": 0.095, "NIFTY500": 0.12}       # 10y + ERP, decimal
+RATES = {"US": 0.095, "IN": 0.12}       # 10y + ERP, decimal, per MARKET (ADR 0029)
 STYLES = {"Financials": "financial", "Information Technology": "tech_growth"}
 WEIGHTS = {("financial", "pe"): 2, ("financial", "pb"): 3, ("financial", "fcf"): 0,
            ("tech_growth", "pe"): 2, ("tech_growth", "pb"): 2,

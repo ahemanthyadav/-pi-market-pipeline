@@ -1,5 +1,5 @@
 # Stock-screener CronJobs (Phases B-G). All use the single toolkit image
-# local/screener:v24 (imagePullPolicy: Never — import on pi1/pi2/pi3 first).
+# local/screener:v25 (imagePullPolicy: Never — import on pi1/pi2/pi3 first).
 # Schedules slot into the existing UTC chain without disturbing it:
 #   Sun 09:00 universe · daily 23:30 prices · Sat 06:00 fundamentals ·
 #   daily 02:00 metrics → 02:15 screener → 02:30 report
@@ -19,7 +19,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
-      activeDeadlineSeconds: 900
+      activeDeadlineSeconds: 1800
       ttlSecondsAfterFinished: 604800
       template:
         spec:
@@ -27,7 +27,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: universe
-              image: local/screener:v24
+              image: local/screener:v25
               imagePullPolicy: Never
               command: ["python", "universe_refresh.py"]
               env:
@@ -60,7 +60,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
-      activeDeadlineSeconds: 7200
+      activeDeadlineSeconds: 10800
       ttlSecondsAfterFinished: 604800
       template:
         spec:
@@ -68,7 +68,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: prices
-              image: local/screener:v24
+              image: local/screener:v25
               imagePullPolicy: Never
               command: ["python", "stock_prices.py"]
               env:
@@ -101,7 +101,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 1
-      activeDeadlineSeconds: 14400
+      activeDeadlineSeconds: 32400
       ttlSecondsAfterFinished: 604800
       template:
         spec:
@@ -109,7 +109,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: fundamentals
-              image: local/screener:v24
+              image: local/screener:v25
               imagePullPolicy: Never
               command: ["python", "stock_fundamentals.py"]
               env:
@@ -144,7 +144,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 1
-      activeDeadlineSeconds: 1200
+      activeDeadlineSeconds: 2400
       ttlSecondsAfterFinished: 604800
       template:
         spec:
@@ -152,7 +152,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: metrics
-              image: local/screener:v24
+              image: local/screener:v25
               imagePullPolicy: Never
               command: ["python", "stock_metrics.py"]
               env:
@@ -193,7 +193,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: screener
-              image: local/screener:v24
+              image: local/screener:v25
               imagePullPolicy: Never
               command: ["python", "stock_screener.py"]
               env:
@@ -239,7 +239,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: report
-              image: local/screener:v24
+              image: local/screener:v25
               imagePullPolicy: Never
               command: ["python", "stock_report.py"]
               env:
@@ -290,7 +290,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: nse-fundamentals
-              image: local/screener:v24
+              image: local/screener:v25
               imagePullPolicy: Never
               command: ["python", "nse_fundamentals.py"]
               env:
@@ -338,7 +338,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: membership
-              image: local/screener:v24
+              image: local/screener:v25
               imagePullPolicy: Never
               command: ["python", "membership_history.py"]
               env:
@@ -376,7 +376,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
-      activeDeadlineSeconds: 900
+      activeDeadlineSeconds: 1800
       ttlSecondsAfterFinished: 604800
       template:
         spec:
@@ -384,7 +384,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: valuation
-              image: local/screener:v24
+              image: local/screener:v25
               imagePullPolicy: Never
               command: ["python", "valuation.py"]
               env:
@@ -428,7 +428,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: predictions
-              image: local/screener:v24
+              image: local/screener:v25
               imagePullPolicy: Never
               command: ["python", "predictions.py"]
               env:
@@ -471,7 +471,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: earnings
-              image: local/screener:v24
+              image: local/screener:v25
               imagePullPolicy: Never
               command: ["python", "earnings_calendar.py"]
               env:
@@ -515,7 +515,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: accuracy
-              image: local/screener:v24
+              image: local/screener:v25
               imagePullPolicy: Never
               command: ["python", "accuracy_check.py"]
               env:

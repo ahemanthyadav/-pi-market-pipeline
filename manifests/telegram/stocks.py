@@ -42,7 +42,11 @@ FACTORS = {
     "growth": "growth_score", "momentum": "momentum_score", "risk": "risk_score",
 }
 UNIVERSES = {"nifty": "NIFTY500", "nifty500": "NIFTY500", "india": "NIFTY500",
-             "sp500": "SP500", "sp": "SP500", "us": "SP500"}
+             "sp500": "SP500", "sp": "SP500", "us": "SP500",
+             # ADR 0029 expansion universes
+             "sp400": "SP400", "midcap": "SP400", "sp600": "SP600",
+             "smallcap": "SP600", "microcap": "NIFTYMICROCAP250",
+             "micro": "NIFTYMICROCAP250"}
 SYMBOL_RE = re.compile(r"[A-Za-z0-9 .&\-]{1,40}")
 
 # /world layout: region → index_prices tickers, in display order. A ticker the

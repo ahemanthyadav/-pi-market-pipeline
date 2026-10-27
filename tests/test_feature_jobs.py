@@ -121,5 +121,21 @@ class AccuracyCheckTest(unittest.TestCase):
             self.assertIn("ts >=", getattr(accuracy_check, name), name)
 
 
+class UniverseExpansionTest(unittest.TestCase):
+    """ADR 0029: five universes, two markets."""
+
+    def test_prediction_benchmarks_cover_all_universes(self):
+        for u in ("SP500", "SP400", "SP600", "NIFTY500", "NIFTYMICROCAP250"):
+            self.assertIn(u, predictions.BENCH)
+
+    def test_valuation_market_mapping(self):
+        import valuation
+        self.assertEqual(valuation.market("SP400"), "US")
+        self.assertEqual(valuation.market("NIFTYMICROCAP250"), "IN")
+        for m in ("US", "IN"):
+            self.assertIn(m, valuation.TENOR)
+            self.assertIn(m, valuation.FALLBACK_10Y)
+
+
 if __name__ == "__main__":
     unittest.main()
