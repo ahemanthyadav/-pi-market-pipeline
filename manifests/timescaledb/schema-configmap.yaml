@@ -764,3 +764,71 @@ data:
       PRIMARY KEY (source, ext_id)
     );
     CREATE INDEX IF NOT EXISTS research_items_rel ON research_items (relevance DESC, published DESC);
+  22-contract-views.sql: |
+    -- ADR 0032 data-platform contract: applications read v_* views, never
+    -- base tables. Views are the published interface — columns are
+    -- APPEND-ONLY, and the rule-9 time bound lives INSIDE each view, so
+    -- consumers cannot forget it. New app-state tables go in the `app`
+    -- schema from now on (existing tables are grandfathered in public).
+    CREATE SCHEMA IF NOT EXISTS app;
+    GRANT USAGE ON SCHEMA app TO grafana_ro;
+    GRANT USAGE ON SCHEMA app TO telegram_app;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT ON TABLES TO grafana_ro;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT ON TABLES TO telegram_app;
+
+    CREATE OR REPLACE VIEW v_universe AS
+      SELECT universe, symbol, name, sector, exchange, currency
+      FROM universe_constituents WHERE active;
+
+    CREATE OR REPLACE VIEW v_latest_prices AS
+      SELECT DISTINCT ON (symbol) symbol, ts, close, adj_close, volume
+      FROM stock_prices WHERE ts >= now() - interval '7 days'
+      ORDER BY symbol, ts DESC;
+
+    CREATE OR REPLACE VIEW v_latest_scores AS
+      SELECT DISTINCT ON (symbol) symbol, universe, ts, rank, composite,
+             value_score, quality_score, growth_score, momentum_score,
+             risk_score, coverage, eligible
+      FROM stock_scores WHERE ts >= now() - interval '14 days'
+      ORDER BY symbol, ts DESC;
+
+    -- methods_above_close lives HERE so the bot, the UI and the reports can
+    -- never disagree about the agreement count (the ADR 0030 five-place pain).
+    CREATE OR REPLACE VIEW v_valuations_recent AS
+      SELECT symbol, universe, ts, close, graham, peer_multiple, fcf_yield,
+             dcf, ddm, epv, residual_income, peg_lynch, damodaran_fcff,
+             graham_growth, fair_value, upside_pct, methods, discount_rate,
+             growth_used,
+             (coalesce((graham          > close)::int, 0) +
+              coalesce((peer_multiple   > close)::int, 0) +
+              coalesce((fcf_yield       > close)::int, 0) +
+              coalesce((dcf             > close)::int, 0) +
+              coalesce((ddm             > close)::int, 0) +
+              coalesce((epv             > close)::int, 0) +
+              coalesce((residual_income > close)::int, 0) +
+              coalesce((peg_lynch       > close)::int, 0) +
+              coalesce((damodaran_fcff  > close)::int, 0) +
+              coalesce((graham_growth   > close)::int, 0)) AS methods_above_close
+      FROM stock_valuations WHERE ts >= now() - interval '4 days';
+
+    CREATE OR REPLACE VIEW v_latest_valuations AS
+      SELECT DISTINCT ON (symbol) * FROM v_valuations_recent
+      ORDER BY symbol, ts DESC;
+
+    CREATE OR REPLACE VIEW v_sector_latest AS
+      SELECT m.universe, m.sector, m.ts, m.members, m.median_pe, m.median_pb,
+             m.median_ev_ebitda, m.median_roe, m.median_op_margin,
+             m.avg_ret_6m, m.avg_ret_12m, m.median_upside_pct,
+             st.style, st.cyclical, st.note
+      FROM (SELECT DISTINCT ON (universe, sector) * FROM sector_metrics
+            WHERE ts >= now() - interval '7 days'
+            ORDER BY universe, sector, ts DESC) m
+      LEFT JOIN sector_styles st ON st.sector = m.sector;
+
+    CREATE OR REPLACE VIEW v_upcoming_earnings AS
+      SELECT e.symbol, max(c.name) AS name, max(c.universe) AS universe,
+             min(e.event_date) AS event_date
+      FROM earnings_calendar e
+      LEFT JOIN universe_constituents c ON c.symbol = e.symbol AND c.active
+      WHERE e.event_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 30
+      GROUP BY e.symbol;

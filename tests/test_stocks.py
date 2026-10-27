@@ -533,7 +533,7 @@ class StockCardTest(unittest.TestCase):
                 ("fcf", "yfinance", fy(2026), 55e9),
                 ("total_debt", "yfinance", fy(2026), 50.0),
                 ("shareholder_equity", "yfinance", fy(2026), 200.0)]),
-            ("FROM stock_valuations", [(1800.0, -18.2, 6)]),
+            ("FROM v_latest_valuations", [(1800.0, -18.2, 6)]),
             ("FROM headline_entities", [(day(8), "TCS Q2 <live>", "ET", -0.82, "results")]),
         ])
 
@@ -943,7 +943,7 @@ class AlertTest(unittest.TestCase):
     def test_sections_silent_without_watchlist_or_changes(self):
         db = FakeDB([("GROUP BY ts", [(day(9),), (day(8),)]),
                      ("s.rank <=", [(day(9), "A", "Alpha", 1), (day(8), "A", "Alpha", 1)]),
-                     ("FROM stock_valuations", []),
+                     ("FROM v_valuations_recent", []),
                      ("FROM watchlist", []), ("FROM stock_prices", [])])
         self.assertEqual(stocks.alert_sections(db, self.NOW), [])
 
@@ -956,7 +956,7 @@ class AlertTest(unittest.TestCase):
             ("FROM stock_metrics_daily", [("TCS.NS", "sma200_ratio", day(9), 1.01),
                                           ("TCS.NS", "sma200_ratio", day(8), 0.98)]),
             ("FROM headline_events", [("TCS.NS", "results", "TCS Q2 profit up <8%>", day(9))]),
-            ("FROM stock_valuations", []),
+            ("FROM v_valuations_recent", []),
             ("FROM stock_prices", []),                                   # ytd lookups
         ])
         text = "\n".join(stocks.alert_sections(db, self.NOW))
@@ -970,7 +970,7 @@ class AlertTest(unittest.TestCase):
     def test_stale_screener_run_is_not_re_announced(self):
         db = FakeDB([("GROUP BY ts", [(day(7),), (day(6),)]),
                      ("s.rank <=", [(day(7), "NEW", "Newco", 3), (day(6), "OLD", "Oldco", 4)]),
-                     ("FROM stock_valuations", []), ("FROM watchlist", [])])
+                     ("FROM v_valuations_recent", []), ("FROM watchlist", [])])
         self.assertEqual(stocks.alert_sections(db, self.NOW), [])
 
     def test_missing_watchlist_table_degrades(self):
@@ -980,7 +980,7 @@ class AlertTest(unittest.TestCase):
         def boom(_args):
             raise UndefinedTable("relation watchlist does not exist")
 
-        db = FakeDB([("GROUP BY ts", []), ("FROM stock_valuations", []),
+        db = FakeDB([("GROUP BY ts", []), ("FROM v_valuations_recent", []),
                      ("FROM watchlist", boom)])
         self.assertEqual(stocks.alert_sections(db, self.NOW), [])
 
@@ -995,7 +995,7 @@ class ValuationWatchTest(unittest.TestCase):
         return (ts, sym, universe, close, fair, up, methods, above)
 
     def db(self, cands, ctx, earnings=()):
-        return FakeDB([("FROM stock_valuations v", cands),
+        return FakeDB([("FROM v_valuations_recent", cands),
                        ("sector_styles st", ctx),
                        ("FROM earnings_calendar", list(earnings))])
 
@@ -1042,9 +1042,9 @@ class ValuationWatchTest(unittest.TestCase):
             pass
 
         def boom(_args):
-            raise UndefinedTable("relation stock_valuations does not exist")
+            raise UndefinedTable("relation v_valuations_recent does not exist")
 
-        db = FakeDB([("FROM stock_valuations v", boom)])
+        db = FakeDB([("FROM v_valuations_recent", boom)])
         self.assertEqual(stocks.alert_valuation(db, self.NOW), [])
 
     def test_earnings_within_three_days_suppresses_the_line(self):
@@ -1061,7 +1061,7 @@ class ValuationWatchTest(unittest.TestCase):
         def boom(_args):
             raise UndefinedTable("relation earnings_calendar does not exist")
 
-        db = FakeDB([("FROM stock_valuations v", [self.cand(day(9), "CHEAP")]),
+        db = FakeDB([("FROM v_valuations_recent", [self.cand(day(9), "CHEAP")]),
                      ("sector_styles st",
                       [("CHEAP", 12, 71.0, "Cheap", "Financials", None)]),
                      ("FROM earnings_calendar", boom)])

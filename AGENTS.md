@@ -50,7 +50,9 @@ skill); never commit credentials or IPs (rules 7–8; run the audit before any p
 9. **Hypertable queries are bounded in time.** An open-ended per-symbol read makes the
    planner open every chunk (34 s planning measured on 3,382 chunks before the 2026-10-18
    merge). Always add a `ts >=` bound in hot paths; new chunks are 1 year
-   (`06e-chunk-intervals.sql`).
+   (`06e-chunk-intervals.sql`). APPLICATIONS (bot, marketview, Grafana) read
+   the `v_*` contract views, which carry the bound inside — base tables are
+   the pipeline's private shape (`docs/database-contract.md`, ADR 0032).
 10. **Never print a secret, even indirectly**: `ps`/`pgrep -af` on a host while
    `runcmd.py` runs shows the expanded `@@PW@@` (happened 2026-10-18).
 

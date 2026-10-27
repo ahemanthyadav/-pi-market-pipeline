@@ -743,9 +743,8 @@ def stock_card(q, row):
              if debt is not None and equity and equity > 0 else None)])]
         # Deterministic fair-value panel (ADR 0026) — labelled, never advice.
         try:
-            fv = q("SELECT fair_value, upside_pct, methods FROM stock_valuations "
-                   "WHERE symbol = %s AND ts >= now() - interval '7 days' "
-                   "ORDER BY ts DESC LIMIT 1", (symbol,))
+            fv = q("SELECT fair_value, upside_pct, methods FROM v_latest_valuations "
+                   "WHERE symbol = %s", (symbol,))
         except Exception as exc:  # noqa: BLE001 - only the missing-table case is expected
             if not table_missing(exc):
                 raise
@@ -1464,21 +1463,12 @@ VAL_MAX_RANK = 50         # screener quality gate
 VAL_MAX_LINES = 5         # per run, across both universes
 VAL_EARNINGS_GAP_DAYS = 3  # suppress entries reporting within N days
 
+# ADR 0032 contract: the agreement count (methods_above_close) and the 4-day
+# bound live INSIDE v_valuations_recent — one definition for bot/UI/reports.
 VAL_CAND_SQL = (
-    "SELECT v.ts, v.symbol, v.universe, v.close, v.fair_value, v.upside_pct, v.methods, "
-    "(CASE WHEN v.graham          > v.close THEN 1 ELSE 0 END + "
-    " CASE WHEN v.peer_multiple   > v.close THEN 1 ELSE 0 END + "
-    " CASE WHEN v.fcf_yield       > v.close THEN 1 ELSE 0 END + "
-    " CASE WHEN v.dcf             > v.close THEN 1 ELSE 0 END + "
-    " CASE WHEN v.ddm             > v.close THEN 1 ELSE 0 END + "
-    " CASE WHEN v.epv             > v.close THEN 1 ELSE 0 END + "
-    " CASE WHEN v.residual_income > v.close THEN 1 ELSE 0 END + "
-    " CASE WHEN v.peg_lynch       > v.close THEN 1 ELSE 0 END + "
-    " CASE WHEN v.damodaran_fcff  > v.close THEN 1 ELSE 0 END + "
-    " CASE WHEN v.graham_growth   > v.close THEN 1 ELSE 0 END) AS above "
-    "FROM stock_valuations v "
-    "WHERE v.ts >= now() - interval '4 days' "
-    "AND v.upside_pct >= %s AND v.methods >= %s ORDER BY v.ts DESC")
+    "SELECT ts, symbol, universe, close, fair_value, upside_pct, methods, "
+    "methods_above_close FROM v_valuations_recent "
+    "WHERE upside_pct >= %s AND methods >= %s ORDER BY ts DESC")
 
 VAL_CTX_SQL = (
     "SELECT s.symbol, s.rank, s.composite, c.name, c.sector, st.note "
