@@ -3,7 +3,9 @@
 > **Purpose:** everything about the Marketfredbot Telegram channel — how the
 > deployed digest + alert pipeline is wired, how to operate and change it, and
 > the tiered menu of two-way/next-step upgrades with their real constraints.
-> **Repo + live state 2026-10-27 (v28):** `local/telegram-digest:v28` LIVE — v28 adds
+> **Repo + live state 2026-10-27 (v29):** `local/telegram-digest:v29` LIVE — v29 registers
+> the new commands in the Telegram "/" menu (MENU list updated + a menu-sync test so the
+> menu can never drift from COMMANDS again). v28 adds
 > /earnings (watchlist ★ + core top-25, 14d), /scorecard (ADR 0028 summary), and fixes
 > /sectors universe parsing ('sp' substring sent sp600 to SP500; now the UNIVERSES alias
 > map with an explicit error). v27 added the ADR 0029 universe aliases

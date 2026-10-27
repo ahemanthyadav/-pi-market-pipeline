@@ -454,5 +454,23 @@ class BotFlowTest(unittest.TestCase):
         self.assertIn("Marketfredbot", bot.COMMANDS["help"]("/help"))
 
 
+class MenuSyncTest(unittest.TestCase):
+    """The Telegram command menu (setMyCommands) follows the code — v28's new
+    commands were missing because MENU was not updated with COMMANDS."""
+
+    ALIASES = {"start", "mb", "usdinr"}      # same handler under another name
+    HIDDEN = {"users", "adduser", "rmuser"}  # owner-only, deliberately unlisted
+
+    def test_every_menu_entry_is_a_real_command(self):
+        for cmd, _desc in bot.MENU:
+            self.assertIn(cmd, bot.COMMANDS)
+
+    def test_every_user_command_is_in_the_menu(self):
+        menu = {c for c, _ in bot.MENU}
+        missing = set(bot.COMMANDS) - menu - self.ALIASES - self.HIDDEN
+        self.assertEqual(missing, set(), f"commands missing from MENU: {missing}")
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
