@@ -21,8 +21,11 @@ from datetime import datetime, timedelta, timezone
 from mdjob import connect, job_run
 
 HORIZONS = (30, 91, 182)
+# NIFTYMICROCAP250 benchmarks against the broad Indian market: Yahoo serves no
+# history for NIFTY_MICROCAP250.NS (verified 2026-10-27 — one bar), and
+# beating the investable broad index is the honest excess-return question.
 BENCH = {"SP500": "^GSPC", "NIFTY500": "^CRSLDX", "SP400": "^SP400",
-         "SP600": "^SP600", "NIFTYMICROCAP250": "NIFTY_MICROCAP250.NS"}
+         "SP600": "^SP600", "NIFTYMICROCAP250": "^CRSLDX"}
 
 SNAP_SCORES_SQL = """
     SELECT s.symbol, s.universe, s.rank::float, s.composite, p.adj_close

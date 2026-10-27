@@ -143,7 +143,10 @@ Each is ~20 min *inside* an already-happening §6 cycle.
   (4) Saturday 2026-10-31 weekly stock-fundamentals fills statements (deadline raised to 9h);
   (5) daily chain (metrics → scores → valuations → reports → predictions) covers the new universes
   automatically the morning after prices exist. Mark ✅ when `/screener?universe=SP600` shows ranked
-  rows with valuations. Full-market (~8–11k) deliberately NOT planned — needs a bulk EOD provider +
+  rows with valuations. ⚠ Deferred into the NEXT screener/marketview image cycles (code committed,
+  tags not yet cycled — pi2 had one wedge tonight, no more imports): microcap benchmark → ^CRSLDX in
+  predictions.BENCH + marketview BENCHMARK (Yahoo has no NIFTY_MICROCAP250.NS history; matters for
+  prediction resolution only from 2026-11-26, chart benchmark cosmetic until then). Full-market (~8–11k) deliberately NOT planned — needs a bulk EOD provider +
   fetcher sharding (see ADR 0029 consequences).
 - [x] ✅ 2026-10-27 **Feature wave 1–8 deployed (ADR 0028):** prediction scorecard (schema 18,
   `prediction-tracker` 02:40 daily — first canary wrote 1,419 snapshots; outcomes from 2026-11-26),
