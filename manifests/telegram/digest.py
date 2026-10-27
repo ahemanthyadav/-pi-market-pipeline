@@ -142,9 +142,12 @@ TOP_SQL = """
     SELECT symbol FROM (
       SELECT DISTINCT ON (symbol) symbol, rank FROM stock_scores
       WHERE ts >= now() - interval '7 days' AND eligible
+        AND universe IN ('SP500', 'NIFTY500')
       ORDER BY symbol, ts DESC) s
     WHERE rank <= 25
 """
+# Flagships only (ADR 0029): the digest's earnings section tracks the core
+# top-25s + the user's own watchlist; extended universes appear on request.
 
 
 def earnings_week(cur, chat_id=None):

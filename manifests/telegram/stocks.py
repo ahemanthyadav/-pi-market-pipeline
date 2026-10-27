@@ -1438,11 +1438,17 @@ def crosses(metric_rows, now=None):
     return out
 
 
+# ADR 0029 tier separation: movers/regime/digest tops stay on the flagships;
+# the extended universes (SP400/SP600/NIFTYMICROCAP250) appear only explicitly
+# (/top sp600, /screener pages) or tagged (valuation watch).
+CORE_UNIVERSES = ("NIFTY500", "SP500")
+
+
 def alert_common(q, now=None):
     """Shared change-alert lines (screener entries/exits + valuation watch) —
     identical for every user."""
     lines = []
-    for universe in ("NIFTY500", "SP500"):
+    for universe in CORE_UNIVERSES:
         result = movers(q, universe)
         if result and is_fresh(result[0], now):
             lines += movers_lines(universe, result, ytd_map(q, [e[0] for e in result[2]]))
@@ -1513,11 +1519,13 @@ def alert_valuation(q, now=None):
     ctx = {s: r for s, r in ctx.items() if s not in reporting}
     lines = []
     for sym in sorted(ctx, key=lambda s: -today[s][5])[:VAL_MAX_LINES]:
-        _ts, _s, _u, close, fair, up, nm, above = today[sym]
+        _ts, _s, uni, close, fair, up, nm, above = today[sym]
         _sym, rank, comp, name, sector, note = ctx[sym]
+        # The rank is within ITS universe — tag it so an extended-tier #2
+        # (ADR 0029) can't be read as a flagship rank.
         reason = (f"fair <b>{num(fair)}</b> vs close {num(close)} ({up:+.0f}%, "
-                  f"{above}/{nm} methods above close); screener rank <b>#{rank}</b>, "
-                  f"composite {num(comp, 0)}")
+                  f"{above}/{nm} methods above close); screener rank <b>#{rank}</b> "
+                  f"in {esc(uni)}, composite {num(comp, 0)}")
         lens = f" {esc(sector)}: <i>{esc(note)}</i>." if note else ""
         lines.append(f"🟢 <b>{esc(name)}</b> ({esc(bare(sym))}) entered the "
                      f"valuation watch — {reason}.{lens} "
