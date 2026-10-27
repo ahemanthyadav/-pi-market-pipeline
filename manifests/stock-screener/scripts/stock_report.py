@@ -94,7 +94,7 @@ def render_report(cur, row, medians):
     # ADR 0026: deterministic fair value + the sector lens (schemas 15/16).
     cur.execute("SELECT fair_value, upside_pct, methods, graham, peer_multiple, "
                 "fcf_yield, dcf, ddm, epv, residual_income, peg_lynch, "
-                "damodaran_fcff, graham_growth "
+                "damodaran_fcff, graham_growth, discount_rate, growth_used "
                 "FROM stock_valuations WHERE symbol=%s "
                 "AND ts >= now() - interval '7 days' ORDER BY ts DESC LIMIT 1", (sym,))
     val = cur.fetchone()
@@ -123,10 +123,29 @@ def render_report(cur, row, medians):
     if val and val[0]:
         md.append(f"- **Fair value {fmt(val[0])}** ({val[1]:+.0f}% vs close, "
                   f"median of {val[2]} methods — ADR 0026, not advice)")
-        names = ("Graham", "Peer multiple", "FCF yield", "DCF", "DDM", "EPV",
-                 "Residual income", "PEG", "Damodaran FCFF", "Graham growth")
-        md.append("- Methods: " + " · ".join(
-            f"{n} {fmt(v)}" for n, v in zip(names, val[3:]) if v))
+        # Methods grouped by philosophy (ADR 0030 §grouping): the gap BETWEEN
+        # schools is the signal. val[3:] order matches the SELECT above.
+        by_name = dict(zip(("Graham", "Peer multiple", "FCF yield", "DCF",
+                            "DDM", "EPV", "Residual income", "PEG",
+                            "Damodaran FCFF", "Graham growth"), val[3:13]))
+        for school, members in (
+                ("Cash-flow intrinsic (Damodaran/Buffett)",
+                 ("DCF", "Damodaran FCFF", "FCF yield", "DDM")),
+                ("Conservative value (Graham/Greenwald)",
+                 ("Graham", "Graham growth", "EPV")),
+                ("Growth at a reasonable price (Lynch)", ("PEG",)),
+                ("Relative & accounting (peers/Penman)",
+                 ("Peer multiple", "Residual income"))):
+            got = [(n, by_name[n]) for n in members if by_name.get(n)]
+            if got:
+                md.append(f"- {school}: " + " · ".join(
+                    f"{n} {fmt(v)}" for n, v in got))
+        gtxt = (f"{val[14] * 100:.1f}% rev-CAGR [0–15%]" if val[14] is not None
+                else "n/a")
+        md.append(f"- _Assumptions: r = {val[13] * 100:.2f}% (10y + 4.5% ERP) · "
+                  f"growth {gtxt} · terminal 2.5% · tax 25% · kd = 10y+2% (synthetic) · "
+                  f"Graham Y = 10y+1% · annual-filing EPS/BVPS/EBIT · debt netted, "
+                  f"no cash credit_")
     if rel:
         md.append("## What matters in this sector")
         for metric, weight, note in rel:
