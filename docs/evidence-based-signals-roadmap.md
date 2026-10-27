@@ -247,3 +247,19 @@ Review* · Tetlock (2007), *J. Finance*.
 Citations are from memory of well-known papers and were not re-checked against the
 journals when this was written; verify a reference before relying on a specific
 figure from it.
+
+## 8. Candidates queued by the Strategy Lab (ADR 0031) — acceptance tests written before testing
+
+- **EV-19 — Post-earnings-announcement drift (PEAD).** Build: earnings surprise =
+  actual quarterly EPS (financial_facts, first-filed) vs trailing 4-quarter mean;
+  signal = standardized surprise on the filing date, held 60 trading days.
+  ACCEPTANCE (§5, unchanged): NW IC t > 3 monthly; same sign both halves and both
+  flagship universes; net of 0.2%/0.4% costs at the implied ~quarterly turnover;
+  FM t > 2 against the existing five. Prerequisites: earnings_calendar (live,
+  schema 19) + point-in-time financial_facts (live, DQ-2). Blocked only on build effort.
+- **EV-20 — Fundamental quality/value tested as PANELS.** The composite's quality
+  and value sleeves have never been through EV-0 (only price signals have). Build:
+  reconstruct the sleeve scores at each past month-end from first-filed
+  financial_facts (US; India lacks point-in-time statements until EV-1/G-6
+  mature). Same §5 acceptance. This is the honest test behind the Strategy Lab's
+  Tier-1 claims for quality and value on OUR data.

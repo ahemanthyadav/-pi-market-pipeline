@@ -167,6 +167,7 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | prediction-tracker | 40 2 * * * | local/screener:v28 | prediction_snapshots + prediction_outcomes (schema 18: write-once daily claims, resolved at 30/91/182d vs adjusted returns, benchmark-relative) |
 | earnings-calendar | 0 12 * * 0 | local/screener:v28 | earnings_calendar (schema 19: weekly yfinance refresh of upcoming earnings dates, all active constituents) |
 | accuracy-check | 30 12 * * 0 | local/screener:v28 | stock_reports `__accuracy__` (DQ-5: valuation internals recomputed in SQL, sector medians, membership drift, Stooq second-source price sample) |
+| research-watcher | 0 13 * * 1 | local/research-fetcher:v1 | research_items (ADR 0031: weekly paper collector — JF/JFE peer-reviewed feeds + NBER + arXiv; venue-tier + keyword scoring; append-only, never edits the curated Strategy Lab tiers) |
 | yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v6 (commits per calendar year) | index_prices (29 tickers — `^RUI` Russell 1000 added 2026-10-10; **history from 1985** backfilled 2026-10-10 for all 38 index tickers: 292,387 rows, 299 chunks — 262 weekly for 2021-10 → 2026-10 plus one-year chunks for everything created since `set_chunk_time_interval('index_prices', '365 days')`; see `yfinance/backfill-job.yaml`) |
 | fx-fetcher | 0 23 * * * | local/fx-fetcher:v1 | fx_rates (10 pairs) |
 | yields-fetcher | 15 23 * * * | local/yields-fetcher:v1 | bond_yields (^TNX/^FVX/^TYX/^IRX) |
@@ -426,7 +427,7 @@ kubectl get nodes
 
 # 2. CronJob schedules present?
 kubectl get cronjobs -n market-data
-# Should show 32 CronJobs: nse-fetcher, fiidii-fetcher, yfinance-fetcher, … nse-fundamentals,
+# Should show 33 CronJobs: nse-fetcher, fiidii-fetcher, yfinance-fetcher, … nse-fundamentals,
 # fx-fetcher, yields-fetcher, rates-fetcher, news-fetcher, sentiment-scorer,
 # ta-compute, pg-backup, pipeline-health, intraday-fetcher, fdi-watch,
 # universe-refresh, stock-prices, stock-fundamentals, stock-metrics,

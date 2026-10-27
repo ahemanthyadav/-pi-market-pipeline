@@ -745,3 +745,22 @@ data:
     -- ADR 0030: two more famous intrinsic methods on the ADR 0026 panel.
     ALTER TABLE stock_valuations ADD COLUMN IF NOT EXISTS damodaran_fcff DOUBLE PRECISION;
     ALTER TABLE stock_valuations ADD COLUMN IF NOT EXISTS graham_growth  DOUBLE PRECISION;
+  21-research-items.sql: |
+    -- ADR 0031 research radar: auto-collected paper metadata, append-only,
+    -- UNVETTED. tier: 1 = top peer-reviewed journal, 2 = NBER WP, 3 = preprint.
+    -- Promotion into the curated Strategy Lab tiers is a human decision.
+    CREATE TABLE IF NOT EXISTS research_items (
+      source     TEXT NOT NULL,
+      ext_id     TEXT NOT NULL,
+      title      TEXT NOT NULL,
+      authors    TEXT,
+      venue      TEXT NOT NULL,
+      tier       INT  NOT NULL,
+      published  DATE,
+      url        TEXT,
+      topics     TEXT,
+      relevance  INT NOT NULL DEFAULT 0,
+      fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (source, ext_id)
+    );
+    CREATE INDEX IF NOT EXISTS research_items_rel ON research_items (relevance DESC, published DESC);
