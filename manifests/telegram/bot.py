@@ -130,6 +130,7 @@ def _help_text() -> str:
         "/movers — who entered/left the screener top-20\n"
         "/sectors sp500 — sector medians + fair-value gap (ADR 0026)\n"
         "/track — how the screener's picks have done\n"
+        "/regime — breadth / trend / momentum traffic light per market\n"
         "/watch — YOUR watchlist + holdings P&amp;L (add/rm); private to this chat\n"
         "/world — every index: close, day, 1m, YTD (/world asia)\n"
         "/index nikkei — one index in depth: 1w–1y, 52w range, trend, RSI\n"
@@ -248,6 +249,10 @@ def cmd_track(_text: str) -> str:
     return stocks.track_text(query)
 
 
+def cmd_regime(_text: str) -> str:
+    return stocks.regime_text(query)
+
+
 def cmd_macro(_text: str) -> str:
     return stocks.macro_text(query)
 
@@ -353,6 +358,7 @@ COMMANDS = {
     "multibagger": cmd_multibagger,
     "mb": cmd_multibagger,
     "track": cmd_track,
+    "regime": cmd_regime,
     "macro": cmd_macro,
     "world": cmd_world,
     "index": cmd_index,

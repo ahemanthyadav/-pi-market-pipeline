@@ -105,7 +105,7 @@ Each is ~20 min *inside* an already-happening §6 cycle.
 | Project | Size | Gate / first decision |
 |---|---|---|
 | **EV-1 historical index membership** | ✅ US done 2026-10-26 (ADR 0025, `index_membership` live, drift 0) — US signal work UNBLOCKED; 🔶 India half deferred (NSE PDFs, own session) | India: ~1 session |
-| ~~**UI / Analysis Explorer**~~ | ✅ BOTH PHASES LIVE 2026-10-26: 4 new Grafana dashboards (24 queries validated as grafana_ro pre-apply; 11 total) + the **marketview** web app in its own repo (ADR 0027, `local/marketview:v3` on pi1, all routes canaried 200, bad input 404s) — port-forward exposure; NodePort/`tailscale serve` = 🤔 owner choice | done |
+| ~~**UI / Analysis Explorer**~~ | ✅ BOTH PHASES LIVE 2026-10-26: 4 new Grafana dashboards (24 queries validated as grafana_ro pre-apply; 11 total) + the **marketview** web app in its own repo (ADR 0027, `local/marketview:v4` on pi1, all routes canaried 200, bad input 404s) — port-forward exposure; NodePort/`tailscale serve` = 🤔 owner choice | done |
 | ~~EV-9 (roadmap half): more statement lines~~ | ✅ done 2026-10-26, `screener:v17` live, canary 3/3; universe fills on the 10-31 weekly run | done |
 | EV-10…14 → EV-17/18 composite v2 | 2+ sessions | data gates CLEARED 2026-10-26 (EV-1 US + EV-9 live); next = EV-0 §5 re-run on point-in-time membership, then per-universe rules = owner |
 | ~~G-20 factor returns~~ | ✅ done 2026-10-26 (`factors-fetcher:v1` live, terms verified; EV-0 §5 test-4 extension rides the next scoring change) | done |
@@ -119,6 +119,31 @@ Each is ~20 min *inside* an already-happening §6 cycle.
 ---
 
 ## 1. Immediate (next checkpoint: tomorrow's `/health`)
+
+- [ ] 🔑 **OWNER-RUN: tailnet exposure of marketview + Grafana** (feature wave #3, ADR 0028 §6 — the
+  agent permission system refuses to widen network exposure, by design). pi1 is on the tailnet.
+  From the workstation (resolves the ClusterIPs, then configures serve on pi1 over ssh):
+  ```bash
+  export KUBECONFIG=~/.kube/pi-cluster.yaml
+  MV=$(kubectl -n market-data get svc marketview -o jsonpath='{.spec.clusterIP}')
+  GF=$(kubectl -n market-data get svc grafana    -o jsonpath='{.spec.clusterIP}')
+  ssh pi1@pi1 "sudo tailscale serve --bg --https=443  http://$MV:8080 && \
+               sudo tailscale serve --bg --https=8443 http://$GF:3000"
+  ```
+  Then `https://pi1.<tailnet>.ts.net/` (marketview) and `:8443` (Grafana) from any tailnet device.
+  If `serve` asks for HTTPS certs, enable MagicDNS + HTTPS in the Tailscale admin console first.
+  ClusterIPs survive pod restarts but not Service recreation — re-run the block if a svc is ever
+  recreated (`tailscale serve status` shows the config; `tailscale serve reset` clears it).
+- [x] ✅ 2026-10-27 **Feature wave 1–8 deployed (ADR 0028):** prediction scorecard (schema 18,
+  `prediction-tracker` 02:40 daily — first canary wrote 1,419 snapshots; outcomes from 2026-11-26),
+  earnings calendar (schema 19, weekly Sunday; canary 40 symbols → 25 dates; AAPL Mon 02 Nov on the
+  dossier), DQ-5 `accuracy-check` weekly (first full run **ALL CLEAN**: 983 valuation rows 0 bad
+  medians/upsides, sector medians 0 off with the engine-mirrored filter, membership drift 0, FRED
+  SP500 vs our ^GSPC 10/10 within 0.5%), regime traffic light (digest + /regime + marketview home),
+  telegram v26 (earnings digest section + 3-day earnings gate on the valuation watch; no-send
+  validated), marketview v4 (/watchlist, /scorecard, dossier badges + closest-mcap peers + earnings
+  badge). 32 CronJobs; screener v24 on all 4 nodes. Stooq grew a JS challenge wall → per-stock
+  second source needs a free API key (Finnhub/Tiingo) = 🤔 owner choice; FRED benchmark check live.
 
 - [x] ✅ 2026-10-26 **Staged manifest hardening APPLIED** (owner said "deploy all"; cluster-mutation discipline,
   one change verified at a time): grafana probes live (new pod healthy, `/api/health` ok) → all 26 CronJobs

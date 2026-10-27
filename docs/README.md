@@ -13,10 +13,10 @@
 > NSE-direct** (series complete 2015→today), and the **ADR 0026 valuation layer**: an 8-method intrinsic
 > fair-value panel per symbol daily (`stock_valuations`), sector→style metric-relevance tables
 > (`sector_styles`/`metric_relevance`), and daily sector aggregates + rendered `__sectors__` analysis
-> (`sector_metrics`) — all descriptive, never in the composite without EV-0 (amended 2026-10-26: the owner-approved VALUATION WATCH alert may fire from it — telegram v25). **UI live:** 11 provisioned Grafana dashboards + the `marketview` web explorer (sibling repo, ADR 0027 — dossiers, comparison charts, sector views, rendered reports; `kubectl -n market-data port-forward svc/marketview 8080:8080`). AI layer live (shared
+> (`sector_metrics`) — all descriptive, never in the composite without EV-0 (amended 2026-10-26: the owner-approved VALUATION WATCH alert may fire from it — telegram v25). **UI live:** 11 provisioned Grafana dashboards + the `marketview` web explorer (sibling repo, ADR 0027 — dossiers, comparison charts, sector views, rendered reports, watchlist + scorecard pages; `kubectl -n market-data port-forward svc/marketview 8080:8080`). **Accountability layer live 2026-10-27 (ADR 0028):** prediction scorecard (write-once snapshots, 30/91/182d benchmark-relative outcomes), weekly earnings calendar (digest section, dossier badge, valuation-watch 3-day earnings gate), regime traffic light (digest + /regime + home page; descriptive only), weekly DQ-5 accuracy job (`__accuracy__` report; first run ALL CLEAN, 10/10 FRED cross-checks). AI layer live (shared
 > `llm-gateway`, NVIDIA free tier: daily AI market note, every number checked — ADR 0022/0023).
-> 4 nodes Ready (pi2 cordoned control plane), 29 CronJobs (nse-fundamentals suspended until its first backfill completes), the others
-> active, DB `Guaranteed` QoS with readiness probe. Images: screener toolkit `local/screener:v22`, telegram `local/telegram-digest:v25`, health monitor
+> 4 nodes Ready (pi2 cordoned control plane), 32 CronJobs (nse-fundamentals suspended until its first backfill completes), the others
+> active, DB `Guaranteed` QoS with readiness probe. Images: screener toolkit `local/screener:v24`, telegram `local/telegram-digest:v26`, health monitor
 > `local/pipeline-health:v6`. Least-privilege DB roles for Grafana and the Telegram bot. Daily second copies of the DB dump
 > and the k3s control-plane datastore on the workstation. A mains power loss on 10-18 rebooted everything — recovered on
 > its own; no UPS by decision. Work order and reasoning: `engineering-plan-2026-10-18.md`; open items: `pending-tasks.md`.

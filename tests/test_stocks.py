@@ -994,9 +994,10 @@ class ValuationWatchTest(unittest.TestCase):
              universe="SP500"):
         return (ts, sym, universe, close, fair, up, methods, above)
 
-    def db(self, cands, ctx):
+    def db(self, cands, ctx, earnings=()):
         return FakeDB([("FROM stock_valuations v", cands),
-                       ("sector_styles st", ctx)])
+                       ("sector_styles st", ctx),
+                       ("FROM earnings_calendar", list(earnings))])
 
     def test_entry_fires_with_reasoning_and_lens(self):
         db = self.db([self.cand(day(9), "CHEAP"), self.cand(day(8), "OTHER")],
@@ -1045,6 +1046,87 @@ class ValuationWatchTest(unittest.TestCase):
 
         db = FakeDB([("FROM stock_valuations v", boom)])
         self.assertEqual(stocks.alert_valuation(db, self.NOW), [])
+
+    def test_earnings_within_three_days_suppresses_the_line(self):
+        from datetime import date as _date
+        db = self.db([self.cand(day(9), "CHEAP")],
+                     [("CHEAP", 12, 71.0, "Cheap", "Financials", None)],
+                     earnings=[("CHEAP", _date(2026, 10, 12))])
+        self.assertEqual(stocks.alert_valuation(db, self.NOW), [])
+
+    def test_missing_earnings_table_does_not_block_the_line(self):
+        class UndefinedTable(Exception):
+            pass
+
+        def boom(_args):
+            raise UndefinedTable("relation earnings_calendar does not exist")
+
+        db = FakeDB([("FROM stock_valuations v", [self.cand(day(9), "CHEAP")]),
+                     ("sector_styles st",
+                      [("CHEAP", 12, 71.0, "Cheap", "Financials", None)]),
+                     ("FROM earnings_calendar", boom)])
+        self.assertEqual(len(stocks.alert_valuation(db, self.NOW)), 1)
+
+
+class RegimeTest(unittest.TestCase):
+    def db(self, breadth, trend, mom):
+        return FakeDB([("sma200_ratio", [(breadth,)]),
+                       ("FROM index_prices", [(trend,)]),
+                       ("FROM factor_returns", [(mom,)])])
+
+    def test_all_green(self):
+        rows = stocks.regime(self.db(0.72, True, True))
+        self.assertEqual(len(rows), 2)
+        label, light, parts = rows[0]
+        self.assertEqual((label, light), ("US", "🟢"))
+        self.assertIn("breadth 72% above 200d", parts[0])
+
+    def test_all_red(self):
+        _, light, _ = stocks.regime(self.db(0.31, False, False))[0]
+        self.assertEqual(light, "🔴")
+
+    def test_mixed_is_yellow(self):
+        _, light, _ = stocks.regime(self.db(0.72, False, True))[0]
+        self.assertEqual(light, "🟡")
+
+    def test_stale_momentum_leg_drops_out(self):
+        rows = stocks.regime(self.db(0.72, True, None))
+        _, light, parts = rows[0]
+        self.assertEqual(light, "🟢")          # 2 of 2 available legs green
+        self.assertEqual(len(parts), 2)
+
+    def test_regime_line_and_text(self):
+        db = self.db(0.72, True, True)
+        self.assertIn("🟢 US", stocks.regime_line(db))
+        db = self.db(0.72, True, True)
+        self.assertIn("<b>US</b>", stocks.regime_text(db))
+
+
+class EarningsHelpersTest(unittest.TestCase):
+    def test_lines_sorted_soonest_first(self):
+        from datetime import date as _date
+        db = FakeDB([("FROM earnings_calendar",
+                      [("MSFT", _date(2026, 10, 29)),
+                       ("AAPL.NS", _date(2026, 10, 27))])])
+        lines = stocks.earnings_lines(db, ["MSFT", "AAPL.NS"])
+        self.assertEqual(len(lines), 2)
+        self.assertIn("AAPL", lines[0])
+        self.assertIn("Tue 27 Oct", lines[0])
+
+    def test_no_symbols_short_circuits(self):
+        db = FakeDB([])
+        self.assertEqual(stocks.earnings_soon(db, []), {})
+        self.assertEqual(db.calls, [])
+
+    def test_missing_table_returns_empty(self):
+        class UndefinedTable(Exception):
+            pass
+
+        def boom(_args):
+            raise UndefinedTable("relation earnings_calendar does not exist")
+
+        db = FakeDB([("FROM earnings_calendar", boom)])
+        self.assertEqual(stocks.earnings_soon(db, ["AAPL"]), {})
 
 
 class SectorsCardTest(unittest.TestCase):

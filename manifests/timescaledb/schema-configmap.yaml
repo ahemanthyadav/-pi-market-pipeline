@@ -702,3 +702,42 @@ data:
     );
     SELECT create_hypertable('sector_metrics', 'ts', if_not_exists => TRUE);
     SELECT set_chunk_time_interval('sector_metrics', INTERVAL '365 days');
+  18-predictions.sql: |
+    -- Prediction scorecard (prediction-validation plan, applied 2026-10-26):
+    -- write-once daily snapshots of what the system claims, resolved later
+    -- against adjusted forward returns. Plain tables (like financial_facts).
+    CREATE TABLE IF NOT EXISTS prediction_snapshots (
+      kind     TEXT NOT NULL,             -- 'screener_rank' | 'valuation_upside'
+      symbol   TEXT NOT NULL,
+      universe TEXT NOT NULL,
+      ts       TIMESTAMPTZ NOT NULL,      -- snapshot day, 00:00 UTC
+      value    DOUBLE PRECISION,          -- rank | upside_pct
+      aux      DOUBLE PRECISION,          -- composite | fair_value
+      close    DOUBLE PRECISION,          -- adj_close at snapshot (return base)
+      PRIMARY KEY (kind, symbol, ts)
+    );
+    CREATE TABLE IF NOT EXISTS prediction_outcomes (
+      kind         TEXT NOT NULL,
+      symbol       TEXT NOT NULL,
+      ts           TIMESTAMPTZ NOT NULL,
+      horizon_days INT NOT NULL,          -- 30 | 91 | 182 calendar days
+      realized_ret DOUBLE PRECISION,      -- adj fwd return over the horizon
+      bench_ret    DOUBLE PRECISION,      -- universe benchmark over the same window
+      resolved_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (kind, symbol, ts, horizon_days)
+    );
+    CREATE INDEX IF NOT EXISTS prediction_snapshots_ts ON prediction_snapshots (ts);
+    CREATE INDEX IF NOT EXISTS prediction_outcomes_ts  ON prediction_outcomes (ts);
+  19-earnings-calendar.sql: |
+    -- Upcoming earnings dates (yfinance calendar, weekly refresh). Rows with
+    -- event_date >= fetch day are DELETE+INSERTed per symbol; past rows stay
+    -- as a record of what was expected.
+    CREATE TABLE IF NOT EXISTS earnings_calendar (
+      symbol     TEXT NOT NULL,
+      universe   TEXT NOT NULL,
+      event_date DATE NOT NULL,
+      source     TEXT NOT NULL DEFAULT 'yfinance',
+      fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (symbol, event_date)
+    );
+    CREATE INDEX IF NOT EXISTS earnings_calendar_date ON earnings_calendar (event_date);

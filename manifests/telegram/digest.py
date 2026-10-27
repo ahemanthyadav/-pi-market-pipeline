@@ -138,6 +138,31 @@ def watchlist(cur, chat_id=None):
         return []
 
 
+TOP_SQL = """
+    SELECT symbol FROM (
+      SELECT DISTINCT ON (symbol) symbol, rank FROM stock_scores
+      WHERE ts >= now() - interval '7 days' AND eligible
+      ORDER BY symbol, ts DESC) s
+    WHERE rank <= 25
+"""
+
+
+def earnings_week(cur, chat_id=None):
+    """Upcoming-earnings lines for the user's watchlist + the top-25s."""
+    def q(sql, args=()):
+        cur.execute(sql, args)
+        return cur.fetchall()
+    try:
+        symbols = {r[0] for r in q(stocks.WATCH_SQL, (chat_id,))}
+        symbols |= {r[0] for r in q(TOP_SQL)}
+        return stocks.earnings_lines(q, sorted(symbols), days=7)
+    except psycopg.Error as exc:
+        if not stocks.table_missing(exc):
+            raise
+        print("WARN earnings_calendar missing — section skipped", flush=True)
+        return []
+
+
 def build_message(chat_id=None):
     """The digest for one user (their own watchlist); chat_id None = the owner."""
     chat_id = str(chat_id or os.environ.get("TELEGRAM_CHAT_ID", ""))
@@ -149,6 +174,14 @@ def build_message(chat_id=None):
 
         lines = [f"<b>Market digest</b>  <i>{datetime.now(IST):%d %b %Y, %H:%M IST}</i>",
                  stocks.quote_table(q, stocks.DIGEST_QUOTES)]
+        try:
+            light = stocks.regime_line(q)
+            if light:
+                lines.append(light)
+        except psycopg.Error as exc:
+            if not stocks.table_missing(exc):
+                raise
+            print("WARN regime inputs missing — line skipped", flush=True)
         note = narrative(cur)
         if note:
             lines.append("<b>Summary</b> <i>(AI-written; every number checked against the data)</i>\n"
@@ -173,6 +206,11 @@ def build_message(chat_id=None):
         watched = watchlist(cur, chat_id)
         if watched:
             lines.append("\n<b>Watchlist</b>\n" + "\n".join(watched))
+
+        upcoming = earnings_week(cur, chat_id)
+        if upcoming:
+            lines.append("\n<b>Earnings this week</b> <i>(watchlist + top 25)</i>\n"
+                         + "\n".join(upcoming))
 
         tops = headlines(cur)
         if tops:

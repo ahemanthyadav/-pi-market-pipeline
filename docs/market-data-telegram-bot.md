@@ -3,7 +3,13 @@
 > **Purpose:** everything about the Marketfredbot Telegram channel — how the
 > deployed digest + alert pipeline is wired, how to operate and change it, and
 > the tiered menu of two-way/next-step upgrades with their real constraints.
-> **Repo + live state 2026-10-26 (v25):** `local/telegram-digest:v25` LIVE — adds the VALUATION
+> **Repo + live state 2026-10-27 (v26):** `local/telegram-digest:v26` LIVE — adds the REGIME
+> line in the digest + /regime command (breadth / benchmark-trend / factor-momentum traffic
+> light per market, descriptive only), the "Earnings this week" digest section (watchlist +
+> top-25, schema 19), and a new valuation-watch gate: entries reporting within 3 days are
+> suppressed (`VAL_EARNINGS_GAP_DAYS`, ADR 0028). No-send validation 10-27: digest 1383 chars
+> with Regime + Earnings sections present, 3 live watch lines, regime_text renders.
+> Earlier v25 (2026-10-26): VALUATION
 > WATCH alert (ADR 0026 amendment: entering names with rank<=50, upside>=25%, >=3 methods above
 > close — reasoning in the line, max 5), /sectors command, and the fair-value line on /stock.
 > No-send validation same day: digest 954 chars, 4 real watch lines, sectors card renders.

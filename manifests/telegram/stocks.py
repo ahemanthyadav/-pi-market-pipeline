@@ -1452,6 +1452,7 @@ VAL_MIN_METHODS = 4       # methods that produced a number
 VAL_MIN_ABOVE = 3         # methods INDIVIDUALLY above the close (agreement)
 VAL_MAX_RANK = 50         # screener quality gate
 VAL_MAX_LINES = 5         # per run, across both universes
+VAL_EARNINGS_GAP_DAYS = 3  # suppress entries reporting within N days
 
 VAL_CAND_SQL = (
     "SELECT v.ts, v.symbol, v.universe, v.close, v.fair_value, v.upside_pct, v.methods, "
@@ -1501,6 +1502,11 @@ def alert_valuation(q, now=None):
     if not entered:
         return []
     ctx = {r[0]: r for r in q(VAL_CTX_SQL, (entered, VAL_MAX_RANK))}
+    # Earnings gate (2026-10-26): a watch line right before a report is the
+    # most dangerous moment for it — suppress entries reporting within 3 days;
+    # if the setup survives the print, it re-enters on the next run.
+    reporting = earnings_soon(q, list(ctx), days=VAL_EARNINGS_GAP_DAYS)
+    ctx = {s: r for s, r in ctx.items() if s not in reporting}
     lines = []
     for sym in sorted(ctx, key=lambda s: -today[s][5])[:VAL_MAX_LINES]:
         _ts, _s, _u, close, fair, up, nm, above = today[sym]
@@ -1582,3 +1588,108 @@ def alert_watch(q, chat_id, now=None):
     if mine:
         lines += ["<b>Your watchlist</b>"] + mine
     return lines
+
+
+# ---- Earnings calendar (schema 19, 2026-10-26) ----
+
+EARNINGS_SOON_SQL = (
+    "SELECT symbol, min(event_date) FROM earnings_calendar "
+    "WHERE symbol = ANY(%s) AND event_date BETWEEN CURRENT_DATE "
+    "AND CURRENT_DATE + %s GROUP BY symbol")
+
+
+def earnings_soon(q, symbols, days=7):
+    """{symbol: next event_date} within `days`; {} when the table is missing."""
+    if not symbols:
+        return {}
+    try:
+        return dict(q(EARNINGS_SOON_SQL, (list(symbols), days)))
+    except Exception as exc:  # noqa: BLE001 - only the missing-table case is expected
+        if not table_missing(exc):
+            raise
+        return {}
+
+
+def earnings_lines(q, symbols, days=7):
+    """Digest block: upcoming earnings for the given names, soonest first."""
+    soon = earnings_soon(q, symbols, days)
+    return [f"• <b>{esc(bare(s))}</b> — {d:%a %d %b}"
+            for s, d in sorted(soon.items(), key=lambda kv: (kv[1], kv[0]))]
+
+
+# ---- Market regime (descriptive traffic light, 2026-10-26) ----
+# Three deterministic legs per market; a leg with no fresh data drops out
+# rather than guessing. Descriptive display only — never a score input (EV-0).
+
+REGIME_MARKETS = (("US", "SP500", "^GSPC"), ("India", "NIFTY500", "^CRSLDX"))
+
+REGIME_BREADTH_SQL = (
+    "SELECT avg((m.value > 1)::int) FROM "
+    "(SELECT DISTINCT ON (symbol) symbol, value FROM stock_metrics_daily "
+    " WHERE metric = 'sma200_ratio' AND ts >= now() - interval '7 days' "
+    " ORDER BY symbol, ts DESC) m "
+    "JOIN universe_constituents c ON c.symbol = m.symbol "
+    "WHERE c.universe = %s AND c.active")
+
+REGIME_TREND_SQL = (
+    "SELECT (SELECT close FROM index_prices WHERE ticker = %s "
+    "        AND ts >= now() - interval '7 days' ORDER BY ts DESC LIMIT 1) "
+    "     > (SELECT avg(close) FROM (SELECT close FROM index_prices "
+    "        WHERE ticker = %s AND ts >= now() - interval '320 days' "
+    "        ORDER BY ts DESC LIMIT 200) t)")
+
+REGIME_MOM_SQL = (
+    "SELECT avg(value) > 0 FROM (SELECT value FROM factor_returns "
+    "WHERE market = %s AND factor = 'MOM' AND freq = 'M' "
+    "AND ts >= now() - interval '200 days' ORDER BY ts DESC LIMIT 3) t")
+
+
+def regime(q):
+    """[(label, light, parts)] per market. Legs: breadth (share of the universe
+    above its 200-day SMA), benchmark trend (close vs its own 200-bar mean),
+    3-month factor momentum (Ken French / IIM-A; drops out when stale)."""
+    out = []
+    for label, universe, bench in REGIME_MARKETS:
+        market = "US" if universe == "SP500" else "IN"
+        legs, parts = [], []
+        row = q(REGIME_BREADTH_SQL, (universe,))
+        breadth = row[0][0] if row and row[0][0] is not None else None
+        if breadth is not None:
+            legs.append(breadth > 0.5)
+            parts.append(f"breadth {breadth * 100:.0f}% above 200d")
+        row = q(REGIME_TREND_SQL, (bench, bench))
+        trend = row[0][0] if row else None
+        if trend is not None:
+            legs.append(bool(trend))
+            parts.append(f"{bench} {'above' if trend else 'below'} 200d mean")
+        row = q(REGIME_MOM_SQL, (market,))
+        mom = row[0][0] if row else None
+        if mom is not None:
+            legs.append(bool(mom))
+            parts.append(f"3m momentum {'positive' if mom else 'negative'}")
+        greens = sum(legs)
+        light = ("🟢" if legs and greens == len(legs) and len(legs) >= 2
+                 else "🔴" if legs and greens == 0 else "🟡")
+        out.append((label, light, parts))
+    return out
+
+
+def regime_line(q):
+    """One digest line, e.g. '🟢 US · 🟡 India — /regime for the legs'."""
+    rows = regime(q)
+    if not rows:
+        return ""
+    return ("<b>Regime</b> " +
+            " · ".join(f"{light} {label}" for label, light, _ in rows) +
+            "  <i>(descriptive — /regime)</i>")
+
+
+def regime_text(q):
+    """/regime — the legs behind the traffic lights."""
+    rows = regime(q)
+    lines = ["<b>Market regime</b> <i>(three deterministic legs; "
+             "descriptive only, never in scores)</i>"]
+    for label, light, parts in rows:
+        lines.append(f"{light} <b>{label}</b> — " +
+                     ("; ".join(parts) if parts else "no fresh inputs"))
+    return "\n".join(lines)
