@@ -366,7 +366,10 @@ def main() -> int:
                         "median_op_margin, avg_ret_6m, avg_ret_12m, median_upside_pct) "
                         "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", sectors)
             run.rows = len(rows)
-            valued = sum(1 for r in rows if r[12] is not None)
+            # fair_value sits right after the method columns (index drifted
+            # when the panel grew to 10 methods — 2026-10-27).
+            fair_idx = 4 + len(METHOD_COLS)
+            valued = sum(1 for r in rows if r[fair_idx] is not None)
         finally:
             conn.close()
         print(f"VALUATION-OK {len(rows)} symbols ({valued} with a fair value, "

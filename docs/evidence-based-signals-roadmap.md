@@ -165,6 +165,44 @@ percentile of 63-day median dollar volume, costs 0.4 % / 0.2 % per trade. Univer
 5. Per §5 nothing enters the composite from this run; the composite is unchanged (ADR 0018). Re-run after EV-1, and per-universe
    rules (criterion 2 "or the exception is explained") are an owner decision for composite v2.
 
+## 5b. EV-0 re-run 2026-10-27 — SP500 point-in-time (`out/ev0/report-2026-10-27.md`)
+
+Same harness; **SP500 now uses EV-1 point-in-time membership** (ADR 0025, 891 intervals,
+101,428 symbol-months) — the 2026-10-18 run's blocking item, resolved. SP400/SP600 appear
+for the first time but are **doubly unreliable** (today's constituents AND the ADR 0029
+price backfill was mid-run): ignore them until EV-1 covers them and the backfill settles.
+NIFTY500 is unchanged (still today's constituents).
+
+| signal | NIFTY 500 (biased) IC (NW t) · net/yr | S&P 500 (point-in-time) IC (NW t) · net/yr | §5 verdict |
+|---|---|---|---|
+| **ret_12_1 (EV-3)** | **0.045 (4.2) · +13.6 %** | 0.001 (0.1) · −3.5 % | FAIL — India-only, exactly as in 5a |
+| ret_12m (in composite) | 0.040 (3.6) · +11.7 % | −0.002 (−0.2) · −4.6 % | FAIL |
+| ret_6m (in composite) | 0.028 (2.9) · +6.7 % | −0.011 (−1.3) · −6.2 % | FAIL |
+| pos_52w (in composite) | 0.027 (2.5) · −2.9 % | −0.015 (−1.4) · −9.6 % | FAIL |
+| sma200_ratio (in composite) | 0.026 (2.4) · +6.0 % | −0.014 (−1.5) · −6.7 % | FAIL |
+| low_vol (in composite) | 0.016 (1.4) | −0.017 (−1.3) | FAIL |
+| near_high (EV-4) | 0.028 (2.4) | −0.020 (−1.7) | FAIL |
+| low_beta (EV-5) | 0.027 (2.0) | −0.014 (−0.9) | FAIL |
+| rev_1m (reversal) | 0.008 (1.1) | 0.017 (1.9) · −5.6 % | FAIL — costs still consume it |
+
+**Reading, not decisions (pair review before anything changes):**
+1. **The survivorship fix did NOT rescue US price momentum.** With point-in-time membership
+   the SP500 ICs stay ~zero-to-negative (ret_12m −0.002 vs 0.004 biased; ret_6m −0.011 vs
+   −0.006). 5a's hope that EV-1 would make the US leg interpretable is answered: it is now
+   interpretable, and the answer is that **large-cap US price momentum has no edge on this
+   data since 2001** — consistent with the post-publication momentum decay literature, not
+   a data artifact.
+2. **India's 12-1 momentum result is unchanged and strong** (t 4.2, net +13.6 %, FM t 4.8),
+   but its universe is still survivorship-biased — EV-1 India is now the decisive item for
+   the composite-v2 question, since the one remaining live candidate rests on biased data.
+3. Low-vol/low-beta flipped from "opposite of the literature" (5a) to merely ~0 on the
+   honest SP500 sample — the anomaly in 5a was indeed the survivorship artifact 5a §2
+   predicted. They still fail §5.
+4. Implication to weigh at composite v2 (owner decision, EV-17): the composite's 20 %
+   momentum weight has supportive evidence only for India; for the US it is noise on this
+   harness. No change made — per §5 and ADR 0018 nothing enters or leaves the composite
+   from a report alone.
+
 ## 6. Deliberately not adding
 
 - Chart patterns, MACD or Bollinger-band rules as predictors — no robust evidence.

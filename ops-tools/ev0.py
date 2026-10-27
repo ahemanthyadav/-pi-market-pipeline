@@ -49,6 +49,15 @@ def export(start):
     os.makedirs(OUT, exist_ok=True)
     df.to_parquet(f"{OUT}/prices.parquet", index=False)
     print(f"exported {len(df)} rows, {df.symbol.nunique()} symbols, {df.d.min().date()}..{df.d.max().date()}")
+    # EV-1 point-in-time membership (ADR 0025): fixes the survivorship bias
+    # for the SP500 leg (2026-10-27 re-run; India still pending).
+    msql = ("COPY (SELECT universe, symbol, added, removed FROM index_membership "
+            "ORDER BY 1, 2, 3) TO STDOUT WITH CSV HEADER")
+    raw = subprocess.run(cmd + " -v ON_ERROR_STOP=1 -c " + _q(msql), shell=True, check=True,
+                         capture_output=True).stdout
+    mem = pd.read_csv(io.BytesIO(raw), parse_dates=["added", "removed"])
+    mem.to_parquet(f"{OUT}/membership.parquet", index=False)
+    print(f"membership: {len(mem)} intervals, universes {sorted(mem.universe.unique())}")
 
 
 def _q(s):
@@ -100,12 +109,15 @@ def rank(s):
     return s.rank(pct=True)
 
 
-def evaluate(sig_me, fwd_me, liq_me, controls_me, cost):
-    """Per-month IC / quintile spread / turnover / FM slope for one signal in one universe."""
+def evaluate(sig_me, fwd_me, liq_me, controls_me, cost, member_me=None):
+    """Per-month IC / quintile spread / turnover / FM slope for one signal in one universe.
+    member_me: optional (month-end x symbol) bool panel — point-in-time membership."""
     rows, prev_long, prev_short = [], None, None
     for t in sig_me.index:
         s, f, liq = sig_me.loc[t], fwd_me.loc[t], liq_me.loc[t]
         ok = s.notna() & f.notna() & liq.notna() & (liq >= liq.quantile(0.2))
+        if member_me is not None:
+            ok &= member_me.loc[t].reindex(ok.index, fill_value=False)
         if ok.sum() < MIN_NAMES:
             continue
         s, f = s[ok], f[ok]
@@ -156,6 +168,26 @@ def verdict(per_uni):
 
 
 # ---------------------------------------------------------------- run
+def membership_mask(me, symbols, universe):
+    """(month-end x symbol) bool panel from index_membership intervals, or
+    None when the universe has no point-in-time history yet."""
+    path = f"{OUT}/membership.parquet"
+    if not os.path.exists(path):
+        return None
+    mem = pd.read_parquet(path)
+    mem = mem[mem.universe == universe]
+    if mem.empty:
+        return None
+    mask = pd.DataFrame(False, index=me, columns=symbols)
+    for row in mem.itertuples():
+        if row.symbol not in mask.columns:
+            continue
+        end = row.removed if pd.notna(row.removed) else pd.Timestamp.max
+        sel = (me >= row.added) & (me < end)
+        mask.loc[sel, row.symbol] = True
+    return mask
+
+
 def run(price_cols, start):
     df = pd.read_parquet(f"{OUT}/prices.parquet")
     df = df[df.d >= pd.Timestamp(start) - pd.Timedelta(days=400)]
@@ -172,9 +204,14 @@ def run(price_cols, start):
             me = me[me >= pd.Timestamp(start)]
             fwd = (tr.loc[me].shift(-1) / tr.loc[me] - 1)
             liq = sig["_liq"].loc[me]
+            member = membership_mask(me, px.columns, uni)
+            if member is not None:
+                print(f"{uni}: point-in-time membership applied "
+                      f"({int(member.values.sum())} symbol-months)", flush=True)
             for name in EXISTING + NEW:
                 ctrl = {c: sig[c].loc[me] for c in EXISTING if c != name}
-                m = evaluate(sig[name].loc[me], fwd, liq, ctrl, COST.get(uni, 0.003))
+                m = evaluate(sig[name].loc[me], fwd, liq, ctrl, COST.get(uni, 0.003),
+                             member_me=member)
                 sm = summarize(m)
                 results.setdefault((price_col, name), {})[uni] = sm
                 if sm:
@@ -190,8 +227,9 @@ def report(results, table, start):
          f"Monthly rebalance from {start}; forward return = next month's total return (adj_close). "
          "Liquidity: 63-day median dollar volume ≥ the month's 20th percentile. "
          f"Costs per trade: {COST}.", "",
-         "> **Survivorship bias:** universe = today's constituents (no EV-1 yet). Results for "
-         "price signals are biased toward winners; treat a PASS as necessary, not sufficient.",
+         "> **Survivorship:** SP500 uses POINT-IN-TIME membership (EV-1, ADR 0025 — applied "
+         "2026-10-27). Universes without interval history (NIFTY500 and the ADR 0029 expansion) "
+         "still use today's constituents; their price-signal results stay biased toward winners.",
          "> Criterion 4 uses price controls only (the other composite price inputs).", "",
          "| price | signal | verdict | universe | months | IC | NW t | IC 1st/2nd half | Q5−Q1 /yr | net /yr | turnover | FM t |",
          "|---|---|---|---|---|---|---|---|---|---|---|---|"]
