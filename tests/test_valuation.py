@@ -156,19 +156,28 @@ class Methods(unittest.TestCase):
 
 class Sectors(unittest.TestCase):
     def test_sector_rows_aggregate_members_and_median_upside(self):
-        data = {"A": {"universe": "SP500", "sector": "S", "ret_6m": 0.10, "ret_12m": 0.2},
-                "B": {"universe": "SP500", "sector": "S", "ret_6m": 0.30},
-                "C": {"universe": "SP500", "sector": "T"}}
+        data = {s: {"universe": "SP500", "sector": "S", "ret_6m": 0.10, "ret_12m": 0.2}
+                for s in "ABCDE"}
+        data["B"]["ret_6m"] = 0.30
+        data["Z"] = {"universe": "SP500", "sector": "T"}
         today = datetime(2026, 10, 26)
-        rows = va.sector_rows(data, {("SP500", "S"): {"pe": 15.0}},
-                              {"A": 10.0, "B": 30.0}, today)
+        ups = {"A": 10.0, "B": 30.0, "C": 20.0, "D": 20.0, "E": 20.0}
+        rows = va.sector_rows(data, {("SP500", "S"): {"pe": 15.0}}, ups, today)
         s = next(r for r in rows if r[1] == "S")
-        self.assertEqual((s[3], s[4]), (2, 15.0))        # members, median_pe
-        self.assertAlmostEqual(s[9], 0.20, places=9)     # avg ret_6m
-        self.assertAlmostEqual(s[11], 20.0, places=9)    # median upside
+        self.assertEqual((s[3], s[4]), (5, 15.0))        # members, median_pe
+        self.assertAlmostEqual(s[9], 0.14, places=9)     # avg ret_6m
+        self.assertAlmostEqual(s[11], 20.0, places=9)    # median upside (n >= 5)
         t = next(r for r in rows if r[1] == "T")
         self.assertEqual(t[3], 1)
         self.assertIsNone(t[11])
+
+    def test_median_needs_min_sample(self):
+        # 2026-10-27: one thin SP400 name printed as a whole sector's view.
+        data = {"A": {"universe": "SP400", "sector": "Materials"}}
+        rows = va.sector_rows(data, {}, {"A": 209.0}, datetime(2026, 10, 27))
+        self.assertIsNone(rows[0][11])
+        thin = {"A": {"universe": "SP400", "sector": "Materials", "pe": 7.2}}
+        self.assertEqual(va.sector_medians(thin), {("SP400", "Materials"): {}})
 
 
 class NewMethodsADR0030(unittest.TestCase):

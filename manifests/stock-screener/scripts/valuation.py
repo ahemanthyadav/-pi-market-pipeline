@@ -171,8 +171,13 @@ MEDIAN_METRICS = ("pe", "pb", "ev_ebitda", "roe", "operating_margin")
 MEDIAN_CAP = {"pe": 200, "pb": 200, "ev_ebitda": 200, "roe": 5, "operating_margin": 1}
 
 
+MEDIAN_MIN_N = 5   # a "sector median" over fewer inputs is noise, not a view
+
+
 def sector_medians(data):
-    """{(universe, sector): {metric: median}} over sane positive values."""
+    """{(universe, sector): {metric: median}} over sane positive values;
+    a metric with fewer than MEDIAN_MIN_N inputs stays absent (2026-10-27:
+    one thin SP400 name printed as 'Materials P/E 7.2, +209%')."""
     buckets = {}
     for d in data.values():
         key = (d["universe"], d["sector"])
@@ -180,7 +185,8 @@ def sector_medians(data):
             v = d.get(m)
             if isinstance(v, (int, float)) and 0 < v < MEDIAN_CAP[m]:
                 buckets.setdefault(key, {}).setdefault(m, []).append(v)
-    return {key: {m: statistics.median(vs) for m, vs in ms.items()}
+    return {key: {m: statistics.median(vs) for m, vs in ms.items()
+                  if len(vs) >= MEDIAN_MIN_N}
             for key, ms in buckets.items()}
 
 
@@ -308,7 +314,7 @@ def sector_rows(data, medians, upsides, today):
                      med.get("roe"), med.get("operating_margin"),
                      _mean(data[s].get("ret_6m") for s in symbols),
                      _mean(data[s].get("ret_12m") for s in symbols),
-                     statistics.median(ups) if ups else None))
+                     statistics.median(ups) if len(ups) >= MEDIAN_MIN_N else None))
     return rows
 
 
