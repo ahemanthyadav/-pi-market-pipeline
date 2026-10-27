@@ -611,11 +611,11 @@ layer (JOINs on ticker/symbol), not in DDL.*
 | nse-fetcher | 15 11 * * * | local/nse-fetcher:v7 | index_prices (11 Indian indices: 9 Yahoo + ^CNXAUTO/^CNXFMCG NSE-direct since 2026-10-26) |
 | fiidii-fetcher | 0 14 * * * | local/fiidii-fetcher:v2 | capital_flows (FII/DII net) |
 | factors-fetcher | 0 11 2 * * | local/factors-fetcher:v1 | factor_returns (US Ken French 5F+MOM, IN IIM-A four-factor — G-20; first mdjob/job_runs adopter) |
-| membership-history | 30 11 2 * * | local/screener:v25 | index_membership (EV-1, ADR 0025: point-in-time S&P 500 intervals from Wikipedia; full idempotent rebuild) |
-| stock-valuation | 10 2 * * * | local/screener:v25 | stock_valuations + sector_metrics (ADR 0026: 8-method intrinsic panel per symbol + daily sector aggregates; descriptive only) |
-| prediction-tracker | 40 2 * * * | local/screener:v25 | prediction_snapshots + prediction_outcomes (schema 18: write-once daily claims, resolved at 30/91/182d vs adjusted returns, benchmark-relative) |
-| earnings-calendar | 0 12 * * 0 | local/screener:v25 | earnings_calendar (schema 19: weekly yfinance refresh of upcoming earnings dates, all active constituents) |
-| accuracy-check | 30 12 * * 0 | local/screener:v25 | stock_reports `__accuracy__` (DQ-5: valuation internals recomputed in SQL, sector medians, membership drift, Stooq second-source price sample) |
+| membership-history | 30 11 2 * * | local/screener:v26 | index_membership (EV-1, ADR 0025: point-in-time S&P 500 intervals from Wikipedia; full idempotent rebuild) |
+| stock-valuation | 10 2 * * * | local/screener:v26 | stock_valuations + sector_metrics (ADR 0026: 10-method intrinsic panel per symbol + daily sector aggregates; descriptive only) |
+| prediction-tracker | 40 2 * * * | local/screener:v26 | prediction_snapshots + prediction_outcomes (schema 18: write-once daily claims, resolved at 30/91/182d vs adjusted returns, benchmark-relative) |
+| earnings-calendar | 0 12 * * 0 | local/screener:v26 | earnings_calendar (schema 19: weekly yfinance refresh of upcoming earnings dates, all active constituents) |
+| accuracy-check | 30 12 * * 0 | local/screener:v26 | stock_reports `__accuracy__` (DQ-5: valuation internals recomputed in SQL, sector medians, membership drift, Stooq second-source price sample) |
 | yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v6 | index_prices (29 tickers) |
 | fx-fetcher | 0 23 * * * | local/fx-fetcher:v1 | fx_rates (10 pairs) |
 | yields-fetcher | 15 23 * * * | local/yields-fetcher:v1 | bond_yields (^TNX/^FVX/^TYX/^IRX) |
@@ -625,20 +625,20 @@ layer (JOINs on ticker/symbol), not in DDL.*
 | ta-compute | 30 0 * * * | local/ta-compute:v1 | technical_indicators |
 | headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (ADR 0010) |
 | rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (IN_* policy rates) + bond_yields (IN_GS_*) |
-| telegram-digest | 0 8 * * * (Asia/Kolkata) | local/telegram-digest:v29 (pinned pi1) | Telegram digest (read-only) |
-| telegram-alerts | 45 2 * * * (node-local) | local/telegram-digest:v29, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only; silent when nothing changed) |
+| telegram-digest | 0 8 * * * (Asia/Kolkata) | local/telegram-digest:v30 (pinned pi1) | Telegram digest (read-only) |
+| telegram-alerts | 45 2 * * * (node-local) | local/telegram-digest:v30, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only; silent when nothing changed) |
 | llm-narrative | 40 7 * * * (Asia/Kolkata) | local/pipeline-health:v6 | llm_narratives — ML-7a AI market note via the shared llm-gateway (ADR 0022); digest shows it only if every number checks out |
 | news-embed | 0 1 * * * | local/pipeline-health:v6 | headline_embeddings — ML-2: embeds new headlines via the gateway `embed` capability, groups near-duplicates into stories (ADR 0024) |
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | pi3 SSD dumps |
 | pipeline-health | 45 1 * * * | local/pipeline-health:v6 | pipeline_heartbeat (14 feeds incl. rbi; stock prices/scores 96 h since v5) |
 | intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
-| universe-refresh | 0 9 * * 0 | local/screener:v25 | universe_constituents + ticker_names (998) |
-| stock-prices | 30 23 * * * | local/screener:v25 | stock_prices (5d window) |
-| stock-fundamentals | 0 6 * * 6 | local/screener:v25 | stock_fundamentals (EDGAR US + yfinance NSE) |
-| stock-metrics | 0 2 * * * | local/screener:v25 | stock_metrics_daily |
-| stock-screener | 15 2 * * * | local/screener:v25 | stock_scores + screening_runs |
-| stock-report | 30 2 * * * | local/screener:v25 | stock_reports (top-25/universe + digest) |
-| nse-fundamentals | 0 10 * * 0 | local/screener:v25 | financial_facts `nse_cons`/`nse_sa` — India results filings (G-6, ADR 0021); **suspended until the first backfill completes** |
+| universe-refresh | 0 9 * * 0 | local/screener:v26 | universe_constituents + ticker_names (998) |
+| stock-prices | 30 23 * * * | local/screener:v26 | stock_prices (5d window) |
+| stock-fundamentals | 0 6 * * 6 | local/screener:v26 | stock_fundamentals (EDGAR US + yfinance NSE) |
+| stock-metrics | 0 2 * * * | local/screener:v26 | stock_metrics_daily |
+| stock-screener | 15 2 * * * | local/screener:v26 | stock_scores + screening_runs |
+| stock-report | 30 2 * * * | local/screener:v26 | stock_reports (top-25/universe + digest) |
+| nse-fundamentals | 0 10 * * 0 | local/screener:v26 | financial_facts `nse_cons`/`nse_sa` — India results filings (G-6, ADR 0021); **suspended until the first backfill completes** |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only → manual INSERT |
 
 **Schedules are node-local PDT, not UTC** (verified 2026-10-04 — the "02:00-02:30"

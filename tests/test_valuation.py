@@ -171,5 +171,42 @@ class Sectors(unittest.TestCase):
         self.assertIsNone(t[11])
 
 
+class NewMethodsADR0030(unittest.TestCase):
+    def test_damodaran_fcff_hand_rolled(self):
+        out = run_one(*tech())
+        # Hand-roll: EBIT 12000, NOPAT 9000, capital 50000 -> ROC 0.18;
+        # g = 10% revenue CAGR -> RR = 0.5556; rf = 0.05, kd = (0.07)(0.75);
+        # E = 100000, D = 10000 -> WACC = (100000*0.095 + 10000*0.0525)/110000.
+        nopat, roc, g = 12000.0 * 0.75, (12000.0 * 0.75) / 50000.0, 0.10
+        rr = g / roc
+        wacc = (100000.0 * 0.095 + 10000.0 * (0.05 + 0.02) * 0.75) / 110000.0
+        pv, n = 0.0, nopat
+        for t in range(1, 6):
+            n *= 1 + g
+            pv += n * (1 - rr) / (1 + wacc) ** t
+        rr_t = 0.025 / roc
+        pv += (n * 1.025 * (1 - rr_t) / (wacc - 0.025)) / (1 + wacc) ** 5
+        self.assertAlmostEqual(out["damodaran_fcff"], (pv - 10000.0) / 1000.0,
+                               places=6)
+
+    def test_graham_growth_hand_rolled(self):
+        out = run_one(*tech())
+        # EPS CAGR 3->5 over 4y = 13.62%, clamp [0,15] keeps it; Y = 5% + 1%.
+        g = (5.0 / 3.0) ** 0.25 - 1
+        self.assertAlmostEqual(out["graham_growth"],
+                               5.0 * (8.5 + 2 * g * 100) * 4.4 / 6.0, places=6)
+
+    def test_damodaran_null_without_operating_income(self):
+        d, hist = tech()
+        hist.pop("operating_income")
+        out = run_one(d, hist)
+        self.assertIsNone(out["damodaran_fcff"])
+
+    def test_methods_count_includes_new_columns(self):
+        out = run_one(*tech())
+        self.assertEqual(out["methods"], 10)
+
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -34,7 +34,8 @@ VAL_SQL = """
       SELECT symbol, close, fair_value, upside_pct,
              (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY v)
               FROM unnest(ARRAY[graham, peer_multiple, fcf_yield, dcf, ddm,
-                                epv, residual_income, peg_lynch]) AS t(v)
+                                epv, residual_income, peg_lynch,
+                                damodaran_fcff, graham_growth]) AS t(v)
               WHERE v IS NOT NULL) AS med
       FROM latest WHERE fair_value IS NOT NULL
     )

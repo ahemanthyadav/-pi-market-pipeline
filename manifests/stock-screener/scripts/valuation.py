@@ -17,6 +17,13 @@ whenever its inputs don't apply — no method is forced:
 - residual_income: justified P/B — (ROE - g)/(r - g) x BVPS when ROE > r,
                    multiple capped at 8
 - peg_lynch:       PEG = 1 fair value — EPS x 100 x EPS CAGR clamped [5%, 25%]
+- damodaran_fcff:  Damodaran two-stage FCFF (ADR 0030): NOPAT with fundamental
+                   growth (reinvestment = g/ROC, ROC on book capital), 5y at
+                   the revenue CAGR then terminal 2.5%, discounted at WACC
+                   (ke = 10y + ERP; kd = 10y + 2% after 25% tax, market-value
+                   weights); debt netted, no cash credit (as EPV)
+- graham_growth:   Graham's revised 1974 formula EPS x (8.5 + 2g%) x 4.4/Y,
+                   g = EPS CAGR clamped [0, 15%], Y = 10y + 1% (AAA proxy)
 fair_value = median of whatever produced a number; methods = how many did.
 
 Sector lens comes from sector_styles + metric_relevance (schema 16); annual
@@ -41,6 +48,9 @@ TERMINAL_G = 0.025                          # terminal growth, decimal
 TAX = 0.25                                  # EPV normalized tax rate
 DCF_YEARS = 5
 JPB_CAP = 8.0                               # residual-income multiple cap
+DEBT_SPREAD = 0.02                          # synthetic cost-of-debt spread over rf (ADR 0030)
+AAA_SPREAD = 1.0                            # AAA-corporate proxy over the 10y, percent (Graham Y)
+RR_CAP = 0.9                                # reinvestment-rate ceiling (Damodaran FCFF)
 # Rates are per MARKET, not per universe (ADR 0029: five universes, two markets).
 FALLBACK_10Y = {"US": 4.5, "IN": 7.0}
 TENOR = {"US": "DGS10", "IN": "IN_GS_10Y"}
@@ -238,6 +248,38 @@ def value_one(d, hist, medians, styles, weights, rates):
     out["peg_lynch"] = (eps * ge * 100
                         if eps and eps > 0 and ge is not None else None)
 
+    # Damodaran FCFF (ADR 0030): fundamental growth — reinvestment = g/ROC —
+    # NOPAT-based firm value at WACC, debt netted (no cash credit, like EPV).
+    out["damodaran_fcff"] = None
+    ebit0 = latest_annual(hist.get("operating_income", []))
+    debt = d.get("total_debt") or 0
+    if (ebit0 and ebit0 > 0 and shares and mcap and equity and equity > 0
+            and g is not None):
+        nopat = ebit0 * (1 - TAX)
+        roc = nopat / (debt + equity)
+        rf = r - ERP / 100.0
+        kd = (rf + DEBT_SPREAD) * (1 - TAX)
+        wacc = (mcap * r + debt * kd) / (mcap + debt)
+        if roc > TERMINAL_G and wacc > TERMINAL_G:
+            rr = clamp(g / roc, 0.0, RR_CAP)
+            pv, n = 0.0, nopat
+            for t in range(1, DCF_YEARS + 1):
+                n *= 1 + g
+                pv += n * (1 - rr) / (1 + wacc) ** t
+            rr_t = clamp(TERMINAL_G / roc, 0.0, RR_CAP)
+            tv = n * (1 + TERMINAL_G) * (1 - rr_t) / (wacc - TERMINAL_G)
+            pv += tv / (1 + wacc) ** DCF_YEARS
+            eq_value = pv - debt
+            out["damodaran_fcff"] = eq_value / shares if eq_value > 0 else None
+
+    # Graham's revised growth formula (1974): V = EPS x (8.5 + 2g%) x 4.4 / Y,
+    # Y = AAA corporate yield, proxied as the 10y + AAA_SPREAD (ADR 0030).
+    gg = clamp(cagr(hist.get("eps", [])), 0.0, 0.15)
+    y_pct = (r - ERP / 100.0) * 100 + AAA_SPREAD
+    out["graham_growth"] = (eps * (8.5 + 2 * gg * 100) * 4.4 / y_pct
+                            if eps and eps > 0 and gg is not None and y_pct > 0
+                            else None)
+
     methods = [v for k, v in out.items()
                if k not in ("discount_rate", "growth_used") and v]
     out["methods"] = len(methods)
@@ -271,7 +313,7 @@ def sector_rows(data, medians, upsides, today):
 
 
 METHOD_COLS = ("graham", "peer_multiple", "fcf_yield", "dcf", "ddm", "epv",
-               "residual_income", "peg_lynch")
+               "residual_income", "peg_lynch", "damodaran_fcff", "graham_growth")
 
 
 def main() -> int:
@@ -305,9 +347,11 @@ def main() -> int:
                     cur.executemany(
                         "INSERT INTO stock_valuations (symbol, ts, universe, close, "
                         "graham, peer_multiple, fcf_yield, dcf, ddm, epv, "
-                        "residual_income, peg_lynch, fair_value, upside_pct, methods, "
+                        "residual_income, peg_lynch, damodaran_fcff, graham_growth, "
+                        "fair_value, upside_pct, methods, "
                         "discount_rate, growth_used) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
+                        "%s,%s)",
                         rows)
                     cur.execute("DELETE FROM sector_metrics WHERE ts = %s", (today,))
                     cur.executemany(

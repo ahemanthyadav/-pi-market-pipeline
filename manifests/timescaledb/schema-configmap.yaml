@@ -741,3 +741,7 @@ data:
       PRIMARY KEY (symbol, event_date)
     );
     CREATE INDEX IF NOT EXISTS earnings_calendar_date ON earnings_calendar (event_date);
+  20-valuation-methods-2.sql: |
+    -- ADR 0030: two more famous intrinsic methods on the ADR 0026 panel.
+    ALTER TABLE stock_valuations ADD COLUMN IF NOT EXISTS damodaran_fcff DOUBLE PRECISION;
+    ALTER TABLE stock_valuations ADD COLUMN IF NOT EXISTS graham_growth  DOUBLE PRECISION;

@@ -93,7 +93,8 @@ def render_report(cur, row, medians):
     fund = dict(cur.fetchall())
     # ADR 0026: deterministic fair value + the sector lens (schemas 15/16).
     cur.execute("SELECT fair_value, upside_pct, methods, graham, peer_multiple, "
-                "fcf_yield, dcf, ddm, epv, residual_income, peg_lynch "
+                "fcf_yield, dcf, ddm, epv, residual_income, peg_lynch, "
+                "damodaran_fcff, graham_growth "
                 "FROM stock_valuations WHERE symbol=%s "
                 "AND ts >= now() - interval '7 days' ORDER BY ts DESC LIMIT 1", (sym,))
     val = cur.fetchone()
@@ -123,7 +124,7 @@ def render_report(cur, row, medians):
         md.append(f"- **Fair value {fmt(val[0])}** ({val[1]:+.0f}% vs close, "
                   f"median of {val[2]} methods — ADR 0026, not advice)")
         names = ("Graham", "Peer multiple", "FCF yield", "DCF", "DDM", "EPV",
-                 "Residual income", "PEG")
+                 "Residual income", "PEG", "Damodaran FCFF", "Graham growth")
         md.append("- Methods: " + " · ".join(
             f"{n} {fmt(v)}" for n, v in zip(names, val[3:]) if v))
     if rel:

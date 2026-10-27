@@ -1473,7 +1473,9 @@ VAL_CAND_SQL = (
     " CASE WHEN v.ddm             > v.close THEN 1 ELSE 0 END + "
     " CASE WHEN v.epv             > v.close THEN 1 ELSE 0 END + "
     " CASE WHEN v.residual_income > v.close THEN 1 ELSE 0 END + "
-    " CASE WHEN v.peg_lynch       > v.close THEN 1 ELSE 0 END) AS above "
+    " CASE WHEN v.peg_lynch       > v.close THEN 1 ELSE 0 END + "
+    " CASE WHEN v.damodaran_fcff  > v.close THEN 1 ELSE 0 END + "
+    " CASE WHEN v.graham_growth   > v.close THEN 1 ELSE 0 END) AS above "
     "FROM stock_valuations v "
     "WHERE v.ts >= now() - interval '4 days' "
     "AND v.upside_pct >= %s AND v.methods >= %s ORDER BY v.ts DESC")

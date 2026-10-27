@@ -157,7 +157,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: backfill
-          image: local/screener:v25
+          image: local/screener:v26
           imagePullPolicy: Never
           command: ["python", "/scripts/history_backfill.py"]
           env:

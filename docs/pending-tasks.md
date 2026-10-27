@@ -14,7 +14,7 @@
 > House-prescribed next: the EV-0 §5 re-run on point-in-time membership (own session, pair review).
 > **Later same day (owner: "get all gaps covered / all famous calculations / sector info"):** the ADR 0026
 > valuation layer shipped as `screener:v20` — schemas 15/16/17 applied (`schema-valuation-17` Job), daily
-> `stock-valuation` CronJob (the 29th, 02:10): 8-method intrinsic panel (Graham, peer multiple, FCF
+> `stock-valuation` CronJob (the 29th, 02:10): 10-method intrinsic panel (Graham, peer multiple, FCF
 > perpetuity, 2-stage DCF, DDM, EPV, residual income, Lynch PEG) for every active symbol →
 > `stock_valuations` (canary: 998 symbols, 983 with a fair value), sector→style relevance tables (31
 > sectors, 64 weighted metrics with reasons) driving method selection, `sector_metrics` daily aggregates,
