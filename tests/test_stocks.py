@@ -1159,5 +1159,72 @@ class CardFairValueTest(StockCardTest):
         self.assertIn("ADR 0026, not advice", text)
 
 
+class SectorsUniverseParseTest(unittest.TestCase):
+    ROWS = [("Energy", 21, 18.7, -42.0, None)]
+
+    def test_sp600_goes_to_sp600_not_sp500(self):
+        db = FakeDB([("FROM sector_metrics", lambda args: self.ROWS
+                      if args[0] == "SP600" else [])])
+        text = stocks.sectors_card(db, "/sectors sp600")
+        self.assertIn("SP600", text)
+        self.assertIn("Energy", text)
+
+    def test_unknown_universe_is_an_error_not_sp500(self):
+        db = FakeDB([])
+        text = stocks.sectors_card(db, "/sectors spx")
+        self.assertIn("Unknown universe", text)
+        self.assertEqual(db.calls, [])
+
+    def test_bare_command_defaults_to_nifty(self):
+        db = FakeDB([("FROM sector_metrics", lambda args: self.ROWS
+                      if args[0] == "NIFTY500" else [])])
+        self.assertIn("NIFTY500", stocks.sectors_card(db, "/sectors"))
+
+
+class EarningsCommandTest(unittest.TestCase):
+    def test_watchlist_names_starred_and_sorted(self):
+        from datetime import date as _date
+        db = FakeDB([("FROM watchlist", [("AAPL",)]),
+                     ("WHERE rank <= 25", [("MSFT",)]),
+                     ("FROM earnings_calendar",
+                      [("AAPL", _date(2026, 10, 29)), ("MSFT", _date(2026, 10, 28))])])
+        text = stocks.earnings_text(db, "123")
+        lines = text.splitlines()
+        self.assertIn("MSFT", lines[1])          # soonest first
+        self.assertIn("AAPL</b> ★", lines[2])    # watchlist starred
+    def test_empty_calendar_message(self):
+        db = FakeDB([("FROM watchlist", []), ("WHERE rank <= 25", []),
+                     ("FROM earnings_calendar", [])])
+        self.assertIn("No earnings dates", stocks.earnings_text(db, "123"))
+
+
+class ScorecardCommandTest(unittest.TestCase):
+    def test_counts_without_outcomes(self):
+        from datetime import date as _date
+        db = FakeDB([("FROM prediction_snapshots GROUP BY kind",
+                      [("screener_rank", 1419, _date(2026, 10, 27), _date(2026, 10, 27))]),
+                     ("prediction_outcomes", [])])
+        text = stocks.scorecard_text(db)
+        self.assertIn("1,419 snapshots", text)
+        self.assertIn("No resolved outcomes yet", text)
+
+    def test_decile_spread_renders(self):
+        from datetime import date as _date
+        db = FakeDB([("FROM prediction_snapshots GROUP BY kind",
+                      [("screener_rank", 100, _date(2026, 10, 1), _date(2026, 10, 27))]),
+                     ("prediction_outcomes", [("screener_rank", 30, 0.042, -0.013, 900)])])
+        text = stocks.scorecard_text(db)
+        self.assertIn("d1 +4.2% vs d10 -1.3%", text)
+
+    def test_missing_table_degrades(self):
+        class UndefinedTable(Exception):
+            pass
+
+        def boom(_args):
+            raise UndefinedTable("relation prediction_snapshots does not exist")
+        db = FakeDB([("FROM prediction_snapshots GROUP BY kind", boom)])
+        self.assertIn("not created yet", stocks.scorecard_text(db))
+
+
 if __name__ == "__main__":
     unittest.main()

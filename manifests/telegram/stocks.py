@@ -1534,8 +1534,15 @@ def alert_valuation(q, now=None):
 
 
 def sectors_card(q, text=""):
-    """/sectors [sp500|nifty] — latest sector aggregates, cheapest first."""
-    universe = "SP500" if "sp" in (text or "").lower() else "NIFTY500"
+    """/sectors [universe] — latest sector aggregates, cheapest first.
+    Any UNIVERSES alias works (v28: 'sp' in text matched sp600 to SP500)."""
+    words = (text or "").lower().split()[1:]
+    universe = "NIFTY500"
+    if words:
+        if words[0] not in UNIVERSES:
+            return (f"Unknown universe '{esc(words[0])}'. One of: "
+                    f"{', '.join(sorted(set(UNIVERSES)))}")
+        universe = UNIVERSES[words[0]]
     rows = q(
         "SELECT m.sector, m.members, m.median_pe, m.median_upside_pct, st.note "
         "FROM (SELECT DISTINCT ON (sector) * FROM sector_metrics "
@@ -1704,4 +1711,73 @@ def regime_text(q):
     for label, light, parts in rows:
         lines.append(f"{light} <b>{label}</b> — " +
                      ("; ".join(parts) if parts else "no fresh inputs"))
+    return "\n".join(lines)
+
+
+CORE_TOP_SQL = (
+    "SELECT symbol FROM (SELECT DISTINCT ON (symbol) symbol, rank "
+    "FROM stock_scores WHERE ts >= now() - interval '7 days' AND eligible "
+    "AND universe IN ('SP500', 'NIFTY500') ORDER BY symbol, ts DESC) s "
+    "WHERE rank <= 25")
+
+
+def earnings_text(q, chat_id=None, days=14):
+    """/earnings — upcoming dates for YOUR watchlist + the core top-25s."""
+    symbols, watch = set(), set()
+    try:
+        watch = {r[0] for r in q(WATCH_SQL, (chat_id,))}
+    except Exception as exc:  # noqa: BLE001 - only the missing-table case is expected
+        if not table_missing(exc):
+            raise
+    symbols = watch | {r[0] for r in q(CORE_TOP_SQL)}
+    soon = earnings_soon(q, sorted(symbols), days=days)
+    if not soon:
+        return (f"No earnings dates in the next {days} days for your watchlist "
+                "or the core top-25s. (Calendar refreshes Sundays; NSE coverage "
+                "is patchy by source.)")
+    lines = [f"<b>Earnings — next {days} days</b> <i>(watchlist ★ + core top-25)</i>"]
+    for sym, d in sorted(soon.items(), key=lambda kv: (kv[1], kv[0])):
+        star = " ★" if sym in watch else ""
+        lines.append(f"• <b>{esc(bare(sym))}</b>{star} — {d:%a %d %b}")
+    return "\n".join(lines)
+
+
+def scorecard_text(q):
+    """/scorecard — prediction scorecard summary (ADR 0028): snapshot counts,
+    and top-vs-bottom decile excess once outcomes accrue."""
+    try:
+        counts = q("SELECT kind, count(*), min(ts)::date, max(ts)::date "
+                   "FROM prediction_snapshots GROUP BY kind ORDER BY kind")
+    except Exception as exc:  # noqa: BLE001 - only the missing-table case is expected
+        if not table_missing(exc):
+            raise
+        return "Scorecard tables not created yet."
+    if not counts:
+        return "No prediction snapshots yet — the tracker runs daily at 02:40 UTC."
+    lines = ["<b>Prediction scorecard</b> <i>(ADR 0028 — write-once, "
+             "benchmark-relative)</i>"]
+    for kind, n, first, last in counts:
+        lines.append(f"• {esc(kind)}: {n:,} snapshots, {first:%d %b} → {last:%d %b}")
+    deciles = q(
+        "SELECT s.kind, o.horizon_days, "
+        "avg(CASE WHEN s.dec = 1  THEN o.realized_ret - coalesce(o.bench_ret, 0) END), "
+        "avg(CASE WHEN s.dec = 10 THEN o.realized_ret - coalesce(o.bench_ret, 0) END), "
+        "count(*) "
+        "FROM (SELECT kind, symbol, ts, ntile(10) OVER "
+        "      (PARTITION BY kind, ts, universe ORDER BY value) AS dec "
+        "      FROM prediction_snapshots) s "
+        "JOIN prediction_outcomes o ON o.kind = s.kind AND o.symbol = s.symbol "
+        "AND o.ts = s.ts GROUP BY 1, 2 ORDER BY 1, 2")
+    if not deciles:
+        first_ts = min(r[2] for r in counts)
+        lines.append(f"\nNo resolved outcomes yet — the first land ~30 days "
+                     f"after {first_ts:%d %b} (then 91d, 182d). The marketview "
+                     f"/scorecard page has the full decile tables.")
+        return "\n".join(lines)
+    lines.append("\n<b>Decile 1 vs 10 — mean excess vs benchmark</b>")
+    for kind, horizon, top, bottom, n in deciles:
+        t = f"{top * 100:+.1f}%" if top is not None else "–"
+        b = f"{bottom * 100:+.1f}%" if bottom is not None else "–"
+        lines.append(f"• {esc(kind)} @ {horizon}d: d1 {t} vs d10 {b} (n={n:,})")
+    lines.append("<i>Not advice; deciles ranked within each universe.</i>")
     return "\n".join(lines)

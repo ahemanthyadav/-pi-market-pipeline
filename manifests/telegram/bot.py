@@ -125,12 +125,15 @@ def _help_text() -> str:
         "/stock TCS — price, trend, score, valuation, news for one stock\n"
         "/news TCS — tagged headlines + sentiment\n"
         "/ask TCS outlook — question answered from stored facts only (numbers checked); AI off → facts table\n"
-        "/top growth sp500 — best by value|quality|growth|momentum|risk\n"
+        "/top growth sp500 — best by value|quality|growth|momentum|risk "
+        "(universes: nifty, sp500, sp400, sp600, microcap)\n"
         "/multibagger sp500 — small, fast-growing, high-return candidates\n"
         "/movers — who entered/left the screener top-20\n"
         "/sectors sp500 — sector medians + fair-value gap (ADR 0026)\n"
         "/track — how the screener's picks have done\n"
         "/regime — breadth / trend / momentum traffic light per market\n"
+        "/earnings — upcoming dates: your watchlist + core top-25s\n"
+        "/scorecard — have the system's picks worked? (ADR 0028)\n"
         "/watch — YOUR watchlist + holdings P&amp;L (add/rm); private to this chat\n"
         "/world — every index: close, day, 1m, YTD (/world asia)\n"
         "/index nikkei — one index in depth: 1w–1y, 52w range, trend, RSI\n"
@@ -253,6 +256,14 @@ def cmd_regime(_text: str) -> str:
     return stocks.regime_text(query)
 
 
+def cmd_earnings(_text: str, chat: str = None) -> str:
+    return stocks.earnings_text(query, chat)
+
+
+def cmd_scorecard(_text: str) -> str:
+    return stocks.scorecard_text(query)
+
+
 def cmd_macro(_text: str) -> str:
     return stocks.macro_text(query)
 
@@ -335,7 +346,8 @@ def cmd_rmuser(text: str, chat: str = None) -> str:
 
 # Commands that need to know WHO is asking get (text, chat); the rest stay (text) so
 # one-liners like COMMANDS['nifty']('/nifty') keep working. ADMIN is owner-only.
-PERSONAL = {"start", "help", "digest", "watch", "users", "adduser", "rmuser"}
+PERSONAL = {"start", "help", "digest", "watch", "users", "adduser", "rmuser",
+            "earnings"}
 ADMIN = {"users", "adduser", "rmuser"}
 
 COMMANDS = {
@@ -359,6 +371,8 @@ COMMANDS = {
     "mb": cmd_multibagger,
     "track": cmd_track,
     "regime": cmd_regime,
+    "earnings": cmd_earnings,
+    "scorecard": cmd_scorecard,
     "macro": cmd_macro,
     "world": cmd_world,
     "index": cmd_index,
