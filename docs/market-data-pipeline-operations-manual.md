@@ -1,7 +1,7 @@
 # Market Data Pipeline — Operations Manual & System Reference
 
 > **Reconciled with `manifests/` 2026-10-30** (schedules/images checked by `ops-tools/workloads.py --check`; §6 cycle
-> re-verified end-to-end with the telegram-digest v33 build; §7 Grafana dashboard list recounted — 11).
+> re-verified end-to-end with the telegram-digest v33/v34 builds; §7 Grafana dashboard list recounted — 11).
 > **Last fully healthy cluster check: 2026-10-30** — all 4 k8s nodes Ready (pi2 cordoned), 33 CronJobs live
 > (`nse-fundamentals` suspended by design until the DG-03 backfill completes), TimescaleDB/Grafana/Telegram-bot
 > all Running. See §8 and pending-tasks §1 for known gaps.
@@ -190,8 +190,8 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (7 IN_* policy rates) + bond_yields (5 G-Sec tenors + 3 T-bills) + pipeline_heartbeat self-row 'rbi' |
 | headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (gazetteer extraction over raw_headlines, ADR 0010) |
 | fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only (manual INSERT follows) |
-| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v33 (pinned pi1) | Telegram digest (read-only; no DB write) |
-| telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v33, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
+| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v34 (pinned pi1) | Telegram digest (read-only; no DB write) |
+| telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v34, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
 | llm-narrative | 40 7 * * * (Asia/Kolkata) | local/pipeline-health:v6 | llm_narratives — ML-7a AI market note via the shared llm-gateway (ADR 0022); digest shows it only if every number checks out |
 | news-embed | 0 1 * * * | local/pipeline-health:v6 | headline_embeddings — ML-2: embeds new headlines via the gateway `embed` capability, groups near-duplicates into stories (ADR 0024) |
 
@@ -366,7 +366,7 @@ round-trips; a hostile value cannot inject a command).
 long foreground command does NOT mean the remote command failed (it keeps running).
 
 **Full cycle — e.g., updating the yfinance fetcher to v6 (verified end-to-end for
-telegram-digest v33, 2026-10-30):**
+telegram-digest v34, 2026-10-30; the step-by-step wrapper lives in `docs/deployment-guide.md`):**
 
 ```bash
 # 1. Edit code + bump the tag EVERYWHERE the image is referenced:
@@ -385,6 +385,14 @@ done
 #    layer can exceed the 120 s channel limit → nohup + poll (note above):
 python3 ops-tools/runcmd.py tx2 ahytx2 \
   'echo @@PW@@ | sudo -S docker build -t local/yfinance-fetcher:v6 /home/ahytx2/yf-build 2>&1 | tail -2'
+
+# 3b. Verify the image carries the code you think it does (build-before-commit
+#     race: telegram v33 was built minutes before 36e6529 landed and shipped a
+#     stale stocks.py/bot.py — caught 2026-10-30 by this check; the tag was
+#     burned, never deployed). md5sum every COPY'd file in-image vs the repo:
+python3 ops-tools/runcmd.py tx2 ahytx2 \
+  'echo @@PW@@ | sudo -S docker run --rm local/yfinance-fetcher:v6 md5sum /app/yfinance-fetcher.py 2>/dev/null'
+md5sum manifests/ingestion/yfinance/yfinance-fetcher.py   # must match line for line
 
 # 4. Save the tarball STRAIGHT INTO the archive (restore source if a node's
 #    containerd store is lost — §8 prune incident), plus a home-dir copy to pull:
