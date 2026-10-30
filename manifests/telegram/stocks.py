@@ -278,14 +278,17 @@ def quote_row(name, row):
             pct(change(value, prev)), pct(change(value, year_start)))
 
 
-QUOTE_HEAD = ("", "Close", "Day chg", "YTD chg")
+QUOTE_HEAD = ("", "Close", "Day", "YTD")
+QUOTE_LEGEND = "<i>Day = vs previous close · YTD = since 1 Jan</i>"
 
 
 def quote_table(q, tickers):
     """Close / day / YTD table for a fixed list of index tickers (digest, /vix)."""
     rows, names = index_rows(q)
     body = [quote_row(names.get(t, t), rows[t]) for t in tickers if t in rows]
-    return table(QUOTE_HEAD, body, "lrrr") if body else "No index rows in the last 15 days."
+    if not body:
+        return "No index rows in the last 15 days."
+    return table(QUOTE_HEAD, body, "lrrr") + "\n" + QUOTE_LEGEND
 
 
 def parse_world(text):
@@ -312,7 +315,7 @@ def world_text(q, only=None):
         return "No index rows in the last 15 days."
     as_of = max(r[1] for r in rows.values())
     out = [f"<b>World markets</b>  <i>latest closes, to {as_of:%d %b}</i>",
-           table(QUOTE_HEAD, body, "lrrr")]
+           table(QUOTE_HEAD, body, "lrrr"), QUOTE_LEGEND]
     if not only:
         ranked = sorted(
             (change(r[2], r[5]), names.get(k, k)) for k, r in rows.items()
@@ -667,8 +670,10 @@ def stock_card(q, row):
         "ORDER BY ts DESC LIMIT 1", (symbol, start, start - timedelta(days=20)))
     ytd = change(close, year_start[0][0]) if year_start else None
 
+    # daily closes, the same basis as the screener's pos_52w — intraday
+    # highs/lows are unadjusted and would contradict the Trend block
     hi52 = q(
-        "SELECT max(high), min(low) FROM stock_prices WHERE symbol = %s "
+        "SELECT max(close), min(close) FROM stock_prices WHERE symbol = %s "
         "AND ts >= now() - interval '52 weeks'", (symbol,))
     hi52v, lo52v = (hi52[0] if hi52 else (None, None))
 
@@ -687,8 +692,8 @@ def stock_card(q, row):
         ("1 month", frac("ret_1m")), ("6 months", frac("ret_6m")),
         ("Year to date", None if ytd is None else pct(ytd)),
         ("12 months", frac("ret_12m")),
-        ("52-week high", px(hi52v) if hi52v is not None else None),
-        ("52-week low", px(lo52v) if lo52v is not None else None)])]
+        ("52-week high (close)", px(hi52v) if hi52v is not None else None),
+        ("52-week low (close)", px(lo52v) if lo52v is not None else None)])]
     out += ["<b>Trend and risk</b>", kv([
         ("vs 50-day average", frac("sma50_ratio", shift=-1.0)),
         ("vs 200-day average", frac("sma200_ratio", shift=-1.0)),
@@ -711,12 +716,13 @@ def stock_card(q, row):
         place = f"rank <b>{rank}</b> of {total}" if eligible and rank else "not eligible"
         conf = screener_confidence(coverage, (v, qu, g, mo, r),
                                    rank_history(q, [symbol]).get(symbol, []), total)
-        out += [f"<b>Screener</b>  {place}  <i>{sts:%d %b} — composite 0-100; value/quality/growth/momentum/risk are percentile ranks within {universe}; confidence = how complete and consistent the inputs are</i>", kv([
+        out += [f"<b>Screener</b>  {place}  <i>run of {sts:%d %b}</i>", kv([
             ("Composite score", num(comp, 1)),
             ("Value", num(v)), ("Quality", num(qu)),
             ("Growth", num(g)), ("Momentum", num(mo)),
             ("Risk (higher = steadier)", num(r)),
-            ("Confidence", f"{conf} {conf_label(conf)}")])]
+            ("Confidence", f"{conf} {conf_label(conf)}")]),
+            SCREENER_NOTE, CONF_NOTE]
 
     snap = {metric: (value, fts) for metric, value, fts in q(
         "SELECT DISTINCT ON (metric) metric, value, ts FROM stock_fundamentals "
@@ -733,13 +739,16 @@ def stock_card(q, row):
             "ORDER BY ts DESC LIMIT 1", (symbol, snap_ts, snap_ts - timedelta(days=10)))
         f, repriced = reprice({k: v for k, (v, _) in snap.items()}, close,
                               then[0][0] if then else None)
-        when = f"at the {ts:%d %b} close" if repriced else f"as reported {snap_ts:%d %b}"
+        when = (f"at the {ts:%d %b} close — P/E, P/B and market cap scaled from "
+                f"the {snap_ts:%d %b} snapshot by the price move (earnings, book "
+                f"value and shares assumed unchanged)" if repriced else
+                f"as reported {snap_ts:%d %b} — from the weekly fundamentals snapshot")
         fcf = annual.get("fcf", (None,))[0]
         debt = annual.get("total_debt", (None,))[0]
         equity = annual.get("shareholder_equity", (None,))[0]
-        out += [f"<b>Valuation</b>  <i>{when} — P/E, P/B, etc. from reported fundamentals snapshot</i>", kv([
-            ("P/E (as reported)", None if f.get("pe") is None else num(f["pe"], 1)),
-            ("P/B (as reported)", None if f.get("pb") is None else num(f["pb"], 1)),
+        out += [f"<b>Valuation</b>  <i>{when}</i>", kv([
+            ("P/E", None if f.get("pe") is None else num(f["pe"], 1)),
+            ("P/B", None if f.get("pb") is None else num(f["pb"], 1)),
             ("Market cap", None if f.get("market_cap") is None else big(f["market_cap"])),
             ("FCF yield", share(fcf / f["market_cap"], 1)
              if fcf is not None and f.get("market_cap") else None),
@@ -930,6 +939,11 @@ def watch_text(q, chat_id=None):
 CONF_HIGH, CONF_MEDIUM = 70, 45
 CONF_NOTE = ("<i>Conf = how complete and consistent the evidence is (0-100), "
              "not the chance the price rises.</i>")
+# One explanation of the derived scores, shared by every surface that shows
+# them (/top tables, stock cards) so the wording cannot drift.
+SCREENER_NOTE = ("<i>Scores are percentile ranks within the universe "
+                 "(1.00 = best); composite is 0-100. Screening output, "
+                 "not advice — /track shows how picks have done.</i>")
 
 
 def conf_label(score):
@@ -1009,20 +1023,17 @@ def top_text(q, factor, universe, n=10):
         return str(screener_confidence(r[5], r[6:11], history.get(r[0], []), size))
 
     if factor == "composite":
-        tbl = table(("#", "", "Composite", "YTD chg", "Conf"),
+        tbl = table(("#", "", "Composite", "YTD", "Conf"),
                     [(r[4], clip(bare(r[0]), 11), num(r[3], 1), year(r[0]), conf(r))
                      for r in rows], "rlrrr")
     else:
-        tbl = table(("", factor.capitalize(), "Rank", "YTD chg", "Conf"),
+        tbl = table(("", factor.capitalize(), "Rank", "YTD", "Conf"),
                     [(clip(bare(r[0]), 11), num(r[2]), r[4], year(r[0]), conf(r))
                      for r in rows], "lrrrr")
     names = "\n".join(f"{esc(bare(r[0]))} — {esc(r[1])}" for r in rows[:5])
     return "\n".join([
         f"<b>Top {len(rows)} by {factor} — {universe}</b>  <i>run of {runs[0]:%d %b}</i>",
-        tbl, names,
-        "<i>Scores are percentile ranks within the universe (1.00 = best); composite "
-        "is 0-100. Screening output, not advice — /track shows how picks have done.</i>",
-        CONF_NOTE])
+        tbl, names, SCREENER_NOTE, CONF_NOTE])
 
 
 def parse_top(text):
@@ -1357,10 +1368,11 @@ def track_text(q):
                 labels[n], pct(h["picks"], 2), pct(h["univ"], 2),
                 pct(h["picks"] - h["univ"], 2), f"{h['beat']}/{h['runs']}"))
         out += [f"<b>{universe}</b>",
-                table(("After", "Pick ret", "Univ ret", "Edge", "Won"), body, "lrrrr")]
-    out.append("<i>Won = runs where the picks beat the universe; – = that horizon has not "
-               "completed yet. Daily runs overlap, so longer horizons are not independent; "
-               "under ~60 runs this is anecdote.</i>")
+                table(("After", "Picks", "Univ", "Edge", "Won"), body, "lrrrr")]
+    out.append("<i>Picks/Univ = average return of the picks / of the whole universe over "
+               "that horizon; Edge = Picks − Univ; Won = runs where the picks beat the "
+               "universe; – = that horizon has not completed yet. Daily runs overlap, so "
+               "longer horizons are not independent; under ~60 runs this is anecdote.</i>")
     return "\n".join(out)
 
 

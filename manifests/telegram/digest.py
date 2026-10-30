@@ -166,6 +166,24 @@ def earnings_week(cur, chat_id=None):
         return []
 
 
+def facts_block(fx_rows, gauge, flow_rows):
+    """FX / sentiment / flows <pre> block + its legend; pure, so tests can
+    hold every line to the phone width. Keep kv() keys short: the longest key
+    pads every line of the block, and past ~38 chars phones wrap the table."""
+    facts = [(label, f"{rate:,.4f}") for label, _ts, rate in fx_rows]
+    if gauge is not None:
+        facts.append(("Sentiment, 7-day", f"{gauge:+.3f}"))
+    facts += [(f"{flow} net, latest day (Rs cr)", f"{amount:+,.0f}")
+              for flow, amount in flow_rows]
+    if not facts:
+        return []
+    out = [stocks.kv(facts)]
+    if gauge is not None:
+        out.append("<i>Sentiment = 7-day average of FinBERT-scored headlines, "
+                   "−1 most negative to +1 most positive.</i>")
+    return out
+
+
 def build_message(chat_id=None):
     """The digest for one user (their own watchlist); chat_id None = the owner."""
     chat_id = str(chat_id or os.environ.get("TELEGRAM_CHAT_ID", ""))
@@ -190,13 +208,7 @@ def build_message(chat_id=None):
             lines.append("<b>Summary</b> <i>(AI-written; every number checked against the data)</i>\n"
                          + html.escape(note))
 
-        facts = [(label, f"{rate:,.4f}") for label, _ts, rate in fx(cur)]
-        gauge = sentiment(cur)
-        if gauge is not None:
-            facts.append(("Sentiment (7-day avg of scored headlines)", f"{gauge:+.3f}"))
-        facts += [(f"{flow} net, latest day (Rs cr)", f"{amount:+,.0f}") for flow, amount in flows(cur)]
-        if facts:
-            lines.append(stocks.kv(facts))
+        lines += facts_block(fx(cur), sentiment(cur), flows(cur))
 
         stale = stale_feeds(cur)
         lines.append(

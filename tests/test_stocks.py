@@ -242,8 +242,7 @@ class WorldFxTest(unittest.TestCase):
     def test_quote_table_keeps_the_requested_order_and_skips_missing(self):
         lines = pre_lines(stocks.quote_table(self.db(), ["^GSPC", "^MISSING", "^NSEI"]))
         self.assertEqual([line.split()[0] for line in lines[1:]], ["S&P", "Nifty"])
-        self.assertEqual(lines[0].split()[:2], ["Close", "Day"])
-        self.assertIn("chg", lines[0])
+        self.assertEqual(lines[0].split(), ["Close", "Day", "YTD"])
 
     def test_fx_orders_inr_first_and_explains_missing_ytd(self):
         db = FakeDB([("FROM fx_rates", [
@@ -515,7 +514,7 @@ class StockCardTest(unittest.TestCase):
             ("ORDER BY ts DESC LIMIT 60", prices),
             ("ts <= %s::timestamptz", [(snapshot_close,)] if snapshot_close else []),
             ("ts < %s::timestamptz", [(3300.0,)]),                     # last close of 2025
-            ("max(high), min(low)", [(2400.0, 1900.0)]),               # 52-week high/low
+            ("max(close), min(close)", [(2400.0, 1900.0)]),            # 52-week close range
             ("FROM stock_metrics_daily", [("ret_1m", -0.016), ("ret_6m", -0.151),
                                           ("ret_12m", -0.275), ("sma50_ratio", 0.973),
                                           ("sma200_ratio", 0.883), ("pos_52w", 0.13),
@@ -564,17 +563,21 @@ class StockCardTest(unittest.TestCase):
     def test_valuation_is_carried_to_the_latest_close(self):
         text = stocks.stock_card(self.db(snapshot_close=2000.0), self.ROW)
         v = pairs(text)
-        self.assertIn("<i>at the 09 Oct close — P/E, P/B, etc. from reported fundamentals snapshot</i>", text)
-        self.assertEqual(v["P/E (as reported)"], "22.0")                         # 20 × 2200/2000
-        self.assertEqual(v["P/B (as reported)"], "4.4")
+        # a repriced value must never sit under an "as reported" label
+        self.assertNotIn("as reported", text)
+        self.assertIn("<i>at the 09 Oct close — P/E, P/B and market cap scaled from "
+                      "the 04 Oct snapshot by the price move (earnings, book value "
+                      "and shares assumed unchanged)</i>", text)
+        self.assertEqual(v["P/E"], "22.0")                         # 20 × 2200/2000
+        self.assertEqual(v["P/B"], "4.4")
         self.assertEqual(v["Market cap"], "1.10T")
         self.assertEqual(v["FCF yield"], "5.0%")                   # 55B / 1.1T
         self.assertEqual(v["EV/EBITDA (04 Oct)"], "10.0")          # not repriced, dated
 
     def test_valuation_falls_back_to_the_snapshot_and_says_so(self):
         text = stocks.stock_card(self.db(snapshot_close=None), self.ROW)
-        self.assertIn("<i>as reported 04 Oct — P/E, P/B, etc. from reported fundamentals snapshot</i>", text)
-        self.assertEqual(pairs(text)["P/E (as reported)"], "20.0")
+        self.assertIn("<i>as reported 04 Oct — from the weekly fundamentals snapshot</i>", text)
+        self.assertEqual(pairs(text)["P/E"], "20.0")
 
     def test_card_fits_a_phone(self):
         for line in pre_lines(stocks.stock_card(self.db(), self.ROW)):
@@ -674,7 +677,7 @@ class TopTest(unittest.TestCase):
         text = stocks.top_text(db, "growth", "NIFTY500")
         self.assertIn("ORDER BY s.growth_score DESC", db.calls[1][0])
         lines = pre_lines(text)
-        self.assertEqual(lines[0].split(), ["Growth", "Rank", "YTD", "chg", "Conf"])
+        self.assertEqual(lines[0].split(), ["Growth", "Rank", "YTD", "Conf"])
         self.assertEqual(lines[1].split(), ["A", "0.99", "12", "+40%", "99"])
         self.assertEqual(lines[2].split(), ["B", "0.95", "1", "47"])   # no YTD, thin evidence
         self.assertIn("not the chance the price rises", text)
@@ -686,7 +689,7 @@ class TopTest(unittest.TestCase):
 
     def test_composite_table_shows_rank_first(self):
         lines = pre_lines(stocks.top_text(self.db(), "composite", "NIFTY500"))
-        self.assertEqual(lines[0].split(), ["#", "Composite", "YTD", "chg", "Conf"])
+        self.assertEqual(lines[0].split(), ["#", "Composite", "YTD", "Conf"])
         self.assertEqual(lines[1].split(), ["12", "A", "61.0", "+40%", "99"])
 
     def test_factor_column_comes_from_the_whitelist(self):
@@ -887,10 +890,20 @@ class TrackTest(unittest.TestCase):
                      ("WITH px", [(1, day(5), 0.0073, 0.0066, 20, 12)])])
         text = stocks.track_text(db)
         lines = pre_lines(text)
-        self.assertEqual(lines[0].split(), ["After", "Pick", "ret", "Univ", "ret", "Edge", "Won"])
+        self.assertEqual(lines[0].split(), ["After", "Picks", "Univ", "Edge", "Won"])
         self.assertEqual(lines[1].split(), ["1", "day", "+0.73%", "+0.66%", "+0.07%", "1/1"])
         self.assertEqual(lines[2].split(), ["1", "week", "–", "–", "–", "–"])
         self.assertIn("anecdote", text)
+        self.assertIn("Edge = Picks − Univ", text)
+        for line in lines:
+            self.assertLessEqual(len(line), PHONE_WIDTH, line)
+
+    def test_table_fits_a_phone_at_triple_digit_run_counts(self):
+        # daily runs pass 100 within months; 'Won' = '100/120' must still fit
+        rows = [(1, day(i % 9 + 1), 0.0073, 0.0066, 20, 12) for i in range(120)]
+        db = FakeDB([("GROUP BY ts", [(day(5),)]), ("WITH px", rows)])
+        lines = pre_lines(stocks.track_text(db))
+        self.assertIn("120/120", lines[1])
         for line in lines:
             self.assertLessEqual(len(line), PHONE_WIDTH, line)
 
