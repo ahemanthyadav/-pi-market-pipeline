@@ -18,7 +18,7 @@ get dropped (F26), so nothing is held across the sleep between polls. One
 retry per query.
 
 Commands: /help /status /vix /nifty /sensex /gold /fii /scores /digest
-  /stock /news /watch /top /movers /track /macro /world /index /fx /multibagger (stock/watchlist/screener
+  /stock /news /watch /top /movers /track /macro /world /index /fx /multibagger /sp500 (stock/watchlist/screener
   views live in stocks.py, 2026-10-10). /start also maps to help. /digest
   re-runs digest.build_message() — the scripts share this image; the
   Deployment selects this entrypoint via args.
@@ -137,6 +137,7 @@ def _help_text() -> str:
         "/watch — YOUR watchlist + holdings P&amp;L (add/rm); private to this chat\n"
         "/world — every index: close, day, 1m, YTD (/world asia)\n"
         "/index nikkei — one index in depth: 1w–1y, 52w range, trend, RSI\n"
+        "/sp500 — S&P 500: close, trend, median P/E/P/B, market cap\n"
         "/fx — USD/INR and the other pairs\n"
         "/macro — gold in INR, yield spreads, FII vs Nifty\n"
         "/digest — your daily digest on demand\n"
@@ -176,6 +177,12 @@ def cmd_gold(_text: str) -> str:
 
 def cmd_index(text: str) -> str:
     return stocks.index_text(query, text.partition(" ")[2].strip())
+
+
+def cmd_sp500(_text: str) -> str:
+    """SP500 in depth: close, performance, trend, plus constituent-level
+    quant values (median P/E, P/B, total market cap)."""
+    return stocks.index_card(query, "^GSPC", "S&P 500")
 
 
 def cmd_fii(_text: str) -> str:
@@ -376,6 +383,7 @@ COMMANDS = {
     "macro": cmd_macro,
     "world": cmd_world,
     "index": cmd_index,
+    "sp500": cmd_sp500,
     "fx": cmd_fx,
     "usdinr": cmd_fx,
     "watch": cmd_watch,
@@ -482,6 +490,7 @@ MENU = [
     ("ask", "Question answered from stored facts only — /ask TCS outlook"),
     ("world", "All world indices: day, 1m, YTD — /world asia"),
     ("index", "One index in depth — /index nikkei"),
+    ("sp500", "S&P 500 in depth — close, trend, median P/E/P/B, cap"),
     ("fx", "USD/INR and other currency pairs"),
     ("macro", "Gold in INR, yield spreads, FII vs Nifty"),
     ("scores", "Screener top-5"),

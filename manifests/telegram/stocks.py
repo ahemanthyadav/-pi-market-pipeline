@@ -79,6 +79,15 @@ SHORT = {
 }
 DIGEST_QUOTES = ["^NSEI", "^BSESN", "^GSPC", "^VIX", "^INDIAVIX", "DX-Y.NYB", "GC=F"]
 
+# Index ticker → universe, so an index card can show constituent-level
+# valuation (median P/E, P/B, total market cap) computed from stock_fundamentals.
+# Non-stock indices (VIX, gold, dollar, …) have no mapping → no quant block.
+INDEX_UNIVERSE = {
+    "^GSPC": "SP500", "^SP400": "SP400", "^SP600": "SP600",
+    "^NSEI": "NIFTY500", "^BSESN": "NIFTY500",
+    "NIFTY_MICROCAP250.NS": "NIFTYMICROCAP250",
+}
+
 
 # ---------------------------------------------------------------- formatting
 
@@ -451,6 +460,48 @@ def long_term_block(rows, ticker):
     return out
 
 
+def index_quant(q, universe):
+    """Median P/E, median P/B and total market cap for an index's constituents.
+
+    Computed from stock_fundamentals (latest per symbol), so an index card can
+    show "quant values" like a stock's /card does. Returns
+    (median_pe, median_pb, total_cap, n_pe, n_pb) or None when no data.
+    """
+    members = q(
+        "SELECT symbol FROM universe_constituents "
+        "WHERE universe = %s AND active", (universe,))
+    symbols = [r[0] for r in members]
+    if not symbols:
+        return None
+    # latest P/E and P/B per symbol (source-agnostic: newest filing wins)
+    rows = q(
+        "SELECT DISTINCT ON (symbol) symbol, metric, value FROM stock_fundamentals "
+        "WHERE symbol = ANY(%s) AND metric = ANY(%s) "
+        "ORDER BY symbol, metric, ts DESC",
+        (symbols, ["pe", "pb"]))
+    pes, pbs = {}, {}
+    for symbol, metric, value in rows:
+        if metric == "pe" and value is not None:
+            pes[symbol] = value
+        elif metric == "pb" and value is not None:
+            pbs[symbol] = value
+    # total market cap from latest snapshot per symbol
+    cap_rows = q(
+        "SELECT DISTINCT ON (symbol) symbol, value FROM stock_fundamentals "
+        "WHERE symbol = ANY(%s) AND metric = 'market_cap' "
+        "ORDER BY symbol, ts DESC", (symbols,))
+    caps = {s: v for s, v in cap_rows if v is not None}
+    if not pes and not pbs and not caps:
+        return None
+    def med(d):
+        vals = sorted(d.values())
+        if not vals:
+            return None
+        m = len(vals) // 2
+        return (vals[m] if len(vals) % 2 else (vals[m - 1] + vals[m]) / 2)
+    return (med(pes), med(pbs), sum(caps.values()) if caps else None, len(pes), len(pbs))
+
+
 def index_card(q, ticker, label, now=None):
     """Full picture of one index: recent performance and trend from the last
     year, then the long-term reference from everything on file."""
@@ -485,7 +536,19 @@ def index_card(q, ticker, label, now=None):
             ("vs 50-day average", since(sma(closes, 50))),
             ("vs 200-day average", since(sma(closes, 200))),
             ("RSI (14)", None if strength is None else f"{strength:.0f}")]),
-    ] + long_term_block(rows, ticker)
+    ]
+    # Index-level quant values from constituents (median P/E, P/B, total cap).
+    universe = INDEX_UNIVERSE.get(ticker)
+    if universe:
+        q_ = index_quant(q, universe)
+        if q_:
+            med_pe, med_pb, total_cap, n_pe, n_pb = q_
+            parts.append(kv([
+                ("P/E (median)", num(med_pe, 1) if med_pe is not None else "–"),
+                ("P/B (median)", num(med_pb, 1) if med_pb is not None else "–"),
+                ("Market cap", big(total_cap) if total_cap else "–"),
+                (f"Constituents", f"{n_pe} w/ P/E · {n_pb} w/ P/B")]))
+    parts += long_term_block(rows, ticker)
     return "\n".join(p for p in parts if p)
 
 

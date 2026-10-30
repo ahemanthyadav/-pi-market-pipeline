@@ -309,7 +309,8 @@ class IndexCardTest(unittest.TestCase):
                       stocks.index_text(FakeDB([("FROM ticker_names", [])]), "zz"))
         self.assertEqual(stocks.find_index(FakeDB([]), "x'; DROP"), [])
         exact = FakeDB([("FROM ticker_names", [("^NSEI", "Nifty 50"), ("^NSEBANK", "Nifty Bank")]),
-                        ("FROM index_prices WHERE ticker", self.series(10))])
+                        ("FROM index_prices WHERE ticker", self.series(10)),
+                        ("universe_constituents", [])])
         self.assertIn("<b>Nifty 50</b>", stocks.index_text(exact, "^nsei"))
 
 
@@ -390,10 +391,100 @@ class LongTermTest(unittest.TestCase):
 
     def test_card_includes_the_block(self):
         rows = [(self.END - timedelta(days=3650 - i), 100.0 * 1.1 ** (i / 365)) for i in range(3651)]
-        text = stocks.index_card(FakeDB([("FROM index_prices", rows)]), "^NSEI", "Nifty 50")
+        text = stocks.index_card(FakeDB([("FROM index_prices", rows),
+                                         ("universe_constituents", [])]), "^NSEI", "Nifty 50")
         self.assertIn("<b>Long-term reference</b>", text)
         self.assertIn("interval '40 years'", "interval '40 years'")
         self.assertIn("<b>Reading: normal</b>", text)
+
+
+class IndexQuantTest(unittest.TestCase):
+    def quant_db(self, pe=None, pb=None, cap=None):
+        """Build a FakeDB answering the universe_constituents query and both
+        stock_fundamentals queries (pe/pb query passes 2 args, cap query 1)."""
+        members = [("AAPL",), ("MSFT",), ("GOOG",)]
+        fund_all = []
+        for i, sym in enumerate(("AAPL", "MSFT", "GOOG")):
+            if pe is not None and i < len(pe):
+                fund_all.append((sym, "pe", pe[i]))
+            if pb is not None and i < len(pb):
+                fund_all.append((sym, "pb", pb[i]))
+            if cap is not None and i < len(cap):
+                fund_all.append((sym, "market_cap", cap[i]))
+
+        def fund(args):
+            # pe/pb query: (symbols, ["pe", "pb"]) → 2 args → 3-tuples
+            # cap query:   (symbols,)            → 1 arg  → 2-tuples (symbol, value)
+            if len(args) > 1:
+                return [r for r in fund_all if r[1] in ("pe", "pb")]
+            return [(r[0], r[2]) for r in fund_all if r[1] == "market_cap"]
+
+        return FakeDB([("universe_constituents", lambda _: members),
+                       ("stock_fundamentals", fund)])
+
+    def test_median_pe_and_pb_and_total_cap(self):
+        db = self.quant_db(pe=[20.0, 30.0, 40.0], pb=[5.0, 10.0, 15.0],
+                           cap=[1e12, 2e12, 3e12])
+        pe, pb, cap, n_pe, n_pb = stocks.index_quant(db, "SP500")
+        self.assertEqual(pe, 30.0)              # median of [20, 30, 40]
+        self.assertEqual(pb, 10.0)              # median of [5, 10, 15]
+        self.assertEqual(cap, 6e12)
+        self.assertEqual(n_pe, 3)
+        self.assertEqual(n_pb, 3)
+
+    def test_even_count_median_averages_middle_two(self):
+        db = self.quant_db(pe=[10.0, 20.0])
+        pe, _, _, _, _ = stocks.index_quant(db, "NIFTY500")
+        self.assertEqual(pe, 15.0)              # (10 + 20) / 2
+
+    def test_missing_metrics_return_none(self):
+        db = self.quant_db(pe=[20.0])
+        pe, pb, cap, n_pe, n_pb = stocks.index_quant(db, "SP400")
+        self.assertEqual(pe, 20.0)
+        self.assertIsNone(pb)
+        self.assertIsNone(cap)
+        self.assertEqual(n_pe, 1)
+        self.assertEqual(n_pb, 0)
+
+    def test_no_members_returns_none(self):
+        db = FakeDB([("universe_constituents", [])])
+        self.assertIsNone(stocks.index_quant(db, "SP600"))
+
+    def test_no_fundamentals_returns_none(self):
+        db = FakeDB([("universe_constituents", [("AAPL",), ("MSFT",)]),
+                     ("stock_fundamentals", [])])
+        self.assertIsNone(stocks.index_quant(db, "SP500"))
+
+    def test_index_card_shows_quant_block_for_sp500(self):
+        db = FakeDB([
+            ("FROM index_prices", lambda _: [(day(9), 6000.0)]),
+            ("universe_constituents", lambda _: [("AAPL",), ("MSFT",)]),
+        ])
+        # stock_fundamentals: pe/pb query gets 2 args, cap query gets 1
+        fund_all = [("AAPL", "pe", 25.0), ("AAPL", "pb", 6.0), ("AAPL", "market_cap", 3e12),
+                    ("MSFT", "pe", 35.0), ("MSFT", "pb", 12.0), ("MSFT", "market_cap", 2.5e12)]
+
+        def fund(args):
+            if len(args) > 1:
+                return [r for r in fund_all if r[1] in ("pe", "pb")]
+            return [(r[0], r[2]) for r in fund_all if r[1] == "market_cap"]
+
+        db.answers.append(("stock_fundamentals", fund))
+        text = stocks.index_card(db, "^GSPC", "S&P 500")
+        self.assertIn("P/E (median)", text)
+        self.assertIn("P/B (median)", text)
+        self.assertIn("Market cap", text)
+        self.assertIn("30.0", text)              # median of [25, 35]
+        self.assertIn("5.50T", text)             # 5.5e12 → "5.50T"
+
+    def test_index_card_skips_quant_for_unmapped_ticker(self):
+        db = FakeDB([("FROM index_prices", lambda _: [(day(9), 7000.0)]),
+                     ("universe_constituents", [])])
+        text = stocks.index_card(db, "^VIX", "India VIX")
+        self.assertNotIn("P/E (median)", text)
+        self.assertNotIn("Market cap", text)
+
+
 
 
 class YtdTest(unittest.TestCase):
