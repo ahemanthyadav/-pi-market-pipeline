@@ -193,8 +193,8 @@ def build_message(chat_id=None):
         facts = [(label, f"{rate:,.4f}") for label, _ts, rate in fx(cur)]
         gauge = sentiment(cur)
         if gauge is not None:
-            facts.append(("Sentiment, 7-day avg", f"{gauge:+.3f}"))
-        facts += [(f"{flow} net, Rs cr", f"{amount:+,.0f}") for flow, amount in flows(cur)]
+            facts.append(("Sentiment (7-day avg of scored headlines)", f"{gauge:+.3f}"))
+        facts += [(f"{flow} net, latest day (Rs cr)", f"{amount:+,.0f}") for flow, amount in flows(cur)]
         if facts:
             lines.append(stocks.kv(facts))
 

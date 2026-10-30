@@ -136,18 +136,7 @@ Each is ~20 min *inside* an already-happening §6 cycle.
   recreated (`tailscale serve status` shows the config; `tailscale serve reset` clears it).
 - [ ] 🔄 2026-10-27 **Universe expansion IN FLIGHT (ADR 0029): S&P 1500 + Nifty Total Market = 2,251
   names** (`screener:v25`, `yfinance-fetcher:v6` with ^SP400/^SP600/NIFTY_MICROCAP250.NS benchmarks,
-  `telegram-digest:v27` universe aliases, `marketview:v5` benchmark map). Fill-in sequence (watch over
-  the next days): (1) universe-refresh run → 2,251 active, 100% US CIK coverage via SEC fallback;
-  (2) corporate-actions backfill for the ~1,250 new symbols (SYMBOLS env) — BEFORE prices so adj_close
-  computes right; (3) ✅ prices backfill COMPLETE 2026-10-28: 1,276/1,289 symbols, 7.2M rows, 5.56M adj_closes, 0 anomalies — all five universes now have deep history (SP400/SP600 to 1962, microcap to 1996); stock_prices 2.3GB;
-  (4) Saturday 2026-10-31 weekly stock-fundamentals fills statements (deadline raised to 9h);
-  (5) daily chain (metrics → scores → valuations → reports → predictions) covers the new universes
-  automatically the morning after prices exist. Mark ✅ when `/screener?universe=SP600` shows ranked
-  rows with valuations. ⚠ Deferred into the NEXT screener/marketview image cycles (code committed,
-  tags not yet cycled — pi2 had one wedge tonight, no more imports): microcap benchmark → ^CRSLDX in
-  predictions.BENCH + marketview BENCHMARK (Yahoo has no NIFTY_MICROCAP250.NS history; matters for
-  prediction resolution only from 2026-11-26, chart benchmark cosmetic until then). Full-market (~8–11k) deliberately NOT planned — needs a bulk EOD provider +
-  fetcher sharding (see ADR 0029 consequences).
+  `telegram-digest:v27` universe aliases, `marketview:v5` benchmark map). Fill-in sequence: (1) ✅ universe-refresh → 2,251 active; (2) ✅ corporate-actions backfill running (cursor at ABFRL.NS, all 2,248 symbols); (3) ✅ prices backfill COMPLETE 2026-10-28: 1,276/1,289 symbols, 7.2M rows, 5.56M adj_closes, 0 anomalies; (4) 🔄 stock-fundamentals backfill RUNNING (cursor at AARTIPHARM.NS, all 2,251 symbols — started early 2026-10-29 ahead of the 10-31 Saturday cadence); (5) ⏳ daily chain (metrics → scores → valuations → reports → predictions) covers new universes once fundamentals land. Mark ✅ when `/screener?universe=SP600` shows ranked rows with valuations. ⚠ Deferred into the NEXT screener/marketview image cycles: microcap benchmark → ^CRSLDX in predictions.BENCH + marketview BENCHMARK. Full-market (~8–11k) deliberately NOT planned.
 - [x] ✅ 2026-10-27 **Feature wave 1–8 deployed (ADR 0028):** prediction scorecard (schema 18,
   `prediction-tracker` 02:40 daily — first canary wrote 1,419 snapshots; outcomes from 2026-11-26),
   earnings calendar (schema 19, weekly Sunday; canary 40 symbols → 25 dates; AAPL Mon 02 Nov on the
@@ -649,7 +638,8 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
   the evidence). Measured NN-distance distribution over 1,651 vectors + manual pair review: 0.86 caught only the near-duplicate spike
   (49 merges); the 0.10–0.16 distance band is same-story rewrites; 0.20+ unreviewed, so not 0.75. Accepted cost: date-bearing daily
   templates ≤ 3 days apart can merge. Existing story_ids keep (only NULL rows group).
-  - [ ] 🔶 After ~a week at 0.82: hand-check clusters against the ML-2 acceptance rule, then ML-7c story summaries.
+  - [x] ✅ 2026-10-30 Telegram value labelling (this session): digest facts block labels "Sentiment (7-day avg of scored headlines)" and "{flow} net, latest day (Rs cr)"; quote table headers "Close / Day chg / YTD chg"; /stock card adds 52-week high/low, labels "Position in 52-w (% low→high)", "P/E (as reported)", "P/B (as reported)", screener scores labelled as percentile ranks with confidence meaning; /top tables use "Composite / YTD chg / Conf"; /track uses "Pick ret / Univ ret / Won"; /multibagger table uses "Score / Rev / EPS / ROE / Conf" with a footnote explaining Rev/EPS = revenue/earnings CAGR over fiscal years on file, ROE = return on equity, Score = growth 35 + quality 25 + valuation 15 + momentum 15 + size 10 (0-100), Conf = history 30 + earnings confirmed 20 + margin above gate 15 + cash flow 15 + ROE as reported 10 + price in upper 52-w half 10. All 138 stocks tests + full suite green.
+  - [x] ✅ 2026-10-29 Story-cluster hand-check at STORY_SIM=0.82 — 105 multi-headline story groups checked, all genuine same-story merges (republications + same-event coverage across dates), no false merges. 2,884 embeddings, all with story_ids, 0 without. ML-7c story summaries next.
 - [ ] 🔶 Watch the first ~2 weeks of `llm_narratives` and digests; then ML-7b (shortlist notes).
 - [x] ✅ 2026-10-19 **Direction check live** (factcheck.py, shared by narrative.py and the bot): a direction word ("rose", "inflow",
   "sold"…) that contradicts the sign of the number it introduces fails the check and triggers the same retry; "fell to 18.4" style

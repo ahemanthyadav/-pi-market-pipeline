@@ -278,7 +278,7 @@ def quote_row(name, row):
             pct(change(value, prev)), pct(change(value, year_start)))
 
 
-QUOTE_HEAD = ("", "Close", "Day", "YTD")
+QUOTE_HEAD = ("", "Close", "Day chg", "YTD chg")
 
 
 def quote_table(q, tickers):
@@ -667,6 +667,11 @@ def stock_card(q, row):
         "ORDER BY ts DESC LIMIT 1", (symbol, start, start - timedelta(days=20)))
     ytd = change(close, year_start[0][0]) if year_start else None
 
+    hi52 = q(
+        "SELECT max(high), min(low) FROM stock_prices WHERE symbol = %s "
+        "AND ts >= now() - interval '52 weeks'", (symbol,))
+    hi52v, lo52v = (hi52[0] if hi52 else (None, None))
+
     m = dict(q(
         "SELECT metric, value FROM stock_metrics_daily WHERE symbol = %s AND ts = ("
         "SELECT max(ts) FROM stock_metrics_daily WHERE symbol = %s "
@@ -681,11 +686,13 @@ def stock_card(q, row):
     out += ["<b>Performance</b>", kv([
         ("1 month", frac("ret_1m")), ("6 months", frac("ret_6m")),
         ("Year to date", None if ytd is None else pct(ytd)),
-        ("12 months", frac("ret_12m"))])]
+        ("12 months", frac("ret_12m")),
+        ("52-week high", px(hi52v) if hi52v is not None else None),
+        ("52-week low", px(lo52v) if lo52v is not None else None)])]
     out += ["<b>Trend and risk</b>", kv([
         ("vs 50-day average", frac("sma50_ratio", shift=-1.0)),
         ("vs 200-day average", frac("sma200_ratio", shift=-1.0)),
-        ("Position in 52-week range", frac("pos_52w", share)),
+        ("Position in 52-w (% low→high)", frac("pos_52w", share)),
         ("RSI (14)", None if strength is None else f"{strength:.0f}"),
         ("Volatility, annualised", frac("vol_180d", share)),
         ("Max drawdown, 1 year", frac("max_dd_252d", lambda v: pct(v, 0))),
@@ -704,9 +711,11 @@ def stock_card(q, row):
         place = f"rank <b>{rank}</b> of {total}" if eligible and rank else "not eligible"
         conf = screener_confidence(coverage, (v, qu, g, mo, r),
                                    rank_history(q, [symbol]).get(symbol, []), total)
-        out += [f"<b>Screener</b>  {place}  <i>{sts:%d %b}</i>", kv([
-            ("Composite (0-100)", num(comp, 1)), ("Value", num(v)), ("Quality", num(qu)),
-            ("Growth", num(g)), ("Momentum", num(mo)), ("Risk (higher = steadier)", num(r)),
+        out += [f"<b>Screener</b>  {place}  <i>{sts:%d %b} — composite 0-100; value/quality/growth/momentum/risk are percentile ranks within {universe}; confidence = how complete and consistent the inputs are</i>", kv([
+            ("Composite score", num(comp, 1)),
+            ("Value", num(v)), ("Quality", num(qu)),
+            ("Growth", num(g)), ("Momentum", num(mo)),
+            ("Risk (higher = steadier)", num(r)),
             ("Confidence", f"{conf} {conf_label(conf)}")])]
 
     snap = {metric: (value, fts) for metric, value, fts in q(
@@ -728,9 +737,9 @@ def stock_card(q, row):
         fcf = annual.get("fcf", (None,))[0]
         debt = annual.get("total_debt", (None,))[0]
         equity = annual.get("shareholder_equity", (None,))[0]
-        out += [f"<b>Valuation</b>  <i>{when}</i>", kv([
-            ("P/E", None if f.get("pe") is None else num(f["pe"], 1)),
-            ("P/B", None if f.get("pb") is None else num(f["pb"], 1)),
+        out += [f"<b>Valuation</b>  <i>{when} — P/E, P/B, etc. from reported fundamentals snapshot</i>", kv([
+            ("P/E (as reported)", None if f.get("pe") is None else num(f["pe"], 1)),
+            ("P/B (as reported)", None if f.get("pb") is None else num(f["pb"], 1)),
             ("Market cap", None if f.get("market_cap") is None else big(f["market_cap"])),
             ("FCF yield", share(fcf / f["market_cap"], 1)
              if fcf is not None and f.get("market_cap") else None),
@@ -1000,11 +1009,11 @@ def top_text(q, factor, universe, n=10):
         return str(screener_confidence(r[5], r[6:11], history.get(r[0], []), size))
 
     if factor == "composite":
-        tbl = table(("#", "", "Score", "YTD", "Conf"),
+        tbl = table(("#", "", "Composite", "YTD chg", "Conf"),
                     [(r[4], clip(bare(r[0]), 11), num(r[3], 1), year(r[0]), conf(r))
                      for r in rows], "rlrrr")
     else:
-        tbl = table(("", factor.capitalize(), "Rank", "YTD", "Conf"),
+        tbl = table(("", factor.capitalize(), "Rank", "YTD chg", "Conf"),
                     [(clip(bare(r[0]), 11), num(r[2]), r[4], year(r[0]), conf(r))
                      for r in rows], "lrrrr")
     names = "\n".join(f"{esc(bare(r[0]))} — {esc(r[1])}" for r in rows[:5])
@@ -1256,13 +1265,18 @@ def multibagger_text(q, universe, n=10):
     return "\n".join([
         head,
         f"{len(ranked)} of {len(names)} companies pass every gate",
-        table(("", "Score", "Rev", "EPS", "ROE", "Conf"), body, "lrrrrr"),
+        table(("", "Score", "Rev", "EPS", "ROE", "Conf"),
+              body, "lrrrrr"),
         detail,
         f"<i>Gates: revenue and earnings each compounding {share(MB_MIN_GROWTH)}+ a year "
         f"over the fiscal years on file (2-3), ROE {share(MB_MIN_ROE)}+, debt/equity under "
         f"{MB_MAX_DEBT_EQUITY:.0f} (financials exempt), outside the largest "
         f"{share(1 - MB_SIZE_CUT)} by market cap, PEG under {MB_MAX_PEG:.0f}, price above "
         f"its 200-day average. Dropped: {funnel}.</i>",
+        f"<i>Rev/EPS = revenue/earnings CAGR over fiscal years on file; ROE = return on equity. "
+        f"Score = growth 35 + quality 25 + valuation 15 + momentum 15 + size 10 (0-100). "
+        f"Conf = history 30 + earnings confirmed 20 + margin above gate 15 + cash flow 15 + "
+        f"ROE as reported 10 + price in upper 52-w half 10.</i>",
         "<i>This finds companies with the profile multibaggers usually had before the "
         "run. Most such companies still do not become one. Not advice.</i>",
         CONF_NOTE])
@@ -1343,7 +1357,7 @@ def track_text(q):
                 labels[n], pct(h["picks"], 2), pct(h["univ"], 2),
                 pct(h["picks"] - h["univ"], 2), f"{h['beat']}/{h['runs']}"))
         out += [f"<b>{universe}</b>",
-                table(("After", "Picks", "All", "Edge", "Won"), body, "lrrrr")]
+                table(("After", "Pick ret", "Univ ret", "Edge", "Won"), body, "lrrrr")]
     out.append("<i>Won = runs where the picks beat the universe; – = that horizon has not "
                "completed yet. Daily runs overlap, so longer horizons are not independent; "
                "under ~60 runs this is anecdote.</i>")

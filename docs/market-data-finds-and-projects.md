@@ -166,6 +166,31 @@ Lifting the ceiling entirely = JetPack 5 reflash (icebox — recovery-mode, full
 
 ---
 
+## 2b. External quant repos — evaluated 2026-10-30
+
+Owner supplied a prioritised list of seven open-source quant repos; each was judged against the
+standing ADRs (0018 EV-0 gate, 0026 deterministic valuation, 0031 no-LLM research scoring,
+0022/DG-19 TX2 ML ceiling) and `data-gaps.md`. Verdict: the list's ranking is roughly inverted
+for this pipeline — the two smallest libraries fit, the four platforms conflict with decisions
+already recorded. None becomes cluster infrastructure; adopted ones are **workstation research
+tools** reading via the ADR 0032 `v_*` contract views, with EV-0 still the gate.
+
+| Repo | Verdict | Why |
+|---|---|---|
+| **QuantStats** | ✅ Adopt (workstation) | Pandas tearsheets (Sharpe, drawdown, rolling stats) over the returns series `ev0.py` / Strategy Lab already produce; replaces hand-rolled stats. Smallest dep, clearest win. |
+| **VectorBT** | ✅ Adopt (workstation, pinned) | Vectorized numba backtesting for Strategy Lab testables (EV-19 PEAD, EV-20 panels) — parameter sweeps the hand-written harness can't do cheaply. Augments EV-0, never replaces it; acceptance criteria still written first. OSS version is maintenance-mode (maintained fork is paid `vectorbt.pro`) — pin the version, treat as tool not infrastructure. |
+| **Riskfolio-Lib** | 🧊 Icebox | Portfolio optimization is premature: ADR 0026 keeps scoring descriptive and nothing has passed EV-0 into an allocation decision. Revisit only with multiple validated signals to weight. |
+| **Qlib** (Microsoft) | ⛔ Skip | Competing platform: own data format/pipeline, x86/GPU workflows the TX2 can't serve (DG-19). Would duplicate TimescaleDB + fetcher architecture to feed it. Factor-definition docs worth skimming as Strategy Lab reading material only. |
+| **RD-Agent** | ⛔ Skip | Autonomous LLM factor discovery — the direct opposite of the house rules: ADR 0031 scoring is deterministic (no LLM in the loop) and acceptance tests precede testing. A data-snooping machine (McLean & Pontiff); also sits on Qlib. |
+| **TradingAgents** | ⛔ Skip | Multi-agent LLM narrative. The Telegram layer already does LLM narrative *with* `factcheck.py` gating every number — a stronger design. Adding it = ungated LLM opinions + gateway API spend. |
+| **OpenBB** | ⛔ Skip (as infra) | The 26 fetchers with idempotent writers already are the ingestion layer; closes no real gap (DG-01 needs NSE PDFs, DG-02 needs a nonexistent archive, DG-04 needs a Finnhub/Tiingo key). Free providers are mostly the same yfinance. At most a workstation exploration tool when hunting a new source. |
+
+**Framing note:** the limiting factor is data, not tooling — the top of `data-gaps.md` (DG-01
+India point-in-time membership, DG-03 NSE fundamentals backfill) blocks India backtests no matter
+which backtester is adopted. A session on DG-01 buys more research capability than any repo above.
+
+---
+
 ## 3. Recommended order
 
 1. Telegram bot (#6) → gives you the alert channel AND a daily digest immediately
