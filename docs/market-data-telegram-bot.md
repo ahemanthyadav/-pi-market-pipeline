@@ -3,12 +3,13 @@
 > **Purpose:** everything about the Marketfredbot Telegram channel — how the
 > deployed digest + alert pipeline is wired, how to operate and change it, and
 > the tiered menu of two-way/next-step upgrades with their real constraints.
-> **Repo state 2026-10-30 (v32):** `local/telegram-digest:v32` in the manifests — rebuild
-> pending (v31 stays LIVE until the ops-manual §6 cycle runs). v32: clearer labels on every
-> derived number (repriced P/E/P/B say so; sentiment, screener scores and track columns carry
-> how-they-are-computed legends), 52-week range from daily closes (same basis as pos_52w),
-> phone-width fixes in the digest facts block and /track table, one shared SCREENER_NOTE.
-> Earlier: v29 registers
+> **Repo state 2026-10-30 (v33):** `local/telegram-digest:v33` — the review-fix build on top
+> of v32's label pass (v32 was deployed from f6f8cda before the review fixes in 3f9d559
+> landed, so it still carries the mislabeled repriced P/E and phone-width wraps). v33: clearer
+> labels on every derived number (repriced P/E/P/B say so; sentiment, screener scores and
+> track columns carry how-they-are-computed legends), 52-week range from daily closes (same
+> basis as pos_52w), phone-width fixes in the digest facts block and /track table, one shared
+> SCREENER_NOTE. Earlier: v29 registers
 > the new commands in the Telegram "/" menu (MENU list updated + a menu-sync test so the
 > menu can never drift from COMMANDS again). v28 adds
 > /earnings (watchlist ★ + core top-25, 14d), /scorecard (ADR 0028 summary), and fixes
