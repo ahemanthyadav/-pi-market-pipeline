@@ -4,7 +4,14 @@
 > the linked docs — this file is the index + status. Maintained per AGENTS.md docs
 > discipline: mark items ✅ with a date (and where the completion is recorded) when
 > done; prune ✅ lines into the relevant doc's history at housekeeping time.
-> **Last reviewed: 2026-10-26** (deploy + backlog pass — owner said "deploy all" then "implement all"):
+> **Last reviewed: 2026-10-30** (owner: "deploy all changes + create a deployment guide"): telegram
+> **v34 live** on pi1 (bot deployment + digest/alerts CronJobs; rollout clean, live specs verified). v33
+> **burned, never deployed** — built minutes before 36e6529 landed, in-image md5 caught stale
+> stocks.py/bot.py; the §6 cycle now carries step 3b (verify image contents vs HEAD) and the new
+> `docs/deployment-guide.md` is the start-to-finish wrapper (indexed in README). Tarball archive at 79
+> images, SHA256SUMS regenerated. No digest canary by policy (off-schedule fan-out to members); owner-side
+> `/sp500` is the functional check for the v34 features (index quant values + /sp500).
+> Earlier **2026-10-26** (deploy + backlog pass — owner said "deploy all" then "implement all"):
 > staged hardening applied · telegram v24 live (probe + non-root canary PASSED) · host keys pinned · H-6
 > decided forward-only · AR-8 ⛔ blocked on an owner-run Secret/role creation (§1) · netpol finding: TX2
 > kernel has no ipset → unenforced on the DB's node (header documents it) · **EV-9 done** (`screener:v17`→

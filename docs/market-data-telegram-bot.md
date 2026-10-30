@@ -3,9 +3,11 @@
 > **Purpose:** everything about the Marketfredbot Telegram channel — how the
 > deployed digest + alert pipeline is wired, how to operate and change it, and
 > the tiered menu of two-way/next-step upgrades with their real constraints.
-> **Repo state 2026-10-30 (v33):** `local/telegram-digest:v33` — the review-fix build on top
-> of v32's label pass (v32 was deployed from f6f8cda before the review fixes in 3f9d559
-> landed, so it still carries the mislabeled repriced P/E and phone-width wraps). v33: clearer
+> **Repo state 2026-10-30 (v34):** `local/telegram-digest:v34` — v33's review fixes plus
+> index quant values in /sp500 & friends (P/E, P/B, market cap from stock_metrics_daily) and
+> the /sp500 command itself (36e6529). The v33 image was built before 36e6529 landed and was
+> never deployed (stale stocks.py/bot.py — caught by an in-image md5 check); the tag is burned,
+> do not reuse it. v33 (never live): clearer
 > labels on every derived number (repriced P/E/P/B say so; sentiment, screener scores and
 > track columns carry how-they-are-computed legends), 52-week range from daily closes (same
 > basis as pos_52w), phone-width fixes in the digest facts block and /track table, one shared
