@@ -1,8 +1,10 @@
 # Market Data Pipeline — Operations Manual & System Reference
 
-> **Reconciled with `manifests/` 2026-10-10** (schedules/images checked by `ops-tools/workloads.py --check`).
-> **Last fully healthy cluster check: 2026-10-17** — all 4 k8s nodes Ready (pi2 cordoned), every CronJob then deployed (23) active,
-> TimescaleDB/Grafana/Telegram-bot all Running. See §8 and pending-tasks §1 for known gaps.
+> **Reconciled with `manifests/` 2026-10-30** (schedules/images checked by `ops-tools/workloads.py --check`; §6 cycle
+> re-verified end-to-end with the telegram-digest v33 build; §7 Grafana dashboard list recounted — 11).
+> **Last fully healthy cluster check: 2026-10-30** — all 4 k8s nodes Ready (pi2 cordoned), 33 CronJobs live
+> (`nse-fundamentals` suspended by design until the DG-03 backfill completes), TimescaleDB/Grafana/Telegram-bot
+> all Running. See §8 and pending-tasks §1 for known gaps.
 > **Repo layout (2026-10-03):** everything lives in `projects/marketdata/` —
 > `docs/` (project docs), `manifests/` (k8s), `ops-tools/` (SSH helpers),
 > `validation/` (Grafana scripts + screenshots), `AGENTS.md` + `opencode.jsonc` +
@@ -358,47 +360,73 @@ tokens (see §10) work the same way; an unknown key is left literal with a stder
 (`echo`, `cat`): that would print the secret.** Covered by `tests/test_creds.py` (quoting
 round-trips; a hostile value cannot inject a command).
 
-**Full cycle — e.g., updating the yfinance fetcher to v4:**
+**`runcmd.py` has a 120 s channel timeout** — any remote command that can exceed ~2 min
+(docker builds from a cold cache, pi2 imports, backfills) must launch with
+`nohup … >/tmp/x.log 2>&1 &` and be polled with `tail /tmp/x.log`; the TIMEOUT error from a
+long foreground command does NOT mean the remote command failed (it keeps running).
+
+**Full cycle — e.g., updating the yfinance fetcher to v6 (verified end-to-end for
+telegram-digest v33, 2026-10-30):**
 
 ```bash
-# 1. Edit code + bump version in CronJob
-#    Edit: manifests/ingestion/yfinance/yfinance-fetcher.py
-#    Bump tag in manifests/ingestion/yfinance/cronjob.yaml:
-#      image: local/yfinance-fetcher:v6
+# 1. Edit code + bump the tag EVERYWHERE the image is referenced:
+#    manifests/ingestion/yfinance/cronjob.yaml → image: local/yfinance-fetcher:v6
+#    (telegram: cronjob.yaml has TWO jobs + deployment.yaml — bump all three;
+#    then python3 ops-tools/workloads.py --check to catch the doc tables too)
 
-# 2. Build on TX2 (native ARM64, no QEMU):
-python3 ops-tools/putfile.py tx2 ahytx2 \
-  manifests/ingestion/yfinance/yfinance-fetcher.py /home/ahytx2/yf-build/yfinance-fetcher.py
-python3 ops-tools/putfile.py tx2 ahytx2 \
-  manifests/ingestion/yfinance/Dockerfile /home/ahytx2/yf-build/Dockerfile
+# 2. Ship the build context to a FRESH dir on the TX2 (a stale leftover file
+#    from an earlier build silently ships old code):
+python3 ops-tools/runcmd.py tx2 ahytx2 'rm -rf /home/ahytx2/yf-build && mkdir -p /home/ahytx2/yf-build && echo DIR-OK'
+for f in Dockerfile requirements.lock yfinance-fetcher.py; do   # everything the Dockerfile COPYs
+  python3 ops-tools/putfile.py tx2 ahytx2 manifests/ingestion/yfinance/$f /home/ahytx2/yf-build/$f
+done
+
+# 3. Build on TX2 (native ARM64, no QEMU). Warm cache ≈ seconds; cold pip
+#    layer can exceed the 120 s channel limit → nohup + poll (note above):
 python3 ops-tools/runcmd.py tx2 ahytx2 \
   'echo @@PW@@ | sudo -S docker build -t local/yfinance-fetcher:v6 /home/ahytx2/yf-build 2>&1 | tail -2'
+
+# 4. Save the tarball STRAIGHT INTO the archive (restore source if a node's
+#    containerd store is lost — §8 prune incident), plus a home-dir copy to pull:
 python3 ops-tools/runcmd.py tx2 ahytx2 \
-  'echo @@PW@@ | sudo -S sh -c "docker save local/yfinance-fetcher:v6 | gzip > /home/ahytx2/yfinance-fetcher-v5.tar.gz" && echo @@PW@@ | sudo -S chown ahytx2:ahytx2 /home/ahytx2/yfinance-fetcher-v4.tar.gz'
+  'echo @@PW@@ | sudo -S sh -c "docker save local/yfinance-fetcher:v6 | gzip > /mnt/tx2-ssd/image-tarballs/yfinance-fetcher-v6.tar.gz && cp /mnt/tx2-ssd/image-tarballs/yfinance-fetcher-v6.tar.gz /home/ahytx2/yfinance-fetcher-v6.tar.gz && chown ahytx2:ahytx2 /home/ahytx2/yfinance-fetcher-v6.tar.gz" && ls -lh /home/ahytx2/yfinance-fetcher-v6.tar.gz'
+python3 ops-tools/runcmd.py tx2 ahytx2 \
+  'cd /mnt/tx2-ssd/image-tarballs && echo @@PW@@ | sudo -S sh -c "sha256sum *.tar.gz > SHA256SUMS.all" && grep -c . SHA256SUMS.all'
 
-# 3. Pull tarball to admin machine:
+# 5. Pull the tarball to the admin machine:
 python3 ops-tools/getfile.py tx2 ahytx2 \
-  /home/ahytx2/yfinance-fetcher-v4.tar.gz /tmp/opencode/yfinance-fetcher-v4.tar.gz
+  /home/ahytx2/yfinance-fetcher-v6.tar.gz /tmp/yfinance-fetcher-v6.tar.gz
 
-# 4. Distribute to Pi workers (TX2-only images skip this):
-for h in pi1 pi2 pi3; do   # alias == login user on the Pis
-  python3 ops-tools/putfile.py $h $h /tmp/opencode/yfinance-fetcher-v4.tar.gz /home/$h/yfinance-fetcher-v4.tar.gz
-  python3 ops-tools/runcmd.py $h $h "echo @@PW@@ | sudo -S /usr/local/bin/k3s ctr -n k8s.io images import /home/$h/yfinance-fetcher-v4.tar.gz 2>&1 | tail -1"
+# 6. Distribute — ONLY to the nodes the workload can schedule on:
+#    · node-pinned images (telegram-digest, marketview → pi1): that node only
+#    · TX2-only images (sentiment, headline-ner, …): skip this step entirely
+#    · unpinned CronJobs: all Pi workers (pi1/pi2/pi3)
+for h in pi1 pi2 pi3; do   # alias == login user on the Pis; trim to the pinned node where applicable
+  python3 ops-tools/putfile.py $h $h /tmp/yfinance-fetcher-v6.tar.gz /home/$h/yfinance-fetcher-v6.tar.gz
+  python3 ops-tools/runcmd.py $h $h "echo @@PW@@ | sudo -S /usr/local/bin/k3s ctr -n k8s.io images import /home/$h/yfinance-fetcher-v6.tar.gz 2>&1 | tail -1 && rm /home/$h/yfinance-fetcher-v6.tar.gz"
 done
-# Note for pi2 (slow import): run detached, then poll:
+# pi1/pi3 imports block ~20-90 s (fine); pi2 MUST run detached or it wedges the session:
 # python3 ops-tools/runcmd.py pi2 pi2 \
-#   "echo @@PW@@ | sudo -S bash -c 'nohup /usr/local/bin/k3s ctr -n k8s.io images import /home/pi2/yfinance-fetcher-v4.tar.gz >/tmp/yf-import.log 2>&1 &' && echo LAUNCHED"
+#   "echo @@PW@@ | sudo -S bash -c 'nohup /usr/local/bin/k3s ctr -n k8s.io images import /home/pi2/yfinance-fetcher-v6.tar.gz >/tmp/yf-import.log 2>&1 &' && echo LAUNCHED"
 # Poll: python3 ops-tools/runcmd.py pi2 pi2 "tail -2 /tmp/yf-import.log"
+# Verify the import landed before applying anything:
+python3 ops-tools/runcmd.py pi1 pi1 'echo @@PW@@ | sudo -S /usr/local/bin/k3s ctr -n k8s.io images ls | grep yfinance-fetcher:v6 | head -1'
 
-# 5. Apply updated manifests + validate:
+# 7. Apply + validate (cluster-mutation pre-flight first: pi2 load < 2, see §7 item 5):
 kubectl apply -f manifests/ingestion/yfinance/cronjob.yaml
+# Always-on images (telegram bot): also apply deployment.yaml — the tag change
+# rolls the pod; a SAME-tag rebuild rolls nothing (imagePullPolicy: Never) and
+# is why every code change needs a bump.
+# Then the canary-validate skill checklist: verify the LIVE spec (jsonpath the
+# image — a sed'd yaml is not a deploy), --from=cronjob canary, poll-capture
+# logs before the pod vanishes, check the script's OK-marker:
+kubectl -n market-data get cronjob yfinance-fetcher -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}{"\n"}'
 kubectl create job -n market-data yf-validate --from=cronjob/yfinance-fetcher
-# Wait ~60s, then verify:
-kubectl get job -n market-data yf-validate
 kubectl logs -n market-data job/yf-validate --tail=10
 # Expect: "fetched 29/29 tickers" + "wrote 29 rows into index_prices"
+kubectl -n market-data delete job yf-validate
 
-# 6. Verify in DB:
+# 8. Trust the DATABASE, not the exit code (silent-empty parsers exist):
 export KUBECONFIG=~/.kube/pi-cluster.yaml
 PW=$(kubectl -n market-data get secret timescaledb-auth -o jsonpath='{.data.password}' | base64 -d)
 kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
@@ -406,8 +434,8 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
 ```
 
 **Image tarball store (2026-10-18):** `/mnt/tx2-ssd/image-tarballs/` on the TX2 holds a gzip tarball of EVERY image a manifest
-references (sentiment: `/mnt/tx2-ssd/sentiment-fetcher-v1.tar.gz`), checksums in `SHA256SUMS.all` — the restore source if a node's
-containerd store is lost (incident §8). After every build, save the new tarball there and regenerate `SHA256SUMS.all`.
+references, checksums in `SHA256SUMS.all` — the restore source if a node's containerd store is lost (incident §8). Step 4
+above keeps it current (78 tarballs as of 2026-10-30); never skip the SHA256SUMS regeneration.
 
 **Dependency locking:** After any build, dump the versions:
 ```bash
@@ -447,6 +475,9 @@ kubectl get jobs -n market-data | grep yfinance-fetcher | head -1 | awk '{print 
 # 5. pi2 load (canary — investigate if sustained > 3):
 python3 ops-tools/runcmd.py pi2 pi2 'uptime; free -m | head -2'
 # If load > 3 sustained: stop all agents, cool pi2, restart one-by-one (see §8)
+# Mutations (kubectl apply, rollouts, canary jobs) want load < 2 first —
+# cluster-mutation skill. A hot-but-responsive pi2 (load ~3, swapping) after
+# pod churn usually cools in minutes; wait rather than apply into it.
 
 # 6. Backup freshness (should show today's dump):
 python3 ops-tools/runcmd.py pi3 pi3 'ls -lh /var/lib/market-data/backups/ | tail -3'
@@ -463,6 +494,10 @@ bash ops-tools/power-review.sh --since 2026-10-12T02:59:00Z
 # Red flags: throttle_hex != 0x0 on a Pi (power/thermal — bit0/1/2 = uv/
 # cap/throttle NOW, bits 16-19 = since boot), k3s_state != active,
 # temp_c > 70, swap_used_mb climbing, db_procs=0 on tx2 (DB down)
+
+# 9. Repo gates — before ANY push, and after any manifest or doc change:
+python3 ops-tools/workloads.py --check   # doc tables ↔ manifests (schedules, image tags, counts)
+bash tests/run-all.sh                    # full unit suite; run whole, never piped through tail/head
 ```
 
 **Grafana dashboards:**
@@ -470,9 +505,10 @@ bash ops-tools/power-review.sh --since 2026-10-12T02:59:00Z
 kubectl -n market-data port-forward svc/grafana 3000:3000
 # Open http://localhost:3000
 # User: admin | Password: GRAFANA_ADMIN_PASSWORD in .secrets.env
-# 7 dashboards (Derived Metrics added 2026-10-10 — provisioned, not yet eyeballed in the UI;
-# Screener): Overview, Indices (named ticker variable — "Nifty 50 (^NSEI)"
-# style labels via ticker_names), Markets, Sentiment, Flows
+# 11 provisioned dashboards (manifests/grafana/dashboards.yaml, counted 2026-10-30):
+# Overview, Indices (named ticker variable — "Nifty 50 (^NSEI)" labels via
+# ticker_names), Markets, Sentiment, Flows, Screener, Derived Metrics,
+# Valuation, Sectors, Dossier, Factors
 ```
 **⚠️ GRAFANA UI "NO DATA" FIX (required on first load):**
 1. **Time picker (top-right) → "Last 90 days" / "All time" → Click Apply**
