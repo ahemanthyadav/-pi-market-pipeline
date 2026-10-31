@@ -462,7 +462,23 @@ def handle(update: dict) -> None:
         send("That command is for the owner only.", chat)
         return
     try:
-        send(handler(text, chat) if cmd in PERSONAL else handler(text), chat)
+        result = handler(text, chat) if cmd in PERSONAL else handler(text)
+        # If the handler returned a usage error (e.g. parse_top couldn't parse
+        # "/top tcs stock"), try the router as a fallback ("tcs stock" → /stock TCS)
+        if isinstance(result, str) and result.startswith("Usage:"):
+            # Strip the command word before passing to router so "/top tcs stock"
+            # becomes "tcs stock" which matches nickname "tcs" → stock TCS.NS
+            router_text = text.split(None, 1)[1] if len(text.split()) > 1 else text
+            r_cmd, r_args, r_conf = router.route(router_text)
+            if r_cmd and r_cmd in COMMANDS:
+                full_text = f"/{r_cmd} {r_args}".strip() if r_args else f"/{r_cmd}"
+                try:
+                    send(COMMANDS[r_cmd](full_text, chat) if r_cmd in PERSONAL else COMMANDS[r_cmd](full_text), chat)
+                    print(f"routed /{r_cmd} ({r_conf}) after handler failure", flush=True)
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    print(f"ERROR routed /{r_cmd}: {exc}", flush=True)
+        send(result, chat)
         print(f"answered /{cmd}", flush=True)
     except Exception as exc:  # noqa: BLE001 - one bad query must not kill the loop
         print(f"ERROR /{cmd}: {exc}", flush=True)

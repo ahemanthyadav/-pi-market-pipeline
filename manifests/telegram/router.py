@@ -48,13 +48,20 @@ def route(text: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     if not t:
         return None, None, None
 
+    nt = _norm(t)
+    words = nt.split()
+
     # 1. Exact command prefix (/cmd ...) — pass through unchanged
     m = re.match(r"^/(\w+)(@\w+)?\s*(.*)$", t, re.I)
     if m:
-        return m.group(1).lower(), m.group(3).strip(), "exact"
-
-    nt = _norm(t)
-    words = nt.split()
+        cmd = m.group(1).lower()
+        args = m.group(3).strip()
+        if cmd in nicknames.KEYWORD_COMMANDS:
+            return cmd, args, "exact"
+        # Not a real command — treat the rest as regular text for nickname/keyword checks
+        t = args
+        nt = _norm(t)
+        words = nt.split()
 
     # 2. Multi-word phrase routes (longest phrase wins)
     best_phrase = None
@@ -124,6 +131,14 @@ def route(text: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         if sym == "none":
             return None, None, None
         return "stock", sym, "nickname"
+
+    # 7. Catch-all: any word in the text is a nickname → stock with that symbol
+    for word in words:
+        if word in nicknames.NICKNAMES:
+            sym = nicknames.NICKNAMES[word]
+            if sym == "none":
+                continue
+            return "stock", sym, "nickname"
 
     return None, None, None
 
