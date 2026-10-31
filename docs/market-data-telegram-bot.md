@@ -3,7 +3,36 @@
 > **Purpose:** everything about the Marketfredbot Telegram channel — how the
 > deployed digest + alert pipeline is wired, how to operate and change it, and
 > the tiered menu of two-way/next-step upgrades with their real constraints.
-> **Repo + live state 2026-10-26:** `local/telegram-digest:v24` LIVE (deployment + both
+> **Repo state 2026-10-31 (v37):** `local/telegram-digest:v37` — symbol-aware routing
+> (`/status cub`, `/movers cub`, `/top tcs stock` → `/stock`) with a live-universe lookup
+> layer, longest-nickname-prefix matching, and nickname entries realigned to the current
+> tickers (CUB.NS, ETERNAL.NS, TMPV/TMCV, POLICYBZR.NS …). v34 — v33's review fixes plus
+> index quant values in /sp500 & friends (P/E, P/B, market cap from stock_metrics_daily) and
+> the /sp500 command itself (36e6529). The v33 image was built before 36e6529 landed and was
+> never deployed (stale stocks.py/bot.py — caught by an in-image md5 check); the tag is burned,
+> do not reuse it. v33 (never live): clearer
+> labels on every derived number (repriced P/E/P/B say so; sentiment, screener scores and
+> track columns carry how-they-are-computed legends), 52-week range from daily closes (same
+> basis as pos_52w), phone-width fixes in the digest facts block and /track table, one shared
+> SCREENER_NOTE. Earlier: v29 registers
+> the new commands in the Telegram "/" menu (MENU list updated + a menu-sync test so the
+> menu can never drift from COMMANDS again). v28 adds
+> /earnings (watchlist ★ + core top-25, 14d), /scorecard (ADR 0028 summary), and fixes
+> /sectors universe parsing ('sp' substring sent sp600 to SP500; now the UNIVERSES alias
+> map with an explicit error). v27 added the ADR 0029 universe aliases
+> (sp400/sp600/midcap/smallcap/microcap) + core/extended tier separation (movers and the
+> digest earnings section stay flagship; valuation-watch lines tag their universe).
+> v26 added the REGIME
+> line in the digest + /regime command (breadth / benchmark-trend / factor-momentum traffic
+> light per market, descriptive only), the "Earnings this week" digest section (watchlist +
+> top-25, schema 19), and a new valuation-watch gate: entries reporting within 3 days are
+> suppressed (`VAL_EARNINGS_GAP_DAYS`, ADR 0028). No-send validation 10-27: digest 1383 chars
+> with Regime + Earnings sections present, 3 live watch lines, regime_text renders.
+> Earlier v25 (2026-10-26): VALUATION
+> WATCH alert (ADR 0026 amendment: entering names with rank<=50, upside>=25%, >=3 methods above
+> close — reasoning in the line, max 5), /sectors command, and the fair-value line on /stock.
+> No-send validation same day: digest 954 chars, 4 real watch lines, sectors card renders.
+> Earlier v24 (deployment + both
 > CronJobs): HTML-safe truncation, getMe retry, rule-9 bounds, `/tmp/bot-alive` liveness
 > heartbeat + exec probe, non-root securityContext (the per-image canary — passed).
 > Deploy-verified same day: bot polling on pi1 (owner + 2 members), heartbeat fresh,
@@ -306,6 +335,32 @@ Outbound-only, survives CGNAT, no VPS.
 5 letters is never auto-picked), AI (shared gateway, `general`) for nicknames — its ticker AND company name must agree
 with the universe (live: facebook → META, big blue → IBM, hul → HINDUNILVR.NS, coke → KO); `/watch` never writes on a corrected symbol — it asks for
 the exact one. Switch: `BOT_AI_RESOLVE` on the Deployment.
+
+### Symbol-aware routing (2026-10-31, image v37)
+Every command now understands a stock name, not just `/stock`:
+
+- **A no-argument command followed by a stock** means that stock —
+  `/status cub`, `/movers cub`, `/digest tcs` → `/stock CUB.NS`. Commands that genuinely take
+  free text keep it (`/news tcs` is news *about* TCS, `/watch cub` adds CUB, `/top growth sp500`
+  keeps its factor/universe); that list is `router.ARG_COMMANDS`.
+- **A command whose parse fails** falls back to the router with the command word stripped, so
+  `/top tcs stock` and `/top cub` → `/stock TCS.NS` / `/stock CUB.NS` instead of a usage error.
+- **Unknown commands are read as text** (`/statsus cub` → `/stock CUB.NS`) — `/statsus` is not a
+  command, so the args go through the normal nickname/keyword/lookup path.
+- **The router's last layer is the live universe, not the static nickname map.**
+  `bot.symbol_lookup` calls `stocks.pick_one_ex`, i.e. the same layers as `/stock`
+  (exact symbol/name → fuzzy → AI when `BOT_AI_RESOLVE=1`), so symbols missing from
+  `nicknames.py` still resolve: `cub` → CUB.NS, `karnataka bank` → KTKBANK.NS,
+  `tata motors pv` → TMPV.NS. `/route cub` now reports `universe lookup`; why this matters —
+  the hardcoded map had drifted (CITYUNION.NS, ZOMATO.NS, PBFINTECH.NS, TATAMOTORS.NS,
+  UTIAM.NS, UJJIVAN.NS, L&TFH.NS, FSN ECOMM.NS, BURGERKING.NS, KVTBANK.NS were all dead
+  symbols; repco/suryoday/esaf/capital-small are no longer in the universe and were dropped).
+  Chosen over "add more nicknames" because the map will always lag: the universe table is the
+  truth (ADR 0029), and the lookup is one cached query per message.
+- **Longest nickname prefix wins**, so a 3-word name is never truncated to its first two
+  (`tata motors pv` → TMPV.NS, not TMCV.NS).
+- Tests: `tests/test_router.py` (fake lookup — no DB) covers all of the above; the live
+  resolver was verified inside the v37 pod with `kubectl exec … python -c "import bot; …"`.
 
 ### /ask — questions answered from stored facts only (2026-10-19, ML-7d family, image v14–v23)
 `/ask TCS outlook`, `/ask news infosys`, `/ask usdinr`, `/ask fii flows`. Flow: find the subject (stock via the forgiving

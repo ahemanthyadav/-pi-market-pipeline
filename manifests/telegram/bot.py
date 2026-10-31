@@ -18,7 +18,7 @@ get dropped (F26), so nothing is held across the sleep between polls. One
 retry per query.
 
 Commands: /help /status /vix /nifty /sensex /gold /fii /scores /digest
-  /stock /news /watch /top /movers /track /macro /world /index /fx /multibagger (stock/watchlist/screener
+  /stock /news /watch /top /movers /track /macro /world /index /fx /multibagger /sp500 (stock/watchlist/screener
   views live in stocks.py, 2026-10-10). /start also maps to help. /digest
   re-runs digest.build_message() — the scripts share this image; the
   Deployment selects this entrypoint via args.
@@ -50,6 +50,7 @@ import requests
 
 import stocks
 import users
+import router
 from digest import TELEGRAM_LIMIT, build_message
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -83,6 +84,22 @@ def query(sql: str, args: tuple = ()) -> list:
             print(f"WARN db retry ({exc.__class__.__name__})", flush=True)
 
 
+def symbol_lookup(text: str):
+    """Universe symbol for a user-typed name/symbol, or None (never raises).
+
+    Same resolution layers as /stock (stocks.pick_one_ex): exact symbol or name,
+    then the forgiving resolver (fuzzy spelling, then AI when BOT_AI_RESOLVE=1).
+    Lets every command understand stocks missing from the static nickname map —
+    "/status cub" → CUB.NS, "city union" → CUB.NS.
+    """
+    try:
+        row, _problem, _note = stocks.pick_one_ex(query, text)
+    except Exception as exc:  # noqa: BLE001 — routing must never break the bot
+        print(f"WARN symbol lookup {text!r}: {exc.__class__.__name__}", flush=True)
+        return None
+    return row[0] if row else None
+
+
 def execute(sql: str, args: tuple = ()) -> int:
     """One atomic write to the bot-owned watchlist table; returns rowcount."""
     conn = psycopg.connect(
@@ -114,6 +131,20 @@ def cmd_help(_text: str, chat: str = None) -> str:
     return text
 
 
+def cmd_route(text: str, chat: str = None) -> str:
+    """Explain how a natural-language query would be routed (/route tcs price)."""
+    arg = text.partition(" ")[2].strip()
+    if not arg:
+        return ("Try <code>/route tcs price</code>, <code>/route what's nifty at</code>, "
+                "<code>/route facebook quote</code>. The router matches nicknames, "
+                "phrases and keywords to the right command automatically — you don't "
+                "need to memorise /command syntax.")
+    r_cmd, r_args, r_conf = router.route(arg, symbol_lookup, COMMANDS)
+    if r_cmd is None:
+        return f"I couldn't figure out a command for <code>{html.escape(arg)}</code>. "
+    return router.format_route(r_cmd, r_args, r_conf)
+
+
 def _help_text() -> str:
     return (
         "<b>Marketfredbot</b> — read-only commands:\n"
@@ -125,18 +156,26 @@ def _help_text() -> str:
         "/stock TCS — price, trend, score, valuation, news for one stock\n"
         "/news TCS — tagged headlines + sentiment\n"
         "/ask TCS outlook — question answered from stored facts only (numbers checked); AI off → facts table\n"
-        "/top growth sp500 — best by value|quality|growth|momentum|risk\n"
+        "/top growth sp500 — best by value|quality|growth|momentum|risk "
+        "(universes: nifty, sp500, sp400, sp600, microcap)\n"
         "/multibagger sp500 — small, fast-growing, high-return candidates\n"
         "/movers — who entered/left the screener top-20\n"
+        "/sectors sp500 — sector medians + fair-value gap (ADR 0026)\n"
         "/track — how the screener's picks have done\n"
+        "/regime — breadth / trend / momentum traffic light per market\n"
+        "/earnings — upcoming dates: your watchlist + core top-25s\n"
+        "/scorecard — have the system's picks worked? (ADR 0028)\n"
         "/watch — YOUR watchlist + holdings P&amp;L (add/rm); private to this chat\n"
         "/world — every index: close, day, 1m, YTD (/world asia)\n"
         "/index nikkei — one index in depth: 1w–1y, 52w range, trend, RSI\n"
+        "/sp500 — S&P 500: close, trend, median P/E/P/B, market cap\n"
         "/fx — USD/INR and the other pairs\n"
         "/macro — gold in INR, yield spreads, FII vs Nifty\n"
         "/digest — your daily digest on demand\n"
         "Daily digest: 08:00 IST · change alerts after the screener run (shared screener "
-        "changes + your own watchlist)"
+        "changes + your own watchlist)\n"
+        "You can also type naturally: <code>tcs price</code>, <code>what's nifty at</code>, "
+        "<code>show me fii flows</code>, <code>facebook quote</code>"
     )
 
 
@@ -171,6 +210,12 @@ def cmd_gold(_text: str) -> str:
 
 def cmd_index(text: str) -> str:
     return stocks.index_text(query, text.partition(" ")[2].strip())
+
+
+def cmd_sp500(_text: str) -> str:
+    """SP500 in depth: close, performance, trend, plus constituent-level
+    quant values (median P/E, P/B, total market cap)."""
+    return stocks.index_card(query, "^GSPC", "S&P 500")
 
 
 def cmd_fii(_text: str) -> str:
@@ -239,8 +284,24 @@ def cmd_movers(_text: str) -> str:
     return stocks.movers_text(query)
 
 
+def cmd_sectors(text: str) -> str:
+    return stocks.sectors_card(query, text)
+
+
 def cmd_track(_text: str) -> str:
     return stocks.track_text(query)
+
+
+def cmd_regime(_text: str) -> str:
+    return stocks.regime_text(query)
+
+
+def cmd_earnings(_text: str, chat: str = None) -> str:
+    return stocks.earnings_text(query, chat)
+
+
+def cmd_scorecard(_text: str) -> str:
+    return stocks.scorecard_text(query)
 
 
 def cmd_macro(_text: str) -> str:
@@ -325,12 +386,14 @@ def cmd_rmuser(text: str, chat: str = None) -> str:
 
 # Commands that need to know WHO is asking get (text, chat); the rest stay (text) so
 # one-liners like COMMANDS['nifty']('/nifty') keep working. ADMIN is owner-only.
-PERSONAL = {"start", "help", "digest", "watch", "users", "adduser", "rmuser"}
+PERSONAL = {"start", "help", "digest", "watch", "users", "adduser", "rmuser",
+            "earnings", "route"}
 ADMIN = {"users", "adduser", "rmuser"}
 
 COMMANDS = {
     "start": cmd_help,
     "help": cmd_help,
+    "route": cmd_route,
     "status": cmd_status,
     "vix": cmd_vix,
     "nifty": cmd_nifty,
@@ -344,12 +407,17 @@ COMMANDS = {
     "ask": cmd_ask,
     "top": cmd_top,
     "movers": cmd_movers,
+    "sectors": cmd_sectors,
     "multibagger": cmd_multibagger,
     "mb": cmd_multibagger,
     "track": cmd_track,
+    "regime": cmd_regime,
+    "earnings": cmd_earnings,
+    "scorecard": cmd_scorecard,
     "macro": cmd_macro,
     "world": cmd_world,
     "index": cmd_index,
+    "sp500": cmd_sp500,
     "fx": cmd_fx,
     "usdinr": cmd_fx,
     "watch": cmd_watch,
@@ -392,13 +460,48 @@ def handle(update: dict) -> None:
     cmd = text.split()[0].lstrip("/").split("@")[0].lower()
     handler = COMMANDS.get(cmd)
     if handler is None:
+        # Try the natural-language router before giving up ("tcs price" → /stock TCS)
+        r_cmd, r_args, r_conf = router.route(text, symbol_lookup, COMMANDS)
+        if r_cmd and r_cmd in COMMANDS:
+            full_text = f"/{r_cmd} {r_args}".strip() if r_args else f"/{r_cmd}"
+            try:
+                send(COMMANDS[r_cmd](full_text, chat) if r_cmd in PERSONAL else COMMANDS[r_cmd](full_text), chat)
+                print(f"routed /{r_cmd} ({r_conf})", flush=True)
+                return
+            except Exception as exc:  # noqa: BLE001 - one bad query must not kill the loop
+                print(f"ERROR routed /{r_cmd}: {exc}", flush=True)
+                send("Command failed — see logs (kubectl logs deploy/telegram-bot).", chat)
+                return
         send(f"Unknown command. {chr(10)}" + cmd_help("", chat), chat)
         return
     if cmd in ADMIN and not REGISTRY.is_owner(chat):
         send("That command is for the owner only.", chat)
         return
+    # A no-argument command followed by a stock name means that stock:
+    # "/status cub", "/movers cub" → /stock CUB.NS (ARG_COMMANDS keep their args).
+    args_text = text.split(None, 1)[1].strip() if len(text.split()) > 1 else ""
+    sym = router.symbol_from_args(cmd, args_text, symbol_lookup)
+    if sym:
+        text, cmd, handler = f"/stock {sym}", "stock", COMMANDS["stock"]
+        print(f"rerouted /status-style → /stock {sym}", flush=True)
     try:
-        send(handler(text, chat) if cmd in PERSONAL else handler(text), chat)
+        result = handler(text, chat) if cmd in PERSONAL else handler(text)
+        # If the handler returned a usage error (e.g. parse_top couldn't parse
+        # "/top tcs stock"), try the router as a fallback ("tcs stock" → /stock TCS)
+        if isinstance(result, str) and result.startswith("Usage:"):
+            # Strip the command word before passing to router so "/top tcs stock"
+            # becomes "tcs stock" which matches nickname "tcs" → stock TCS.NS
+            router_text = text.split(None, 1)[1] if len(text.split()) > 1 else text
+            r_cmd, r_args, r_conf = router.route(router_text, symbol_lookup, COMMANDS)
+            if r_cmd and r_cmd in COMMANDS:
+                full_text = f"/{r_cmd} {r_args}".strip() if r_args else f"/{r_cmd}"
+                try:
+                    send(COMMANDS[r_cmd](full_text, chat) if r_cmd in PERSONAL else COMMANDS[r_cmd](full_text), chat)
+                    print(f"routed /{r_cmd} ({r_conf}) after handler failure", flush=True)
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    print(f"ERROR routed /{r_cmd}: {exc}", flush=True)
+        send(result, chat)
         print(f"answered /{cmd}", flush=True)
     except Exception as exc:  # noqa: BLE001 - one bad query must not kill the loop
         print(f"ERROR /{cmd}: {exc}", flush=True)
@@ -447,11 +550,16 @@ MENU = [
     ("top", "Best by factor — /top growth sp500"),
     ("multibagger", "Small, fast-growing, high-return candidates"),
     ("movers", "Entered / left the screener top-20"),
+    ("sectors", "Sector medians + fair-value gap — /sectors sp600"),
+    ("earnings", "Upcoming earnings: watchlist + core top-25"),
+    ("scorecard", "Have the system's picks worked? (ADR 0028)"),
+    ("regime", "Breadth / trend / momentum traffic light"),
     ("track", "How the screener's picks have done"),
     ("news", "Tagged headlines + sentiment — /news TCS"),
     ("ask", "Question answered from stored facts only — /ask TCS outlook"),
     ("world", "All world indices: day, 1m, YTD — /world asia"),
     ("index", "One index in depth — /index nikkei"),
+    ("sp500", "S&P 500 in depth — close, trend, median P/E/P/B, cap"),
     ("fx", "USD/INR and other currency pairs"),
     ("macro", "Gold in INR, yield spreads, FII vs Nifty"),
     ("scores", "Screener top-5"),
@@ -463,6 +571,7 @@ MENU = [
     ("gold", "Gold futures"),
     ("fii", "FII/DII net flows"),
     ("help", "All commands"),
+    ("route", "Natural-language → command: /route tcs price"),
 ]
 
 

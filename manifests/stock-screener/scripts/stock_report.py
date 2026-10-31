@@ -15,6 +15,7 @@ deterministically ("connection is closed") mid-loop — this layout matches the
 proven prices/fundamentals/metrics fetchers.
 """
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -47,15 +48,20 @@ def q1(cur, sql, args=()):
 
 
 def news_block(cur, sym, name):
+    # The ticker matches only ticker_relevance (where it IS a symbol) and the
+    # company name only headlines: tickers like ALL/IT/ON are English words,
+    # so ILIKE '%ALL%' — and even \mALL\M against headlines — pulled in
+    # "falls"/"rally"/"All eyes" noise and skewed the average (2026-10-26).
     base = sym.replace(".NS", "").replace("-", ".")
     first = name.split()[0] if name else ""
+    pat_base = rf"\m{re.escape(base)}\M"
+    pat_name = rf"\m{re.escape(first)}\M" if first else pat_base
     cur.execute(
         """SELECT headline, sentiment_score FROM news_sentiment
            WHERE ts >= now() - interval '3 days'
-             AND (ticker_relevance ILIKE %s OR headline ILIKE %s
-                  OR ticker_relevance ILIKE %s OR headline ILIKE %s)
+             AND (ticker_relevance ~* %s OR headline ~* %s)
            ORDER BY ts DESC LIMIT 10""",
-        (f"%{base}%", f"%{base}%", f"%{first}%", f"%{first}%"))
+        (pat_base, pat_name))
     rows = cur.fetchall()
     if not rows:
         return "_No matching headlines in the last 3 days._\n", 0.0
@@ -85,9 +91,25 @@ def render_report(cur, row, medians):
                 "('total_revenue','net_income','operating_income','eps','fcf')) "
                 "ORDER BY metric, ts DESC", (sym,))
     fund = dict(cur.fetchall())
+    # ADR 0026: deterministic fair value + the sector lens (schemas 15/16).
+    cur.execute("SELECT fair_value, upside_pct, methods, graham, peer_multiple, "
+                "fcf_yield, dcf, ddm, epv, residual_income, peg_lynch, "
+                "damodaran_fcff, graham_growth, discount_rate, growth_used "
+                "FROM stock_valuations WHERE symbol=%s "
+                "AND ts >= now() - interval '7 days' ORDER BY ts DESC LIMIT 1", (sym,))
+    val = cur.fetchone()
+    cur.execute("SELECT c.sector, coalesce(st.style,'default'), st.note "
+                "FROM universe_constituents c LEFT JOIN sector_styles st "
+                "ON st.sector = c.sector WHERE c.symbol=%s LIMIT 1", (sym,))
+    sec = cur.fetchone() or (None, "default", None)
+    cur.execute("SELECT metric, weight, note FROM metric_relevance WHERE style=%s "
+                "ORDER BY weight DESC, metric", (sec[1],))
+    rel = cur.fetchall()
     nb, sent = news_block(cur, sym, name)
     md = []
     md.append(f"# {name} ({sym}) — shortlist\n")
+    if sec[0]:
+        md.append(f"Sector: **{sec[0]}**" + (f" — _{sec[2]}_" if sec[2] else ""))
     md.append(f"**Rank {rank}** · composite **{fmt(comp)}** "
               f"(universe median {fmt(med_c)}) · coverage {int((cov or 0) * 100)}%")
     md.append(f"Factors: value {fmt(vs)} (med {fmt(med_v)}) · quality {fmt(qs)} "
@@ -98,6 +120,40 @@ def render_report(cur, row, medians):
               f"EV/EBITDA {fmt(fund.get('ev_ebitda'))}")
     mcap = fund.get("market_cap")
     md.append(f"- Market cap: {fmt(mcap / 1e9, suffix='B') if mcap else 'n/a'}")
+    if val and val[0]:
+        md.append(f"- **Fair value {fmt(val[0])}** ({val[1]:+.0f}% vs close, "
+                  f"median of {val[2]} methods — ADR 0026, not advice)")
+        # Methods grouped by philosophy (ADR 0030 §grouping): the gap BETWEEN
+        # schools is the signal. val[3:] order matches the SELECT above.
+        by_name = dict(zip(("Graham", "Peer multiple", "FCF yield", "DCF",
+                            "DDM", "EPV", "Residual income", "PEG",
+                            "Damodaran FCFF", "Graham growth"), val[3:13]))
+        for school, members in (
+                ("Cash-flow intrinsic (Damodaran/Buffett)",
+                 ("DCF", "Damodaran FCFF", "FCF yield", "DDM")),
+                ("Conservative value (Graham/Greenwald)",
+                 ("Graham", "Graham growth", "EPV")),
+                ("Growth at a reasonable price (Lynch)", ("PEG",)),
+                ("Relative & accounting (peers/Penman)",
+                 ("Peer multiple", "Residual income"))):
+            got = [(n, by_name[n]) for n in members if by_name.get(n)]
+            if got:
+                md.append(f"- {school}: " + " · ".join(
+                    f"{n} {fmt(v)}" for n, v in got))
+        gtxt = (f"{val[14] * 100:.1f}% rev-CAGR [0–15%]" if val[14] is not None
+                else "n/a")
+        md.append(f"- _Assumptions: r = {val[13] * 100:.2f}% (10y + 4.5% ERP) · "
+                  f"growth {gtxt} · terminal 2.5% · tax 25% · kd = 10y+2% (synthetic) · "
+                  f"Graham Y = 10y+1% · annual-filing EPS/BVPS/EBIT · debt netted, "
+                  f"no cash credit_")
+    if rel:
+        md.append("## What matters in this sector")
+        for metric, weight, note in rel:
+            if weight >= 3:
+                md.append(f"- **{metric}**: {note}")
+        for metric, weight, note in rel:
+            if weight == 0:
+                md.append(f"- ~~{metric}~~ (misleading here): {note}")
     md.append("## Quality & growth")
     md.append(f"- ROE {fmt(fund.get('roe'))} · operating margin "
               f"{fmt(fund.get('operating_margin'))}")
@@ -208,6 +264,40 @@ def main() -> int:
                             "AND ts=%s", (today,))
                 cur.execute("INSERT INTO stock_reports (symbol, ts, report_md) "
                             "VALUES ('__digest__', %s, %s)", (today, digest))
+    # Sector analysis per universe (ADR 0026): today's sector_metrics rendered
+    # as one '__sectors__' report row, sorted cheapest-by-median-upside first.
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT m.universe, m.sector, m.members, m.median_pe, m.median_pb,
+                      m.median_ev_ebitda, m.avg_ret_6m, m.avg_ret_12m,
+                      m.median_upside_pct, st.style, st.note
+               FROM sector_metrics m LEFT JOIN sector_styles st USING (sector)
+               WHERE m.ts >= now() - interval '7 days'
+                 AND m.ts = (SELECT max(ts) FROM sector_metrics
+                             WHERE ts >= now() - interval '7 days')
+               ORDER BY m.universe, m.median_upside_pct DESC NULLS LAST""")
+        sector_rows = cur.fetchall()
+    if sector_rows:
+        md = ["# Sector analysis — " + today.strftime("%Y-%m-%d"),
+              "", "_Medians over members; upside = median of each member's "
+              "fair-value gap (ADR 0026). Not advice._", ""]
+        last_u = None
+        for (u, sector, n, pe, pb, ev, r6, r12, up, _style, note) in sector_rows:
+            if u != last_u:
+                md += [f"## {u}", "", "| Sector | n | P/E | P/B | EV/EBITDA | "
+                       "6m | 12m | Upside | Lens |", "|---|---|---|---|---|---|---|---|---|"]
+                last_u = u
+            md.append(f"| {sector} | {n} | {fmt(pe)} | {fmt(pb)} | {fmt(ev)} | "
+                      f"{fmt(r6)} | {fmt(r12)} | "
+                      f"{f'{up:+.0f}%' if up is not None else 'n/a'} | "
+                      f"{note or ''} |")
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM stock_reports WHERE symbol='__sectors__' "
+                            "AND ts=%s", (today,))
+                cur.execute("INSERT INTO stock_reports (symbol, ts, report_md) "
+                            "VALUES ('__sectors__', %s, %s)", (today, "\n".join(md)))
+        print(f"sector analysis: {len(sector_rows)} sector rows", flush=True)
     conn.close()
     print(f"REPORT-OK reports={n_reports} digest={'yes' if digest_lines else 'no'}",
           flush=True)

@@ -42,7 +42,11 @@ FACTORS = {
     "growth": "growth_score", "momentum": "momentum_score", "risk": "risk_score",
 }
 UNIVERSES = {"nifty": "NIFTY500", "nifty500": "NIFTY500", "india": "NIFTY500",
-             "sp500": "SP500", "sp": "SP500", "us": "SP500"}
+             "sp500": "SP500", "sp": "SP500", "us": "SP500",
+             # ADR 0029 expansion universes
+             "sp400": "SP400", "midcap": "SP400", "sp600": "SP600",
+             "smallcap": "SP600", "microcap": "NIFTYMICROCAP250",
+             "micro": "NIFTYMICROCAP250"}
 SYMBOL_RE = re.compile(r"[A-Za-z0-9 .&\-]{1,40}")
 
 # /world layout: region → index_prices tickers, in display order. A ticker the
@@ -74,6 +78,15 @@ SHORT = {
     "WTI Crude Oil Futures": "WTI crude", "US Dollar Index (DXY)": "Dollar (DXY)",
 }
 DIGEST_QUOTES = ["^NSEI", "^BSESN", "^GSPC", "^VIX", "^INDIAVIX", "DX-Y.NYB", "GC=F"]
+
+# Index ticker → universe, so an index card can show constituent-level
+# valuation (median P/E, P/B, total market cap) computed from stock_fundamentals.
+# Non-stock indices (VIX, gold, dollar, …) have no mapping → no quant block.
+INDEX_UNIVERSE = {
+    "^GSPC": "SP500", "^SP400": "SP400", "^SP600": "SP600",
+    "^NSEI": "NIFTY500", "^BSESN": "NIFTY500",
+    "NIFTY_MICROCAP250.NS": "NIFTYMICROCAP250",
+}
 
 
 # ---------------------------------------------------------------- formatting
@@ -275,13 +288,16 @@ def quote_row(name, row):
 
 
 QUOTE_HEAD = ("", "Close", "Day", "YTD")
+QUOTE_LEGEND = "<i>Day = vs previous close · YTD = since 1 Jan</i>"
 
 
 def quote_table(q, tickers):
     """Close / day / YTD table for a fixed list of index tickers (digest, /vix)."""
     rows, names = index_rows(q)
     body = [quote_row(names.get(t, t), rows[t]) for t in tickers if t in rows]
-    return table(QUOTE_HEAD, body, "lrrr") if body else "No index rows in the last 15 days."
+    if not body:
+        return "No index rows in the last 15 days."
+    return table(QUOTE_HEAD, body, "lrrr") + "\n" + QUOTE_LEGEND
 
 
 def parse_world(text):
@@ -308,7 +324,7 @@ def world_text(q, only=None):
         return "No index rows in the last 15 days."
     as_of = max(r[1] for r in rows.values())
     out = [f"<b>World markets</b>  <i>latest closes, to {as_of:%d %b}</i>",
-           table(QUOTE_HEAD, body, "lrrr")]
+           table(QUOTE_HEAD, body, "lrrr"), QUOTE_LEGEND]
     if not only:
         ranked = sorted(
             (change(r[2], r[5]), names.get(k, k)) for k, r in rows.items()
@@ -444,6 +460,48 @@ def long_term_block(rows, ticker):
     return out
 
 
+def index_quant(q, universe):
+    """Median P/E, median P/B and total market cap for an index's constituents.
+
+    Computed from stock_fundamentals (latest per symbol), so an index card can
+    show "quant values" like a stock's /card does. Returns
+    (median_pe, median_pb, total_cap, n_pe, n_pb) or None when no data.
+    """
+    members = q(
+        "SELECT symbol FROM universe_constituents "
+        "WHERE universe = %s AND active", (universe,))
+    symbols = [r[0] for r in members]
+    if not symbols:
+        return None
+    # latest P/E and P/B per symbol (source-agnostic: newest filing wins)
+    rows = q(
+        "SELECT DISTINCT ON (symbol) symbol, metric, value FROM stock_fundamentals "
+        "WHERE symbol = ANY(%s) AND metric = ANY(%s) "
+        "ORDER BY symbol, metric, ts DESC",
+        (symbols, ["pe", "pb"]))
+    pes, pbs = {}, {}
+    for symbol, metric, value in rows:
+        if metric == "pe" and value is not None:
+            pes[symbol] = value
+        elif metric == "pb" and value is not None:
+            pbs[symbol] = value
+    # total market cap from latest snapshot per symbol
+    cap_rows = q(
+        "SELECT DISTINCT ON (symbol) symbol, value FROM stock_fundamentals "
+        "WHERE symbol = ANY(%s) AND metric = 'market_cap' "
+        "ORDER BY symbol, ts DESC", (symbols,))
+    caps = {s: v for s, v in cap_rows if v is not None}
+    if not pes and not pbs and not caps:
+        return None
+    def med(d):
+        vals = sorted(d.values())
+        if not vals:
+            return None
+        m = len(vals) // 2
+        return (vals[m] if len(vals) % 2 else (vals[m - 1] + vals[m]) / 2)
+    return (med(pes), med(pbs), sum(caps.values()) if caps else None, len(pes), len(pbs))
+
+
 def index_card(q, ticker, label, now=None):
     """Full picture of one index: recent performance and trend from the last
     year, then the long-term reference from everything on file."""
@@ -478,7 +536,19 @@ def index_card(q, ticker, label, now=None):
             ("vs 50-day average", since(sma(closes, 50))),
             ("vs 200-day average", since(sma(closes, 200))),
             ("RSI (14)", None if strength is None else f"{strength:.0f}")]),
-    ] + long_term_block(rows, ticker)
+    ]
+    # Index-level quant values from constituents (median P/E, P/B, total cap).
+    universe = INDEX_UNIVERSE.get(ticker)
+    if universe:
+        q_ = index_quant(q, universe)
+        if q_:
+            med_pe, med_pb, total_cap, n_pe, n_pb = q_
+            parts.append(kv([
+                ("P/E (median)", num(med_pe, 1) if med_pe is not None else "–"),
+                ("P/B (median)", num(med_pb, 1) if med_pb is not None else "–"),
+                ("Market cap", big(total_cap) if total_cap else "–"),
+                (f"Constituents", f"{n_pe} w/ P/E · {n_pb} w/ P/B")]))
+    parts += long_term_block(rows, ticker)
     return "\n".join(p for p in parts if p)
 
 
@@ -663,6 +733,13 @@ def stock_card(q, row):
         "ORDER BY ts DESC LIMIT 1", (symbol, start, start - timedelta(days=20)))
     ytd = change(close, year_start[0][0]) if year_start else None
 
+    # daily closes, the same basis as the screener's pos_52w — intraday
+    # highs/lows are unadjusted and would contradict the Trend block
+    hi52 = q(
+        "SELECT max(close), min(close) FROM stock_prices WHERE symbol = %s "
+        "AND ts >= now() - interval '52 weeks'", (symbol,))
+    hi52v, lo52v = (hi52[0] if hi52 else (None, None))
+
     m = dict(q(
         "SELECT metric, value FROM stock_metrics_daily WHERE symbol = %s AND ts = ("
         "SELECT max(ts) FROM stock_metrics_daily WHERE symbol = %s "
@@ -677,11 +754,13 @@ def stock_card(q, row):
     out += ["<b>Performance</b>", kv([
         ("1 month", frac("ret_1m")), ("6 months", frac("ret_6m")),
         ("Year to date", None if ytd is None else pct(ytd)),
-        ("12 months", frac("ret_12m"))])]
+        ("12 months", frac("ret_12m")),
+        ("52-week high (close)", px(hi52v) if hi52v is not None else None),
+        ("52-week low (close)", px(lo52v) if lo52v is not None else None)])]
     out += ["<b>Trend and risk</b>", kv([
         ("vs 50-day average", frac("sma50_ratio", shift=-1.0)),
         ("vs 200-day average", frac("sma200_ratio", shift=-1.0)),
-        ("Position in 52-week range", frac("pos_52w", share)),
+        ("Position in 52-w (% low→high)", frac("pos_52w", share)),
         ("RSI (14)", None if strength is None else f"{strength:.0f}"),
         ("Volatility, annualised", frac("vol_180d", share)),
         ("Max drawdown, 1 year", frac("max_dd_252d", lambda v: pct(v, 0))),
@@ -700,10 +779,13 @@ def stock_card(q, row):
         place = f"rank <b>{rank}</b> of {total}" if eligible and rank else "not eligible"
         conf = screener_confidence(coverage, (v, qu, g, mo, r),
                                    rank_history(q, [symbol]).get(symbol, []), total)
-        out += [f"<b>Screener</b>  {place}  <i>{sts:%d %b}</i>", kv([
-            ("Composite (0-100)", num(comp, 1)), ("Value", num(v)), ("Quality", num(qu)),
-            ("Growth", num(g)), ("Momentum", num(mo)), ("Risk (higher = steadier)", num(r)),
-            ("Confidence", f"{conf} {conf_label(conf)}")])]
+        out += [f"<b>Screener</b>  {place}  <i>run of {sts:%d %b}</i>", kv([
+            ("Composite score", num(comp, 1)),
+            ("Value", num(v)), ("Quality", num(qu)),
+            ("Growth", num(g)), ("Momentum", num(mo)),
+            ("Risk (higher = steadier)", num(r)),
+            ("Confidence", f"{conf} {conf_label(conf)}")]),
+            SCREENER_NOTE, CONF_NOTE]
 
     snap = {metric: (value, fts) for metric, value, fts in q(
         "SELECT DISTINCT ON (metric) metric, value, ts FROM stock_fundamentals "
@@ -720,7 +802,10 @@ def stock_card(q, row):
             "ORDER BY ts DESC LIMIT 1", (symbol, snap_ts, snap_ts - timedelta(days=10)))
         f, repriced = reprice({k: v for k, (v, _) in snap.items()}, close,
                               then[0][0] if then else None)
-        when = f"at the {ts:%d %b} close" if repriced else f"as reported {snap_ts:%d %b}"
+        when = (f"at the {ts:%d %b} close — P/E, P/B and market cap scaled from "
+                f"the {snap_ts:%d %b} snapshot by the price move (earnings, book "
+                f"value and shares assumed unchanged)" if repriced else
+                f"as reported {snap_ts:%d %b} — from the weekly fundamentals snapshot")
         fcf = annual.get("fcf", (None,))[0]
         debt = annual.get("total_debt", (None,))[0]
         equity = annual.get("shareholder_equity", (None,))[0]
@@ -737,6 +822,18 @@ def stock_card(q, row):
              else share(f["operating_margin"])),
             ("Debt / equity", f"{debt / equity:.2f}"
              if debt is not None and equity and equity > 0 else None)])]
+        # Deterministic fair-value panel (ADR 0026) — labelled, never advice.
+        try:
+            fv = q("SELECT fair_value, upside_pct, methods FROM v_latest_valuations "
+                   "WHERE symbol = %s", (symbol,))
+        except Exception as exc:  # noqa: BLE001 - only the missing-table case is expected
+            if not table_missing(exc):
+                raise
+            fv = []
+        if fv and fv[0][0] is not None:
+            fair, up, nm = fv[0]
+            out += [f"Fair value <b>{num(fair)}</b> ({up:+.0f}% vs close, "
+                    f"median of {nm} methods — <i>ADR 0026, not advice</i>)"]
     if annual:
         year = max(v[2] for v in annual.values())
         block = kv([("Revenue", yoy(annual, "total_revenue")), ("EPS", yoy(annual, "eps")),
@@ -905,6 +1002,11 @@ def watch_text(q, chat_id=None):
 CONF_HIGH, CONF_MEDIUM = 70, 45
 CONF_NOTE = ("<i>Conf = how complete and consistent the evidence is (0-100), "
              "not the chance the price rises.</i>")
+# One explanation of the derived scores, shared by every surface that shows
+# them (/top tables, stock cards) so the wording cannot drift.
+SCREENER_NOTE = ("<i>Scores are percentile ranks within the universe "
+                 "(1.00 = best); composite is 0-100. Screening output, "
+                 "not advice — /track shows how picks have done.</i>")
 
 
 def conf_label(score):
@@ -984,7 +1086,7 @@ def top_text(q, factor, universe, n=10):
         return str(screener_confidence(r[5], r[6:11], history.get(r[0], []), size))
 
     if factor == "composite":
-        tbl = table(("#", "", "Score", "YTD", "Conf"),
+        tbl = table(("#", "", "Composite", "YTD", "Conf"),
                     [(r[4], clip(bare(r[0]), 11), num(r[3], 1), year(r[0]), conf(r))
                      for r in rows], "rlrrr")
     else:
@@ -994,10 +1096,7 @@ def top_text(q, factor, universe, n=10):
     names = "\n".join(f"{esc(bare(r[0]))} — {esc(r[1])}" for r in rows[:5])
     return "\n".join([
         f"<b>Top {len(rows)} by {factor} — {universe}</b>  <i>run of {runs[0]:%d %b}</i>",
-        tbl, names,
-        "<i>Scores are percentile ranks within the universe (1.00 = best); composite "
-        "is 0-100. Screening output, not advice — /track shows how picks have done.</i>",
-        CONF_NOTE])
+        tbl, names, SCREENER_NOTE, CONF_NOTE])
 
 
 def parse_top(text):
@@ -1240,13 +1339,18 @@ def multibagger_text(q, universe, n=10):
     return "\n".join([
         head,
         f"{len(ranked)} of {len(names)} companies pass every gate",
-        table(("", "Score", "Rev", "EPS", "ROE", "Conf"), body, "lrrrrr"),
+        table(("", "Score", "Rev", "EPS", "ROE", "Conf"),
+              body, "lrrrrr"),
         detail,
         f"<i>Gates: revenue and earnings each compounding {share(MB_MIN_GROWTH)}+ a year "
         f"over the fiscal years on file (2-3), ROE {share(MB_MIN_ROE)}+, debt/equity under "
         f"{MB_MAX_DEBT_EQUITY:.0f} (financials exempt), outside the largest "
         f"{share(1 - MB_SIZE_CUT)} by market cap, PEG under {MB_MAX_PEG:.0f}, price above "
         f"its 200-day average. Dropped: {funnel}.</i>",
+        f"<i>Rev/EPS = revenue/earnings CAGR over fiscal years on file; ROE = return on equity. "
+        f"Score = growth 35 + quality 25 + valuation 15 + momentum 15 + size 10 (0-100). "
+        f"Conf = history 30 + earnings confirmed 20 + margin above gate 15 + cash flow 15 + "
+        f"ROE as reported 10 + price in upper 52-w half 10.</i>",
         "<i>This finds companies with the profile multibaggers usually had before the "
         "run. Most such companies still do not become one. Not advice.</i>",
         CONF_NOTE])
@@ -1327,10 +1431,11 @@ def track_text(q):
                 labels[n], pct(h["picks"], 2), pct(h["univ"], 2),
                 pct(h["picks"] - h["univ"], 2), f"{h['beat']}/{h['runs']}"))
         out += [f"<b>{universe}</b>",
-                table(("After", "Picks", "All", "Edge", "Won"), body, "lrrrr")]
-    out.append("<i>Won = runs where the picks beat the universe; – = that horizon has not "
-               "completed yet. Daily runs overlap, so longer horizons are not independent; "
-               "under ~60 runs this is anecdote.</i>")
+                table(("After", "Picks", "Univ", "Edge", "Won"), body, "lrrrr")]
+    out.append("<i>Picks/Univ = average return of the picks / of the whole universe over "
+               "that horizon; Edge = Picks − Univ; Won = runs where the picks beat the "
+               "universe; – = that horizon has not completed yet. Daily runs overlap, so "
+               "longer horizons are not independent; under ~60 runs this is anecdote.</i>")
     return "\n".join(out)
 
 
@@ -1421,14 +1526,122 @@ def crosses(metric_rows, now=None):
     return out
 
 
+# ADR 0029 tier separation: movers/regime/digest tops stay on the flagships;
+# the extended universes (SP400/SP600/NIFTYMICROCAP250) appear only explicitly
+# (/top sp600, /screener pages) or tagged (valuation watch).
+CORE_UNIVERSES = ("NIFTY500", "SP500")
+
+
 def alert_common(q, now=None):
-    """Shared change-alert lines (screener entries/exits) — identical for every user."""
+    """Shared change-alert lines (screener entries/exits + valuation watch) —
+    identical for every user."""
     lines = []
-    for universe in ("NIFTY500", "SP500"):
+    for universe in CORE_UNIVERSES:
         result = movers(q, universe)
         if result and is_fresh(result[0], now):
             lines += movers_lines(universe, result, ytd_map(q, [e[0] for e in result[2]]))
+    lines += alert_valuation(q, now)
     return lines
+
+
+# Valuation-watch gates (ADR 0026 amendment, owner-approved 2026-10-26).
+VAL_MIN_UPSIDE = 25.0     # median-fair-value upside, percent
+VAL_MIN_METHODS = 4       # methods that produced a number
+VAL_MIN_ABOVE = 3         # methods INDIVIDUALLY above the close (agreement)
+VAL_MAX_RANK = 50         # screener quality gate
+VAL_MAX_LINES = 5         # per run, across both universes
+VAL_EARNINGS_GAP_DAYS = 3  # suppress entries reporting within N days
+
+# ADR 0032 contract: the agreement count (methods_above_close) and the 4-day
+# bound live INSIDE v_valuations_recent — one definition for bot/UI/reports.
+VAL_CAND_SQL = (
+    "SELECT ts, symbol, universe, close, fair_value, upside_pct, methods, "
+    "methods_above_close FROM v_valuations_recent "
+    "WHERE upside_pct >= %s AND methods >= %s ORDER BY ts DESC")
+
+VAL_CTX_SQL = (
+    "SELECT s.symbol, s.rank, s.composite, c.name, c.sector, st.note "
+    "FROM (SELECT DISTINCT ON (symbol) symbol, rank, composite, eligible "
+    "      FROM stock_scores WHERE symbol = ANY(%s) "
+    "      AND ts >= now() - interval '14 days' ORDER BY symbol, ts DESC) s "
+    "JOIN universe_constituents c ON c.symbol = s.symbol "
+    "LEFT JOIN sector_styles st ON st.sector = c.sector "
+    "WHERE s.eligible AND s.rank IS NOT NULL AND s.rank <= %s")
+
+
+def alert_valuation(q, now=None):
+    """Valuation-watch lines: a name ENTERING the high-agreement value set —
+    screener rank <= 50 AND fair-value upside >= 25% with >= 4 methods, >= 3 of
+    them individually above the close (ADR 0026 amendment: deterministic data
+    echo with the reasoning in the line; clearly labelled, never advice).
+    Stateless like every alert here: compares today's valuation run with the
+    previous one, so a name alerts once on entry, not daily."""
+    try:
+        rows = q(VAL_CAND_SQL, (VAL_MIN_UPSIDE, VAL_MIN_METHODS))
+    except Exception as exc:  # noqa: BLE001 - only the missing-table case is expected
+        if not table_missing(exc):
+            raise
+        return []
+    if not rows:
+        return []
+    latest = max(r[0] for r in rows)
+    if not is_fresh(latest, now):
+        return []
+    today = {r[1]: r for r in rows if r[0] == latest and r[7] >= VAL_MIN_ABOVE}
+    prior = {r[1] for r in rows if r[0] != latest and r[7] >= VAL_MIN_ABOVE}
+    entered = [s for s in today if s not in prior]
+    if not entered:
+        return []
+    ctx = {r[0]: r for r in q(VAL_CTX_SQL, (entered, VAL_MAX_RANK))}
+    # Earnings gate (2026-10-26): a watch line right before a report is the
+    # most dangerous moment for it — suppress entries reporting within 3 days;
+    # if the setup survives the print, it re-enters on the next run.
+    reporting = earnings_soon(q, list(ctx), days=VAL_EARNINGS_GAP_DAYS)
+    ctx = {s: r for s, r in ctx.items() if s not in reporting}
+    lines = []
+    for sym in sorted(ctx, key=lambda s: -today[s][5])[:VAL_MAX_LINES]:
+        _ts, _s, uni, close, fair, up, nm, above = today[sym]
+        _sym, rank, comp, name, sector, note = ctx[sym]
+        # The rank is within ITS universe — tag it so an extended-tier #2
+        # (ADR 0029) can't be read as a flagship rank.
+        reason = (f"fair <b>{num(fair)}</b> vs close {num(close)} ({up:+.0f}%, "
+                  f"{above}/{nm} methods above close); screener rank <b>#{rank}</b> "
+                  f"in {esc(uni)}, composite {num(comp, 0)}")
+        lens = f" {esc(sector)}: <i>{esc(note)}</i>." if note else ""
+        lines.append(f"🟢 <b>{esc(name)}</b> ({esc(bare(sym))}) entered the "
+                     f"valuation watch — {reason}.{lens} "
+                     f"<i>ADR 0026 — not advice.</i>")
+    return lines
+
+
+def sectors_card(q, text=""):
+    """/sectors [universe] — latest sector aggregates, cheapest first.
+    Any UNIVERSES alias works (v28: 'sp' in text matched sp600 to SP500)."""
+    words = (text or "").lower().split()[1:]
+    universe = "NIFTY500"
+    if words:
+        if words[0] not in UNIVERSES:
+            return (f"Unknown universe '{esc(words[0])}'. One of: "
+                    f"{', '.join(sorted(set(UNIVERSES)))}")
+        universe = UNIVERSES[words[0]]
+    rows = q(
+        "SELECT m.sector, m.members, m.median_pe, m.median_upside_pct, st.note "
+        "FROM (SELECT DISTINCT ON (sector) * FROM sector_metrics "
+        "      WHERE universe = %s AND ts >= now() - interval '7 days' "
+        "      ORDER BY sector, ts DESC) m "
+        "LEFT JOIN sector_styles st ON st.sector = m.sector "
+        "ORDER BY m.median_upside_pct DESC NULLS LAST", (universe,))
+    if not rows:
+        return f"No sector data for {universe} yet."
+    width = max(len(s) for s, *_ in rows)
+    body = [f"{'Sector':<{width}}  {'n':>3}  {'P/E':>6}  {'Upside':>7}"]
+    for sector, n, pe, up, _note in rows:
+        body.append(f"{sector:<{width}}  {n:>3}  "
+                    f"{num(pe, 1) if pe is not None else '–':>6}  "
+                    f"{f'{up:+.0f}%' if up is not None else '–':>7}")
+    return (f"<b>Sectors — {universe}</b>  <i>median fair-value gap, ADR 0026</i>\n"
+            f"<pre>{esc(chr(10).join(body))}</pre>\n"
+            f"<i>Lens per sector: /stock &lt;symbol&gt; shows what matters. Not advice.</i>")
 
 
 def alert_sections(q, now=None, chat_id=None):
@@ -1475,3 +1688,177 @@ def alert_watch(q, chat_id, now=None):
     if mine:
         lines += ["<b>Your watchlist</b>"] + mine
     return lines
+
+
+# ---- Earnings calendar (schema 19, 2026-10-26) ----
+
+EARNINGS_SOON_SQL = (
+    "SELECT symbol, min(event_date) FROM earnings_calendar "
+    "WHERE symbol = ANY(%s) AND event_date BETWEEN CURRENT_DATE "
+    "AND CURRENT_DATE + %s GROUP BY symbol")
+
+
+def earnings_soon(q, symbols, days=7):
+    """{symbol: next event_date} within `days`; {} when the table is missing."""
+    if not symbols:
+        return {}
+    try:
+        return dict(q(EARNINGS_SOON_SQL, (list(symbols), days)))
+    except Exception as exc:  # noqa: BLE001 - only the missing-table case is expected
+        if not table_missing(exc):
+            raise
+        return {}
+
+
+def earnings_lines(q, symbols, days=7):
+    """Digest block: upcoming earnings for the given names, soonest first."""
+    soon = earnings_soon(q, symbols, days)
+    return [f"• <b>{esc(bare(s))}</b> — {d:%a %d %b}"
+            for s, d in sorted(soon.items(), key=lambda kv: (kv[1], kv[0]))]
+
+
+# ---- Market regime (descriptive traffic light, 2026-10-26) ----
+# Three deterministic legs per market; a leg with no fresh data drops out
+# rather than guessing. Descriptive display only — never a score input (EV-0).
+
+REGIME_MARKETS = (("US", "SP500", "^GSPC"), ("India", "NIFTY500", "^CRSLDX"))
+
+REGIME_BREADTH_SQL = (
+    "SELECT avg((m.value > 1)::int) FROM "
+    "(SELECT DISTINCT ON (symbol) symbol, value FROM stock_metrics_daily "
+    " WHERE metric = 'sma200_ratio' AND ts >= now() - interval '7 days' "
+    " ORDER BY symbol, ts DESC) m "
+    "JOIN universe_constituents c ON c.symbol = m.symbol "
+    "WHERE c.universe = %s AND c.active")
+
+REGIME_TREND_SQL = (
+    "SELECT (SELECT close FROM index_prices WHERE ticker = %s "
+    "        AND ts >= now() - interval '7 days' ORDER BY ts DESC LIMIT 1) "
+    "     > (SELECT avg(close) FROM (SELECT close FROM index_prices "
+    "        WHERE ticker = %s AND ts >= now() - interval '320 days' "
+    "        ORDER BY ts DESC LIMIT 200) t)")
+
+REGIME_MOM_SQL = (
+    "SELECT avg(value) > 0 FROM (SELECT value FROM factor_returns "
+    "WHERE market = %s AND factor = 'MOM' AND freq = 'M' "
+    "AND ts >= now() - interval '200 days' ORDER BY ts DESC LIMIT 3) t")
+
+
+def regime(q):
+    """[(label, light, parts)] per market. Legs: breadth (share of the universe
+    above its 200-day SMA), benchmark trend (close vs its own 200-bar mean),
+    3-month factor momentum (Ken French / IIM-A; drops out when stale)."""
+    out = []
+    for label, universe, bench in REGIME_MARKETS:
+        market = "US" if universe == "SP500" else "IN"
+        legs, parts = [], []
+        row = q(REGIME_BREADTH_SQL, (universe,))
+        breadth = row[0][0] if row and row[0][0] is not None else None
+        if breadth is not None:
+            legs.append(breadth > 0.5)
+            parts.append(f"breadth {breadth * 100:.0f}% above 200d")
+        row = q(REGIME_TREND_SQL, (bench, bench))
+        trend = row[0][0] if row else None
+        if trend is not None:
+            legs.append(bool(trend))
+            parts.append(f"{bench} {'above' if trend else 'below'} 200d mean")
+        row = q(REGIME_MOM_SQL, (market,))
+        mom = row[0][0] if row else None
+        if mom is not None:
+            legs.append(bool(mom))
+            parts.append(f"3m momentum {'positive' if mom else 'negative'}")
+        greens = sum(legs)
+        light = ("🟢" if legs and greens == len(legs) and len(legs) >= 2
+                 else "🔴" if legs and greens == 0 else "🟡")
+        out.append((label, light, parts))
+    return out
+
+
+def regime_line(q):
+    """One digest line, e.g. '🟢 US · 🟡 India — /regime for the legs'."""
+    rows = regime(q)
+    if not rows:
+        return ""
+    return ("<b>Regime</b> " +
+            " · ".join(f"{light} {label}" for label, light, _ in rows) +
+            "  <i>(descriptive — /regime)</i>")
+
+
+def regime_text(q):
+    """/regime — the legs behind the traffic lights."""
+    rows = regime(q)
+    lines = ["<b>Market regime</b> <i>(three deterministic legs; "
+             "descriptive only, never in scores)</i>"]
+    for label, light, parts in rows:
+        lines.append(f"{light} <b>{label}</b> — " +
+                     ("; ".join(parts) if parts else "no fresh inputs"))
+    return "\n".join(lines)
+
+
+CORE_TOP_SQL = (
+    "SELECT symbol FROM (SELECT DISTINCT ON (symbol) symbol, rank "
+    "FROM stock_scores WHERE ts >= now() - interval '7 days' AND eligible "
+    "AND universe IN ('SP500', 'NIFTY500') ORDER BY symbol, ts DESC) s "
+    "WHERE rank <= 25")
+
+
+def earnings_text(q, chat_id=None, days=14):
+    """/earnings — upcoming dates for YOUR watchlist + the core top-25s."""
+    symbols, watch = set(), set()
+    try:
+        watch = {r[0] for r in q(WATCH_SQL, (chat_id,))}
+    except Exception as exc:  # noqa: BLE001 - only the missing-table case is expected
+        if not table_missing(exc):
+            raise
+    symbols = watch | {r[0] for r in q(CORE_TOP_SQL)}
+    soon = earnings_soon(q, sorted(symbols), days=days)
+    if not soon:
+        return (f"No earnings dates in the next {days} days for your watchlist "
+                "or the core top-25s. (Calendar refreshes Sundays; NSE coverage "
+                "is patchy by source.)")
+    lines = [f"<b>Earnings — next {days} days</b> <i>(watchlist ★ + core top-25)</i>"]
+    for sym, d in sorted(soon.items(), key=lambda kv: (kv[1], kv[0])):
+        star = " ★" if sym in watch else ""
+        lines.append(f"• <b>{esc(bare(sym))}</b>{star} — {d:%a %d %b}")
+    return "\n".join(lines)
+
+
+def scorecard_text(q):
+    """/scorecard — prediction scorecard summary (ADR 0028): snapshot counts,
+    and top-vs-bottom decile excess once outcomes accrue."""
+    try:
+        counts = q("SELECT kind, count(*), min(ts)::date, max(ts)::date "
+                   "FROM prediction_snapshots GROUP BY kind ORDER BY kind")
+    except Exception as exc:  # noqa: BLE001 - only the missing-table case is expected
+        if not table_missing(exc):
+            raise
+        return "Scorecard tables not created yet."
+    if not counts:
+        return "No prediction snapshots yet — the tracker runs daily at 02:40 UTC."
+    lines = ["<b>Prediction scorecard</b> <i>(ADR 0028 — write-once, "
+             "benchmark-relative)</i>"]
+    for kind, n, first, last in counts:
+        lines.append(f"• {esc(kind)}: {n:,} snapshots, {first:%d %b} → {last:%d %b}")
+    deciles = q(
+        "SELECT s.kind, o.horizon_days, "
+        "avg(CASE WHEN s.dec = 1  THEN o.realized_ret - coalesce(o.bench_ret, 0) END), "
+        "avg(CASE WHEN s.dec = 10 THEN o.realized_ret - coalesce(o.bench_ret, 0) END), "
+        "count(*) "
+        "FROM (SELECT kind, symbol, ts, ntile(10) OVER "
+        "      (PARTITION BY kind, ts, universe ORDER BY value) AS dec "
+        "      FROM prediction_snapshots) s "
+        "JOIN prediction_outcomes o ON o.kind = s.kind AND o.symbol = s.symbol "
+        "AND o.ts = s.ts GROUP BY 1, 2 ORDER BY 1, 2")
+    if not deciles:
+        first_ts = min(r[2] for r in counts)
+        lines.append(f"\nNo resolved outcomes yet — the first land ~30 days "
+                     f"after {first_ts:%d %b} (then 91d, 182d). The marketview "
+                     f"/scorecard page has the full decile tables.")
+        return "\n".join(lines)
+    lines.append("\n<b>Decile 1 vs 10 — mean excess vs benchmark</b>")
+    for kind, horizon, top, bottom, n in deciles:
+        t = f"{top * 100:+.1f}%" if top is not None else "–"
+        b = f"{bottom * 100:+.1f}%" if bottom is not None else "–"
+        lines.append(f"• {esc(kind)} @ {horizon}d: d1 {t} vs d10 {b} (n={n:,})")
+    lines.append("<i>Not advice; deciles ranked within each universe.</i>")
+    return "\n".join(lines)
