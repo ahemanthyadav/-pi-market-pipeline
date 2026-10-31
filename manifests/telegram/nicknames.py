@@ -128,6 +128,33 @@ NICKNAMES = {
     "suryoday": "SURYODAY.NS",
     "esaf": "ESAF.NS",
     "capital small": "CAPSFB.NS",
+    # India — indices (all symbols carry ^ or .NS suffix, >5 chars)
+    "nifty": "^NSEI",
+    "nifty 50": "^NSEI",
+    "sensex": "^BSESN",
+    "bank nifty": "^NSEBANK",
+    "india vix": "^INDIAVIX",
+    "nifty midcap 150": "^NSEMDCP50.NS",
+    "nifty smallcap 250": "NIFTYSMLCAP250.NS",
+    "nifty it": "^CNXIT.NS",
+    "nifty pharma": "^CNXPHARMA.NS",
+    "nifty auto": "^CNXAUTO.NS",
+    "nifty fmcg": "^CNXFMCG.NS",
+    "nifty metal": "^CNXMETAL.NS",
+    "nifty realty": "^CNXREALY.NS",
+    "nifty energy": "^CNXENERGY.NS",
+    "nifty infra": "^CNXINFRA.NS",
+    "nifty psu bank": "^CNXPSUBANK.NS",
+    "nifty pvt bank": "^CNXPVTBANK.NS",
+    # FX (all >5 chars)
+    "usdinr": "USDINR=X",
+    "usd inr": "USDINR=X",
+    "dollar": "DX-Y.NYB",
+    "dxy": "DX-Y.NYB",
+    "dollar index": "DX-Y.NYB",
+    "euro": "EURUSD=X",
+    "yen": "USDJPY=X",
+    "pound": "GBPUSD=X",
 
 # Short alias → full command for command routing
 COMMAND_ALIASES = {
