@@ -65,6 +65,11 @@ headline_entities · headline_events · screener layer (§5.7)
 > Diagram convention used throughout this file: **solid arrows** = data writes or
 > pulls, **dashed arrows** = reads or control-plane relationships. All diagrams are
 > Mermaid fenced blocks (GitHub renders them natively).
+> **Visual companion:** `docs/system-architecture-visual.md` — expanded Mermaid
+> diagrams covering system context, deployment view, temporal job chain, data flow,
+> DB entity relationships, image rebuild cycle, failure detection, and the
+> project-to-project dependency map. Read this file for the canonical reference;
+> read the visual companion when you need to see how everything connects at a glance.
 
 ```mermaid
 flowchart LR
