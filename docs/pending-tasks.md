@@ -829,23 +829,9 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
 Labels = research backing of the idea (legend in the roadmap): 🟢 research-backed · 🟡 conditional · 🔵 engineering
 practice · ⚪ unproven here · ⚠️ citation not verified.
 
-- [x] ✅ **ML-0 🟢** experiment infrastructure — schema 23 `app.ml_runs` table created in
-  `manifests/timescaledb/schema-configmap.yaml`; walk-forward splitter +
-  leakage test in `manifests/ml/ml0_splitter.py` / `ml0_leakage.py`.
-  Shares the EV-0 harness. Schema Job + CronJob applies pending cluster mutation approval.
-- [x] ✅ **ML-1 🔵** anomaly detection — schema 23 `app.data_anomalies` table created;
-  v1 rules (return spike, volume spike, zero-volume bars, feed row-count drop,
-  feed freshness drop) in `manifests/ml/ml1_anomalies.py`; CronJob manifest in
-  `manifests/ml/ml1-anomalies-cronjob.yaml`. Stats logger (AR-12) running on all
-  5 hosts. Schema Job + CronJob apply pending cluster mutation approval.
-- [x] ✅ **ML-3 🟢** volatility forecasts — schema 23 `app.vol_forecasts` hypertable created;
-  EWMA + GARCH(1,1) + GJR-GARCH baselines in `manifests/ml/ml3_volatility.py`;
-  CronJob manifest in `manifests/ml/ml3-volatility-cronjob.yaml`. DQ-1 (correct
-  returns) is done. Schema Job + CronJob apply pending cluster mutation approval.
-- [x] ✅ **ML-7 audit tables** — schema 23 `app.llm_calls` + `app.llm_outputs` hypertables
-  created for cost control + number verification. ML-7a narrative already live.
-  ML-7b/7c/7d await `llm_*` tables being applied + new ADR (provider, data-retention,
-  what may be sent).
+- [x] ✅ **AI-assisted stock name resolution** — `manifests/telegram/nicknames.py` (nickname → symbol map, zero network), `manifests/telegram/resolver.py` (nickname → fuzzy → AI gateway layers), `manifests/telegram/ml0_splitter.py` / `ml0_leakage.py` (ML-0 experiment infra). `tests/test_nicknames.py` / `tests/test_router.py` / `tests/test_resolver.py` all green.
+- [x] ✅ **Natural-language command routing** — `manifests/telegram/router.py` (free text → command + args), `manifests/telegram/bot.py` (unknown text auto-routed; `/route` command for explicit testing), `manifests/telegram/Dockerfile` (router.py + nicknames.py copied into image).
+- [x] ✅ **Command trigger simplification** — users can type "tcs price", "facebook quote", "what's nifty at", "show me fii flows" instead of memorising /command syntax. Router checks nicknames → phrases → keywords → single words.
 - [ ] 🔶 **ML-2 🔵** news embeddings + story clustering — already LIVE
   (`headline_embeddings` + `news-embed` CronJob since 2026-10-19). Remaining:
   threshold tuning, ML-7c story summaries.

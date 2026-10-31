@@ -50,6 +50,7 @@ import requests
 
 import stocks
 import users
+import router
 from digest import TELEGRAM_LIMIT, build_message
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -114,6 +115,20 @@ def cmd_help(_text: str, chat: str = None) -> str:
     return text
 
 
+def cmd_route(text: str, chat: str = None) -> str:
+    """Explain how a natural-language query would be routed (/route tcs price)."""
+    arg = text.partition(" ")[2].strip()
+    if not arg:
+        return ("Try <code>/route tcs price</code>, <code>/route what's nifty at</code>, "
+                "<code>/route facebook quote</code>. The router matches nicknames, "
+                "phrases and keywords to the right command automatically — you don't "
+                "need to memorise /command syntax.")
+    r_cmd, r_args, r_conf = router.route(arg)
+    if r_cmd is None:
+        return f"I couldn't figure out a command for <code>{html.escape(arg)}</code>. "
+    return router.format_route(r_cmd, r_args, r_conf)
+
+
 def _help_text() -> str:
     return (
         "<b>Marketfredbot</b> — read-only commands:\n"
@@ -142,7 +157,9 @@ def _help_text() -> str:
         "/macro — gold in INR, yield spreads, FII vs Nifty\n"
         "/digest — your daily digest on demand\n"
         "Daily digest: 08:00 IST · change alerts after the screener run (shared screener "
-        "changes + your own watchlist)"
+        "changes + your own watchlist)\n"
+        "You can also type naturally: <code>tcs price</code>, <code>what's nifty at</code>, "
+        "<code>show me fii flows</code>, <code>facebook quote</code>"
     )
 
 
@@ -354,12 +371,13 @@ def cmd_rmuser(text: str, chat: str = None) -> str:
 # Commands that need to know WHO is asking get (text, chat); the rest stay (text) so
 # one-liners like COMMANDS['nifty']('/nifty') keep working. ADMIN is owner-only.
 PERSONAL = {"start", "help", "digest", "watch", "users", "adduser", "rmuser",
-            "earnings"}
+            "earnings", "route"}
 ADMIN = {"users", "adduser", "rmuser"}
 
 COMMANDS = {
     "start": cmd_help,
     "help": cmd_help,
+    "route": cmd_route,
     "status": cmd_status,
     "vix": cmd_vix,
     "nifty": cmd_nifty,
@@ -426,6 +444,18 @@ def handle(update: dict) -> None:
     cmd = text.split()[0].lstrip("/").split("@")[0].lower()
     handler = COMMANDS.get(cmd)
     if handler is None:
+        # Try the natural-language router before giving up ("tcs price" → /stock TCS)
+        r_cmd, r_args, r_conf = router.route(text)
+        if r_cmd and r_cmd in COMMANDS:
+            full_text = f"/{r_cmd} {r_args}".strip() if r_args else f"/{r_cmd}"
+            try:
+                send(COMMANDS[r_cmd](full_text, chat) if r_cmd in PERSONAL else COMMANDS[r_cmd](full_text), chat)
+                print(f"routed /{r_cmd} ({r_conf})", flush=True)
+                return
+            except Exception as exc:  # noqa: BLE001 - one bad query must not kill the loop
+                print(f"ERROR routed /{r_cmd}: {exc}", flush=True)
+                send("Command failed — see logs (kubectl logs deploy/telegram-bot).", chat)
+                return
         send(f"Unknown command. {chr(10)}" + cmd_help("", chat), chat)
         return
     if cmd in ADMIN and not REGISTRY.is_owner(chat):
@@ -502,6 +532,7 @@ MENU = [
     ("gold", "Gold futures"),
     ("fii", "FII/DII net flows"),
     ("help", "All commands"),
+    ("route", "Natural-language → command: /route tcs price"),
 ]
 
 
