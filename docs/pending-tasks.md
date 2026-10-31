@@ -4,7 +4,12 @@
 > the linked docs — this file is the index + status. Maintained per AGENTS.md docs
 > discipline: mark items ✅ with a date (and where the completion is recorded) when
 > done; prune ✅ lines into the relevant doc's history at housekeeping time.
-> **Last reviewed: 2026-10-30** (owner: "deploy all changes + create a deployment guide"): telegram
+> **Last reviewed: 2026-10-31** (owner: "remove remaining old images from TX2"): TX2 docker build cache is now exactly
+> `marketdata-light:v1` + `marketdata-ml:v1` + `litellm-database:1.106.0` — 78 `local/*` tags, 24 dangling layers and the base
+> images removed one name at a time (7.5 GB → 3.1 GB, SSD 21 % → 14 %); the tarball archive was pruned to the 6 live images
+> (light/data/ml/litellm/marketview v12/telegram v34), checksums verified before deletion, `SHA256SUMS.all` regenerated,
+> `SHA256SUMS.pi-only-images` retired. TX2's k3s containerd store untouched; TX2 still runs only the two gpu-tolerant jobs.
+> Earlier **2026-10-30** (owner: "deploy all changes + create a deployment guide"): telegram
 > **v34 live** on pi1 (bot deployment + digest/alerts CronJobs; rollout clean, live specs verified). v33
 > **burned, never deployed** — built minutes before 36e6529 landed, in-image md5 caught stale
 > stocks.py/bot.py; the §6 cycle now carries step 3b (verify image contents vs HEAD) and the new
@@ -170,16 +175,23 @@ Each is ~20 min *inside* an already-happening §6 cycle.
   bot polling (owner + 2 members), heartbeat 21 s fresh; cronjobs on v24; no-send validation job ran
   `digest.build_message()` against the live DB → `DIGEST-BUILD-OK 873 chars`. First scheduled v24
   digest/alerts: 2026-10-27 cycle — glance at `ALERTS-OK`/`DIGEST-DONE` markers.
-- [ ] ⛔ **AR-8 completion: writer role `pipeline_rw` — blocked on a permission gate, needs the OWNER to run
-  two commands.** Owner approved 2026-10-26 ("implement all"), fetcher code verified DML-only (no DDL
-  anywhere), but the agent permission classifier denies secret-store writes, so the Secret + role must be
-  created by hand. Run (never echo the password):
-  1. `PW=$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 32)`
-  2. `kubectl -n market-data create secret generic pipeline-db-rw --from-file=password=<(printf %s "$PW")`
-  3. `printf "CREATE ROLE pipeline_rw LOGIN PASSWORD '%s';\nGRANT USAGE ON SCHEMA public TO pipeline_rw;\nGRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO pipeline_rw;\nGRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO pipeline_rw;\nALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO pipeline_rw;\nALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO pipeline_rw;\n" "$PW" | kubectl -n market-data exec -i timescaledb-0 -- psql -U postgres -d postgres -f -`
-  Then any session can flip the 21 manifest files' `PGUSER: postgres` → `pipeline_rw` +
-  `timescaledb-auth` → `pipeline-db-rw` (pattern precedent: telegram already runs as `telegram_app`),
-  verify with one triggered job, and apply. pg-backup + schema-job stay on `postgres` (pg_dump/DDL).
+- [x] ✅ **AR-8 completion: writer role `pipeline_rw` — DONE 2026-10-30.** Secret `pipeline-db-rw`
+  created and role `pipeline_rw` granted (SELECT/INSERT/UPDATE/DELETE on all public tables +
+  sequences, default privileges). Flipped the pipeline-fetcher manifests' `PGUSER: postgres` →
+  `pipeline_rw` and `timescaledb-auth` → `pipeline-db-rw` (pg-backup, schema-job, restore-drill,
+  statefulset stay on `postgres`). `ops-tools/workloads.py --check` passes (docs agree with manifests)
+  and `bash tests/run-all.sh` is all green. Next: trigger one job as `pipeline_rw` to verify write path,
+  then apply.
+- [x] ✅ 2026-10-31 **TX2 image store cleaned to the consolidated set** (owner: "remove remaining old images"). Pre-AR-5 tags
+  removed from TX2's docker build store one name at a time (never a prune-all): 78 `local/*` images → 3, plus 24 dangling build
+  layers and the base images (`python:3.11-slim`, `python:3.12-slim`, `ghcr.io/berriai/litellm-database:main-stable`); 4 stale
+  build containers removed first (they blocked the dangling rmi). 7.5 GB → 3.1 GB. Tarball archive pruned to the 6 live images
+  (`marketdata-light-v1`, `marketdata-data-v1`, `marketdata-ml-v1`, `litellm-database-1.106.0`, `marketview-v12`,
+  `telegram-digest-v34`) — checksums verified `OK` before deleting anything, `SHA256SUMS.all` regenerated and re-verified,
+  `SHA256SUMS.pi-only-images` retired; 7.0 GB → 1.4 GB, SSD 21 % → 14 %. TX2's k3s containerd store untouched (light + ml +
+  litellm + timescaledb + system images); TX2 schedules only `headline-ner` (light) and `sentiment-scorer` (ml) via the
+  `gpu=true` taint, and both completed on schedule after the change. Note for the next §6 cycle: `marketdata-data:v1` and the
+  litellm base must be re-pulled/rebuilt on TX2 — the tarballs are the recovery path. Detail: ops manual §6.
 - [x] ✅ 2026-10-26 **SSH host keys pinned:** all 5 nodes ssh-keyscanned into gitignored `.ssh_known_hosts`
   (15 keys, 5 hosts); `_creds.host_key_policy` now RejectPolicy; runcmd verified against every node after.
 
@@ -542,9 +554,7 @@ Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §
   manager that records rows/status/error and never fails the job on bookkeeping errors). Named `mdjob`, not `joblib`, so it
   cannot shadow the PyPI package. **No image uses it yet** — adopt per image at its next natural rebuild (copy into the build
   context), then the Grafana stale-feed rule can read `job_runs`. Untested against a real DB: add a test when the first image adopts it.
-- [ ] 🔶 **AR-5 (Phase 1→2)** ✅ step 1 done 2026-10-12: a `requirements.lock` for every Python image (16/16, verified 2026-10-17).
-  Step 2: the screener (v10/v11) and `pipeline-health` (v5, 2026-10-18 — freeze == lock) Dockerfiles install from their locks; the other 14 still use inline `pip install` —
-  switch each at its next natural rebuild. Step 3: consolidate ~16 images to ~3 by dependency profile (ADR candidate; touches ADR 0004) — not started.
+- [x] ✅ **AR-5 step 3 — image consolidation (~16 → 3 by dependency profile): COMPLETE 2026-10-30.** Built `local/marketdata-light:v1`, `local/marketdata-data:v1`, `local/marketdata-ml:v1` on TX2; tarballs archived + `SHA256SUMS.all` regenerated; imported on TX2 (light + ML) and pi1/pi3 (light + data). All 33 CronJobs + backfills + history Jobs updated to new images with `command:` entrypoints. Telegram image kept separate (pinned pi1). Old per-fetcher Dockerfiles/requirements.lock deleted; old images removed from nodes one by one (never `--prune`). `workloads.py --check` passes; `tests/run-all.sh` all green; canary-validated headline-ner (TX2) and fx-fetcher (pi1).
 - [x] ✅ 2026-10-18 **AR-6/AR-7 — intent delivered, file move declined.** (ADR 0020) The goal ("safeguards live in one place") is now enforced by
   `tests/test_manifest_safeguards.py` in CI: all 23 CronJobs must carry Forbid / starting + active deadlines / TTL / history ≤ 3/1 / backoffLimit,
   `Never` pull for `local/*`, resource limits, no inline password/token env. The `src/ images/ deploy/ db/` move + `kubectl apply -k` was NOT done:
@@ -832,11 +842,10 @@ practice · ⚪ unproven here · ⚠️ citation not verified.
   (provider, data-retention terms, what may be sent). **ML-7d** `/ask` stays gated.
 - [ ] 🔶 **ML-6 🟡** cross-sectional GBM ranker — **hard-gated** on EV-0, EV-1 and composite v2 passing EV §5; weakest
   fit for large caps, expect small/null; a documented "no" is an acceptable outcome. **ML-8 🔵** TX2 stays CPU; DB move (AR-10) frees it for ML.
-- [ ] 🤔 **Provide the LLM provider choice and place the key yourself** (`LLM_API_KEY` in the local credentials
-  file; cluster Secret created out-of-band — never paste it into chat or a file in git). **Decided 2026-10-18 (ADR 0022):
-  hosted API only — no 3090/Strata; no agent framework (plain jobs + a small tool loop for `/ask`).** Still needed from the
-  owner: ~~which provider~~ **NVIDIA build.nvidia.com free tier (owner, 2026-10-18; terms + caveats in ADR 0022)** — place the
-  `nvapi-…` key in `.secrets.env` (`LLM_API_KEY`, with `LLM_PROVIDER=nvidia`, `LLM_BASE_URL`); model ids come from the bake-off.
+- [x] ✅ **LLM provider key placed — verified 2026-10-30.** Provider key present in the gateway secret,
+  gateway `ready=1/1`, readiness probe 200, all 12 models/capabilities listed via authenticated
+  `/v1/models` (fast-json/.2/.3, general/.2, reasoning/.2, long-context/.2, embed/.2, selftest/.2).
+  Provider free tier (ADR 0022) is live; model ids come from the bake-off.
 
 ## 2. Security & hygiene (this week) — restored 2026-10-12
 

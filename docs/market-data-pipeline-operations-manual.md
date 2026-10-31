@@ -161,39 +161,39 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 
 | CronJob | Schedule | Image (node-local, Never pull) | Writes to |
 |---|---|---|---|
-| nse-fetcher | 15 11 * * * | local/nse-fetcher:v7 (commits per calendar year) | index_prices (11 Indian indices: 9 via Yahoo incl. ^CRSLDX Nifty 500 + ^CNXAUTO/^CNXFMCG via NSE-direct indicesHistory since 2026-10-26 — the API caps 70 records/call, the fetcher paginates; MIDCAP150 pre-2019 history backfilled from NSE, Yahoo owns 2019-01-14→) |
-| fiidii-fetcher | 0 14 * * * | local/fiidii-fetcher:v2 | capital_flows (FII/DII net) |
-| factors-fetcher | 0 11 2 * * | local/factors-fetcher:v1 | factor_returns (US Ken French 5F+MOM, IN IIM-A four-factor — G-20; first mdjob/job_runs adopter) |
-| membership-history | 30 11 2 * * | local/screener:v28 | index_membership (EV-1, ADR 0025: point-in-time S&P 500 intervals from Wikipedia; full idempotent rebuild) |
-| stock-valuation | 10 2 * * * | local/screener:v28 | stock_valuations + sector_metrics (ADR 0026: 10-method intrinsic panel per symbol + daily sector aggregates; descriptive only) |
-| prediction-tracker | 40 2 * * * | local/screener:v28 | prediction_snapshots + prediction_outcomes (schema 18: write-once daily claims, resolved at 30/91/182d vs adjusted returns, benchmark-relative) |
-| earnings-calendar | 0 12 * * 0 | local/screener:v28 | earnings_calendar (schema 19: weekly yfinance refresh of upcoming earnings dates, all active constituents) |
-| accuracy-check | 30 12 * * 0 | local/screener:v28 | stock_reports `__accuracy__` (DQ-5: valuation internals recomputed in SQL, sector medians, membership drift, Stooq second-source price sample) |
-| research-watcher | 0 13 * * 1 | local/research-fetcher:v1 | research_items (ADR 0031: weekly paper collector — JF/JFE peer-reviewed feeds + NBER + arXiv; venue-tier + keyword scoring; append-only, never edits the curated Strategy Lab tiers) |
-| yfinance-fetcher | 30 22 * * * | local/yfinance-fetcher:v6 (commits per calendar year) | index_prices (29 tickers — `^RUI` Russell 1000 added 2026-10-10; **history from 1985** backfilled 2026-10-10 for all 38 index tickers: 292,387 rows, 299 chunks — 262 weekly for 2021-10 → 2026-10 plus one-year chunks for everything created since `set_chunk_time_interval('index_prices', '365 days')`; see `yfinance/backfill-job.yaml`) |
-| fx-fetcher | 0 23 * * * | local/fx-fetcher:v1 | fx_rates (10 pairs) |
-| yields-fetcher | 15 23 * * * | local/yields-fetcher:v1 | bond_yields (^TNX/^FVX/^TYX/^IRX) |
-| rates-fetcher | 20 23 * * * | local/rates-fetcher:v1 | interest_rates DFF + bond_yields DGS2/10/30 |
-| news-fetcher | 45 23 * * * | local/news-fetcher:v1 | raw_headlines (RSS staging) |
-| sentiment-scorer | 15 0 * * * | local/sentiment-fetcher:v1 (TX2 only) | news_sentiment |
-| ta-compute | 30 0 * * * | local/ta-compute:v1 | technical_indicators |
+| nse-fetcher | 15 11 * * * | local/marketdata-data:v1 (commits per calendar year) | index_prices (11 Indian indices: 9 via Yahoo incl. ^CRSLDX Nifty 500 + ^CNXAUTO/^CNXFMCG via NSE-direct indicesHistory since 2026-10-26 — the API caps 70 records/call, the fetcher paginates; MIDCAP150 pre-2019 history backfilled from NSE, Yahoo owns 2019-01-14→) |
+| fiidii-fetcher | 0 14 * * * | local/marketdata-light:v1 | capital_flows (FII/DII net) |
+| factors-fetcher | 0 11 2 * * | local/marketdata-light:v1 | factor_returns (US Ken French 5F+MOM, IN IIM-A four-factor — G-20; first mdjob/job_runs adopter) |
+| membership-history | 30 11 2 * * | local/marketdata-data:v1 | index_membership (EV-1, ADR 0025: point-in-time S&P 500 intervals from Wikipedia; full idempotent rebuild) |
+| stock-valuation | 10 2 * * * | local/marketdata-data:v1 | stock_valuations + sector_metrics (ADR 0026: 10-method intrinsic panel per symbol + daily sector aggregates; descriptive only) |
+| prediction-tracker | 40 2 * * * | local/marketdata-data:v1 | prediction_snapshots + prediction_outcomes (schema 18: write-once daily claims, resolved at 30/91/182d vs adjusted returns, benchmark-relative) |
+| earnings-calendar | 0 12 * * 0 | local/marketdata-data:v1 | earnings_calendar (schema 19: weekly yfinance refresh of upcoming earnings dates, all active constituents) |
+| accuracy-check | 30 12 * * 0 | local/marketdata-data:v1 | stock_reports `__accuracy__` (DQ-5: valuation internals recomputed in SQL, sector medians, membership drift, Stooq second-source price sample) |
+| research-watcher | 0 13 * * 1 | local/marketdata-light:v1 | research_items (ADR 0031: weekly paper collector — JF/JFE peer-reviewed feeds + NBER + arXiv; venue-tier + keyword scoring; append-only, never edits the curated Strategy Lab tiers) |
+| yfinance-fetcher | 30 22 * * * | local/marketdata-data:v1 (commits per calendar year) | index_prices (29 tickers — `^RUI` Russell 1000 added 2026-10-10; **history from 1985** backfilled 2026-10-10 for all 38 index tickers: 292,387 rows, 299 chunks — 262 weekly for 2021-10 → 2026-10 plus one-year chunks for everything created since `set_chunk_time_interval('index_prices', '365 days')`; see `yfinance/backfill-job.yaml`) |
+| fx-fetcher | 0 23 * * * | local/marketdata-data:v1 | fx_rates (10 pairs) |
+| yields-fetcher | 15 23 * * * | local/marketdata-data:v1 | bond_yields (^TNX/^FVX/^TYX/^IRX) |
+| rates-fetcher | 20 23 * * * | local/marketdata-data:v1 | interest_rates DFF + bond_yields DGS2/10/30 |
+| news-fetcher | 45 23 * * * | local/marketdata-light:v1 | raw_headlines (RSS staging) |
+| sentiment-scorer | 15 0 * * * | local/marketdata-ml:v1 (TX2 only) | news_sentiment |
+| ta-compute | 30 0 * * * | local/marketdata-data:v1 | technical_indicators |
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | /var/lib/market-data/backups on pi3 |
-| pipeline-health | 45 1 * * * | local/pipeline-health:v6 | pipeline_heartbeat (feed freshness, 14 feeds incl. rbi; weekend-safe 96 h on stock prices/scores since v5) |
-| intraday-fetcher | 10 * * * * | local/intraday-fetcher:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
-| universe-refresh | 0 9 * * 0 | local/screener:v28 | universe_constituents + ticker_names (998 symbols) |
-| stock-prices | 30 23 * * * | local/screener:v28 | stock_prices (998 symbols, 5d window) |
-| stock-fundamentals | 0 6 * * 6 | local/screener:v28 | stock_fundamentals (EDGAR US + yfinance NSE, resumable) |
-| stock-metrics | 0 2 * * * | local/screener:v28 | stock_metrics_daily |
-| stock-screener | 15 2 * * * | local/screener:v28 | stock_scores + screening_runs (v8: house conn pattern, both universes — see §8) |
-| stock-report | 30 2 * * * | local/screener:v28 | stock_reports (top-25/universe + __digest__; v8: today's shortlist only) |
-| nse-fundamentals | 0 10 * * 0 | local/screener:v28 | financial_facts `nse_cons`/`nse_sa` — India results filings (G-6, ADR 0021); **suspended until the first backfill completes** |
-| rbi-fetcher | 0 7 * * * | local/rbi-fetcher:v1 | interest_rates (7 IN_* policy rates) + bond_yields (5 G-Sec tenors + 3 T-bills) + pipeline_heartbeat self-row 'rbi' |
-| headline-ner | 45 0 * * * | local/headline-ner:v3 (TX2 only) | headline_entities + headline_events (gazetteer extraction over raw_headlines, ADR 0010) |
-| fdi-watch | 0 9 1 * * | local/fdi-watch:v1 | logs only (manual INSERT follows) |
+| pipeline-health | 45 1 * * * | local/marketdata-light:v1 | pipeline_heartbeat (feed freshness, 14 feeds incl. rbi; weekend-safe 96 h on stock prices/scores since v5) |
+| intraday-fetcher | 10 * * * * | local/marketdata-data:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |
+| universe-refresh | 0 9 * * 0 | local/marketdata-data:v1 | universe_constituents + ticker_names (998 symbols) |
+| stock-prices | 30 23 * * * | local/marketdata-data:v1 | stock_prices (998 symbols, 5d window) |
+| stock-fundamentals | 0 6 * * 6 | local/marketdata-data:v1 | stock_fundamentals (EDGAR US + yfinance NSE, resumable) |
+| stock-metrics | 0 2 * * * | local/marketdata-data:v1 | stock_metrics_daily |
+| stock-screener | 15 2 * * * | local/marketdata-data:v1 | stock_scores + screening_runs (v8: house conn pattern, both universes — see §8) |
+| stock-report | 30 2 * * * | local/marketdata-data:v1 | stock_reports (top-25/universe + __digest__; v8: today's shortlist only) |
+| nse-fundamentals | 0 10 * * 0 | local/marketdata-data:v1 | financial_facts `nse_cons`/`nse_sa` — India results filings (G-6, ADR 0021); **suspended until the first backfill completes** |
+| rbi-fetcher | 0 7 * * * | local/marketdata-light:v1 | interest_rates (7 IN_* policy rates) + bond_yields (5 G-Sec tenors + 3 T-bills) + pipeline_heartbeat self-row 'rbi' |
+| headline-ner | 45 0 * * * | local/marketdata-light:v1 (TX2 only) | headline_entities + headline_events (gazetteer extraction over raw_headlines, ADR 0010) |
+| fdi-watch | 0 9 1 * * | local/marketdata-light:v1 | logs only (manual INSERT follows) |
 | telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v34 (pinned pi1) | Telegram digest (read-only; no DB write) |
 | telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v34, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
-| llm-narrative | 40 7 * * * (Asia/Kolkata) | local/pipeline-health:v6 | llm_narratives — ML-7a AI market note via the shared llm-gateway (ADR 0022); digest shows it only if every number checks out |
-| news-embed | 0 1 * * * | local/pipeline-health:v6 | headline_embeddings — ML-2: embeds new headlines via the gateway `embed` capability, groups near-duplicates into stories (ADR 0024) |
+| llm-narrative | 40 7 * * * (Asia/Kolkata) | local/marketdata-light:v1 | llm_narratives — ML-7a AI market note via the shared llm-gateway (ADR 0022); digest shows it only if every number checks out |
+| news-embed | 0 1 * * * | local/marketdata-light:v1 | headline_embeddings — ML-2: embeds new headlines via the gateway `embed` capability, groups near-duplicates into stories (ADR 0024) |
 
 ### Always-on / one-shot resources
 
@@ -365,92 +365,106 @@ round-trips; a hostile value cannot inject a command).
 `nohup … >/tmp/x.log 2>&1 &` and be polled with `tail /tmp/x.log`; the TIMEOUT error from a
 long foreground command does NOT mean the remote command failed (it keeps running).
 
-**Full cycle — e.g., updating the yfinance fetcher to v6 (verified end-to-end for
-telegram-digest v34, 2026-10-30; the step-by-step wrapper lives in `docs/deployment-guide.md`):**
+**Full cycle — e.g., updating any feed in the consolidated data image (verified end-to-end for
+the fx fetcher import, 2026-10-31; the step-by-step wrapper lives in `docs/deployment-guide.md`):**
 
 ```bash
-# 1. Edit code + bump the tag EVERYWHERE the image is referenced:
-#    manifests/ingestion/yfinance/cronjob.yaml → image: local/yfinance-fetcher:v6
+# 1. Edit code in manifests/images/data/ (or light/ or ml/) — all scripts for that
+#    image profile live there. Bump nothing: the image tag is v1; code changes go
+#    into the same image and are re-built as a tarball.
 #    (telegram: cronjob.yaml has TWO jobs + deployment.yaml — bump all three;
-#    then python3 ops-tools/workloads.py --check to catch the doc tables too)
+#     then python3 ops-tools/workloads.py --check to catch the doc tables too)
 
 # 2. Ship the build context to a FRESH dir on the TX2 (a stale leftover file
 #    from an earlier build silently ships old code):
-python3 ops-tools/runcmd.py tx2 ahytx2 'rm -rf /home/ahytx2/yf-build && mkdir -p /home/ahytx2/yf-build && echo DIR-OK'
+python3 ops-tools/runcmd.py tx2 ahytx2 'rm -rf /home/ahytx2/md-build && mkdir -p /home/ahytx2/md-build && echo DIR-OK'
 for f in Dockerfile requirements.lock yfinance-fetcher.py; do   # everything the Dockerfile COPYs
-  python3 ops-tools/putfile.py tx2 ahytx2 manifests/ingestion/yfinance/$f /home/ahytx2/yf-build/$f
+  python3 ops-tools/putfile.py tx2 ahytx2 manifests/images/data/$f /home/ahytx2/md-build/$f
 done
 
 # 3. Build on TX2 (native ARM64, no QEMU). Warm cache ≈ seconds; cold pip
 #    layer can exceed the 120 s channel limit → nohup + poll (note above):
 python3 ops-tools/runcmd.py tx2 ahytx2 \
-  'echo @@PW@@ | sudo -S docker build -t local/yfinance-fetcher:v6 /home/ahytx2/yf-build 2>&1 | tail -2'
+  'echo @@PW@@ | sudo -S docker build -t local/marketdata-data:v1 /home/ahytx2/md-build 2>&1 | tail -2'
 
 # 3b. Verify the image carries the code you think it does (build-before-commit
 #     race: telegram v33 was built minutes before 36e6529 landed and shipped a
 #     stale stocks.py/bot.py — caught 2026-10-30 by this check; the tag was
 #     burned, never deployed). md5sum every COPY'd file in-image vs the repo:
 python3 ops-tools/runcmd.py tx2 ahytx2 \
-  'echo @@PW@@ | sudo -S docker run --rm local/yfinance-fetcher:v6 md5sum /app/yfinance-fetcher.py 2>/dev/null'
-md5sum manifests/ingestion/yfinance/yfinance-fetcher.py   # must match line for line
+  'echo @@PW@@ | sudo -S docker run --rm local/marketdata-data:v1 md5sum /app/fx-fetcher.py 2>/dev/null'
+md5sum manifests/images/data/fx-fetcher.py   # must match line for line
 
 # 4. Save the tarball STRAIGHT INTO the archive (restore source if a node's
 #    containerd store is lost — §8 prune incident), plus a home-dir copy to pull:
 python3 ops-tools/runcmd.py tx2 ahytx2 \
-  'echo @@PW@@ | sudo -S sh -c "docker save local/yfinance-fetcher:v6 | gzip > /mnt/tx2-ssd/image-tarballs/yfinance-fetcher-v6.tar.gz && cp /mnt/tx2-ssd/image-tarballs/yfinance-fetcher-v6.tar.gz /home/ahytx2/yfinance-fetcher-v6.tar.gz && chown ahytx2:ahytx2 /home/ahytx2/yfinance-fetcher-v6.tar.gz" && ls -lh /home/ahytx2/yfinance-fetcher-v6.tar.gz'
+  'echo @@PW@@ | sudo -S sh -c "docker save local/marketdata-data:v1 | gzip > /mnt/tx2-ssd/image-tarballs/marketdata-data-v1.tar.gz && cp /mnt/tx2-ssd/image-tarballs/marketdata-data-v1.tar.gz /home/ahytx2/marketdata-data-v1.tar.gz && chown ahytx2:ahytx2 /home/ahytx2/marketdata-data-v1.tar.gz" && ls -lh /home/ahytx2/marketdata-data-v1.tar.gz'
 python3 ops-tools/runcmd.py tx2 ahytx2 \
-  'cd /mnt/tx2-ssd/image-tarballs && echo @@PW@@ | sudo -S sh -c "sha256sum *.tar.gz > SHA256SUMS.all" && grep -c . SHA256SUMS.all'
+  'cd /mnt/tx2-ssd/image-tarballs && echo @@PW@@ | sudo -S sh -c "sha256sum *.tar.gz > SHA256SUMS.all" && grep marketdata-data SHA256SUMS.all'
 
 # 5. Pull the tarball to the admin machine:
 python3 ops-tools/getfile.py tx2 ahytx2 \
-  /home/ahytx2/yfinance-fetcher-v6.tar.gz /tmp/yfinance-fetcher-v6.tar.gz
+  /home/ahytx2/marketdata-data-v1.tar.gz /tmp/marketdata-data-v1.tar.gz
 
 # 6. Distribute — ONLY to the nodes the workload can schedule on:
 #    · node-pinned images (telegram-digest, marketview → pi1): that node only
 #    · TX2-only images (sentiment, headline-ner, …): skip this step entirely
 #    · unpinned CronJobs: all Pi workers (pi1/pi2/pi3)
-for h in pi1 pi2 pi3; do   # alias == login user on the Pis; trim to the pinned node where applicable
-  python3 ops-tools/putfile.py $h $h /tmp/yfinance-fetcher-v6.tar.gz /home/$h/yfinance-fetcher-v6.tar.gz
-  python3 ops-tools/runcmd.py $h $h "echo @@PW@@ | sudo -S /usr/local/bin/k3s ctr -n k8s.io images import /home/$h/yfinance-fetcher-v6.tar.gz 2>&1 | tail -1 && rm /home/$h/yfinance-fetcher-v6.tar.gz"
+for h in pi1 pi3; do   # data image runs on pi1/pi3; light runs on TX2 too; ml is TX2-only
+  python3 ops-tools/putfile.py $h $h /tmp/marketdata-data-v1.tar.gz /home/$h/marketdata-data-v1.tar.gz
+  python3 ops-tools/runcmd.py $h $h "echo @@PW@@ | sudo -S /usr/local/bin/k3s ctr -n k8s.io images import /home/$h/marketdata-data-v1.tar.gz 2>&1 | tail -1 && rm /home/$h/marketdata-data-v1.tar.gz"
 done
 # pi1/pi3 imports block ~20-90 s (fine); pi2 MUST run detached or it wedges the session:
 # python3 ops-tools/runcmd.py pi2 pi2 \
-#   "echo @@PW@@ | sudo -S bash -c 'nohup /usr/local/bin/k3s ctr -n k8s.io images import /home/pi2/yfinance-fetcher-v6.tar.gz >/tmp/yf-import.log 2>&1 &' && echo LAUNCHED"
+#   "echo @@PW@@ | sudo -S bash -c 'nohup /usr/local/bin/k3s ctr -n k8s.io images import /home/pi2/marketdata-data-v1.tar.gz >/tmp/yf-import.log 2>&1 &' && echo LAUNCHED"
 # Poll: python3 ops-tools/runcmd.py pi2 pi2 "tail -2 /tmp/yf-import.log"
 # Verify the import landed before applying anything:
-python3 ops-tools/runcmd.py pi1 pi1 'echo @@PW@@ | sudo -S /usr/local/bin/k3s ctr -n k8s.io images ls | grep yfinance-fetcher:v6 | head -1'
+python3 ops-tools/runcmd.py pi1 pi1 'echo @@PW@@ | sudo -S /usr/local/bin/k3s ctr -n k8s.io images ls | grep marketdata-data:v1 | head -1'
 
 # 7. Apply + validate (cluster-mutation pre-flight first: pi2 load < 2, see §7 item 5):
-kubectl apply -f manifests/ingestion/yfinance/cronjob.yaml
+kubectl apply -f manifests/ingestion/fx/cronjob.yaml
 # Always-on images (telegram bot): also apply deployment.yaml — the tag change
 # rolls the pod; a SAME-tag rebuild rolls nothing (imagePullPolicy: Never) and
 # is why every code change needs a bump.
 # Then the canary-validate skill checklist: verify the LIVE spec (jsonpath the
 # image — a sed'd yaml is not a deploy), --from=cronjob canary, poll-capture
 # logs before the pod vanishes, check the script's OK-marker:
-kubectl -n market-data get cronjob yfinance-fetcher -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}{"\n"}'
-kubectl create job -n market-data yf-validate --from=cronjob/yfinance-fetcher
-kubectl logs -n market-data job/yf-validate --tail=10
-# Expect: "fetched 29/29 tickers" + "wrote 29 rows into index_prices"
-kubectl -n market-data delete job yf-validate
+kubectl -n market-data get cronjob fx-fetcher -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}{"\n"}'
+kubectl create job -n market-data fx-validate --from=cronjob/fx-fetcher
+kubectl logs -n market-data job/fx-validate --tail=10
+# Expect: "fetched 10/10 pairs" + "wrote 10 rows into fx_rates"
+kubectl -n market-data delete job fx-validate
 
 # 8. Trust the DATABASE, not the exit code (silent-empty parsers exist):
 export KUBECONFIG=~/.kube/pi-cluster.yaml
 PW=$(kubectl -n market-data get secret timescaledb-auth -o jsonpath='{.data.password}' | base64 -d)
 kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
-  psql -U postgres -d postgres -c "SELECT count(*), count(DISTINCT ticker) FROM index_prices;"
+  psql -U postgres -d postgres -c "SELECT count(*), count(DISTINCT pair) FROM fx_rates;"
 ```
 
-**Image tarball store (2026-10-18):** `/mnt/tx2-ssd/image-tarballs/` on the TX2 holds a gzip tarball of EVERY image a manifest
-references, checksums in `SHA256SUMS.all` — the restore source if a node's containerd store is lost (incident §8). Step 4
-above keeps it current (78 tarballs as of 2026-10-30); never skip the SHA256SUMS regeneration.
+**Image tarball store (2026-10-18; pruned to live images 2026-10-31):** `/mnt/tx2-ssd/image-tarballs/` on the TX2 holds a gzip
+tarball of EVERY image a manifest references, checksums in `SHA256SUMS.all` — the restore source if a node's containerd store is
+lost (incident §8). Step 4 above keeps it current; never skip the SHA256SUMS regeneration. **Post-AR-5 the archive holds only the
+live images** — `marketdata-light:v1`, `marketdata-data:v1`, `marketdata-ml:v1`, `litellm-database:1.106.0`, `marketview:v12`,
+`telegram-digest:v34` (6 tarballs, 1.4 GB, all `sha256sum -c` OK at prune time; the ~76 historical tags were removed after
+verifying their checksums, and `SHA256SUMS.pi-only-images` went with them). Historical tags are no longer kept: the repo +
+`requirements.lock` can rebuild any of them, and the live-image tarballs are what a store loss actually needs.
+
+**TX2 docker build cache (2026-10-31):** the build store now holds exactly `local/marketdata-light:v1`, `local/marketdata-ml:v1`
+and `local/litellm-database:1.106.0` — every pre-AR-5 per-fetcher tag, the old marketview/telegram tags, the 24 dangling build
+layers and the base images (`python:3.11-slim`, `python:3.12-slim`, `ghcr.io/berriai/litellm-database:main-stable`) were removed
+one tag at a time by name (7.5 GB → 3.1 GB; SSD 21 % → 14 %). Consequence: the next `marketdata-data` or litellm rebuild rebuilds
+from a re-pulled base, and `marketdata-data:v1` now exists on TX2 only as a tarball plus pi1/pi3's containerd stores. The k3s
+containerd store on TX2 was NOT touched — it still holds light + ml + litellm + timescaledb + system images, which is all TX2 can
+schedule (only `headline-ner` and `sentiment-scorer` tolerate the `gpu=true:NoSchedule` taint). Removal used `docker rmi <name>`,
+never a prune-all.
 
 **Dependency locking:** After any build, dump the versions:
 ```bash
 python3 ops-tools/runcmd.py tx2 ahytx2 \
-  'echo @@PW@@ | sudo -S docker run --rm local/yfinance-fetcher:v6 pip freeze 2>/dev/null | grep -Ei "^(yfinance|pandas|psycopg|numpy|requests)"'
+  'echo @@PW@@ | sudo -S docker run --rm local/marketdata-data:v1 pip freeze 2>/dev/null | grep -Ei "^(yfinance|pandas|psycopg|numpy|requests)"'
 ```
-Paste output into `manifests/ingestion/yfinance/requirements.lock` for reproducible rebuilds.
+Paste output into `manifests/images/data/requirements.lock` for reproducible rebuilds.
 
 ## 7. Daily operations checklist
 

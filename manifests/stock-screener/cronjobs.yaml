@@ -27,18 +27,18 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: universe
-              image: local/screener:v28
+              image: local/marketdata-data:v1
               imagePullPolicy: Never
               command: ["python", "universe_refresh.py"]
               env:
                 - name: PGHOST
                   value: timescaledb.market-data.svc.cluster.local
                 - name: PGUSER
-                  value: postgres
+                  value: pipeline_rw
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: timescaledb-auth
+                      name: pipeline-db-rw
                       key: password
                 - name: PGDATABASE
                   value: postgres
@@ -68,18 +68,18 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: prices
-              image: local/screener:v28
+              image: local/marketdata-data:v1
               imagePullPolicy: Never
               command: ["python", "stock_prices.py"]
               env:
                 - name: PGHOST
                   value: timescaledb.market-data.svc.cluster.local
                 - name: PGUSER
-                  value: postgres
+                  value: pipeline_rw
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: timescaledb-auth
+                      name: pipeline-db-rw
                       key: password
                 - name: PGDATABASE
                   value: postgres
@@ -109,7 +109,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: fundamentals
-              image: local/screener:v28
+              image: local/marketdata-data:v1
               imagePullPolicy: Never
               command: ["python", "stock_fundamentals.py"]
               env:
@@ -118,11 +118,11 @@ spec:
                 - name: PGHOST
                   value: timescaledb.market-data.svc.cluster.local
                 - name: PGUSER
-                  value: postgres
+                  value: pipeline_rw
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: timescaledb-auth
+                      name: pipeline-db-rw
                       key: password
                 - name: PGDATABASE
                   value: postgres
@@ -152,18 +152,18 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: metrics
-              image: local/screener:v28
+              image: local/marketdata-data:v1
               imagePullPolicy: Never
               command: ["python", "stock_metrics.py"]
               env:
                 - name: PGHOST
                   value: timescaledb.market-data.svc.cluster.local
                 - name: PGUSER
-                  value: postgres
+                  value: pipeline_rw
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: timescaledb-auth
+                      name: pipeline-db-rw
                       key: password
                 - name: PGDATABASE
                   value: postgres
@@ -193,7 +193,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: screener
-              image: local/screener:v28
+              image: local/marketdata-data:v1
               imagePullPolicy: Never
               command: ["python", "stock_screener.py"]
               env:
@@ -205,11 +205,11 @@ spec:
                 - name: PGHOST
                   value: timescaledb.market-data.svc.cluster.local
                 - name: PGUSER
-                  value: postgres
+                  value: pipeline_rw
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: timescaledb-auth
+                      name: pipeline-db-rw
                       key: password
                 - name: PGDATABASE
                   value: postgres
@@ -239,7 +239,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: report
-              image: local/screener:v28
+              image: local/marketdata-data:v1
               imagePullPolicy: Never
               command: ["python", "stock_report.py"]
               env:
@@ -248,11 +248,11 @@ spec:
                 - name: PGHOST
                   value: timescaledb.market-data.svc.cluster.local
                 - name: PGUSER
-                  value: postgres
+                  value: pipeline_rw
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: timescaledb-auth
+                      name: pipeline-db-rw
                       key: password
                 - name: PGDATABASE
                   value: postgres
@@ -290,7 +290,7 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: nse-fundamentals
-              image: local/screener:v28
+              image: local/marketdata-data:v1
               imagePullPolicy: Never
               command: ["python", "nse_fundamentals.py"]
               env:
@@ -299,11 +299,11 @@ spec:
                 - name: PGHOST
                   value: timescaledb.market-data.svc.cluster.local
                 - name: PGUSER
-                  value: postgres
+                  value: pipeline_rw
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: timescaledb-auth
+                      name: pipeline-db-rw
                       key: password
                 - name: PGDATABASE
                   value: postgres
@@ -338,18 +338,18 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: membership
-              image: local/screener:v28
+              image: local/marketdata-data:v1
               imagePullPolicy: Never
               command: ["python", "membership_history.py"]
               env:
                 - name: PGHOST
                   value: timescaledb.market-data.svc.cluster.local
                 - name: PGUSER
-                  value: postgres
+                  value: pipeline_rw
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: timescaledb-auth
+                      name: pipeline-db-rw
                       key: password
                 - name: PGDATABASE
                   value: postgres
@@ -384,18 +384,18 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: valuation
-              image: local/screener:v28
+              image: local/marketdata-data:v1
               imagePullPolicy: Never
               command: ["python", "valuation.py"]
               env:
                 - name: PGHOST
                   value: timescaledb.market-data.svc.cluster.local
                 - name: PGUSER
-                  value: postgres
+                  value: pipeline_rw
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: timescaledb-auth
+                      name: pipeline-db-rw
                       key: password
                 - name: PGDATABASE
                   value: postgres
@@ -428,18 +428,18 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: predictions
-              image: local/screener:v28
+              image: local/marketdata-data:v1
               imagePullPolicy: Never
               command: ["python", "predictions.py"]
               env:
                 - name: PGHOST
                   value: timescaledb.market-data.svc.cluster.local
                 - name: PGUSER
-                  value: postgres
+                  value: pipeline_rw
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: timescaledb-auth
+                      name: pipeline-db-rw
                       key: password
                 - name: PGDATABASE
                   value: postgres
@@ -471,18 +471,18 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: earnings
-              image: local/screener:v28
+              image: local/marketdata-data:v1
               imagePullPolicy: Never
               command: ["python", "earnings_calendar.py"]
               env:
                 - name: PGHOST
                   value: timescaledb.market-data.svc.cluster.local
                 - name: PGUSER
-                  value: postgres
+                  value: pipeline_rw
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: timescaledb-auth
+                      name: pipeline-db-rw
                       key: password
                 - name: PGDATABASE
                   value: postgres
@@ -515,18 +515,18 @@ spec:
           automountServiceAccountToken: false
           containers:
             - name: accuracy
-              image: local/screener:v28
+              image: local/marketdata-data:v1
               imagePullPolicy: Never
               command: ["python", "accuracy_check.py"]
               env:
                 - name: PGHOST
                   value: timescaledb.market-data.svc.cluster.local
                 - name: PGUSER
-                  value: postgres
+                  value: pipeline_rw
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: timescaledb-auth
+                      name: pipeline-db-rw
                       key: password
                 - name: PGDATABASE
                   value: postgres
