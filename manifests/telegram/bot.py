@@ -84,6 +84,22 @@ def query(sql: str, args: tuple = ()) -> list:
             print(f"WARN db retry ({exc.__class__.__name__})", flush=True)
 
 
+def symbol_lookup(text: str):
+    """Universe symbol for a user-typed name/symbol, or None (never raises).
+
+    Same resolution layers as /stock (stocks.pick_one_ex): exact symbol or name,
+    then the forgiving resolver (fuzzy spelling, then AI when BOT_AI_RESOLVE=1).
+    Lets every command understand stocks missing from the static nickname map —
+    "/status cub" → CUB.NS, "city union" → CUB.NS.
+    """
+    try:
+        row, _problem, _note = stocks.pick_one_ex(query, text)
+    except Exception as exc:  # noqa: BLE001 — routing must never break the bot
+        print(f"WARN symbol lookup {text!r}: {exc.__class__.__name__}", flush=True)
+        return None
+    return row[0] if row else None
+
+
 def execute(sql: str, args: tuple = ()) -> int:
     """One atomic write to the bot-owned watchlist table; returns rowcount."""
     conn = psycopg.connect(
@@ -123,7 +139,7 @@ def cmd_route(text: str, chat: str = None) -> str:
                 "<code>/route facebook quote</code>. The router matches nicknames, "
                 "phrases and keywords to the right command automatically — you don't "
                 "need to memorise /command syntax.")
-    r_cmd, r_args, r_conf = router.route(arg)
+    r_cmd, r_args, r_conf = router.route(arg, symbol_lookup, COMMANDS)
     if r_cmd is None:
         return f"I couldn't figure out a command for <code>{html.escape(arg)}</code>. "
     return router.format_route(r_cmd, r_args, r_conf)
@@ -445,7 +461,7 @@ def handle(update: dict) -> None:
     handler = COMMANDS.get(cmd)
     if handler is None:
         # Try the natural-language router before giving up ("tcs price" → /stock TCS)
-        r_cmd, r_args, r_conf = router.route(text)
+        r_cmd, r_args, r_conf = router.route(text, symbol_lookup, COMMANDS)
         if r_cmd and r_cmd in COMMANDS:
             full_text = f"/{r_cmd} {r_args}".strip() if r_args else f"/{r_cmd}"
             try:
@@ -461,6 +477,13 @@ def handle(update: dict) -> None:
     if cmd in ADMIN and not REGISTRY.is_owner(chat):
         send("That command is for the owner only.", chat)
         return
+    # A no-argument command followed by a stock name means that stock:
+    # "/status cub", "/movers cub" → /stock CUB.NS (ARG_COMMANDS keep their args).
+    args_text = text.split(None, 1)[1].strip() if len(text.split()) > 1 else ""
+    sym = router.symbol_from_args(cmd, args_text, symbol_lookup)
+    if sym:
+        text, cmd, handler = f"/stock {sym}", "stock", COMMANDS["stock"]
+        print(f"rerouted /status-style → /stock {sym}", flush=True)
     try:
         result = handler(text, chat) if cmd in PERSONAL else handler(text)
         # If the handler returned a usage error (e.g. parse_top couldn't parse
@@ -469,7 +492,7 @@ def handle(update: dict) -> None:
             # Strip the command word before passing to router so "/top tcs stock"
             # becomes "tcs stock" which matches nickname "tcs" → stock TCS.NS
             router_text = text.split(None, 1)[1] if len(text.split()) > 1 else text
-            r_cmd, r_args, r_conf = router.route(router_text)
+            r_cmd, r_args, r_conf = router.route(router_text, symbol_lookup, COMMANDS)
             if r_cmd and r_cmd in COMMANDS:
                 full_text = f"/{r_cmd} {r_args}".strip() if r_args else f"/{r_cmd}"
                 try:

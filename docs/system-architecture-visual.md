@@ -370,7 +370,7 @@ flowchart LR
 | `local/marketdata-ml:v1` | TX2 | sentiment-scorer (GPU taint path) |
 | `local/litellm-database:1.106.0` | TX2 | llm-gateway Deployment |
 | `local/marketview:v12` | pi1 | marketview web app |
-| `local/telegram-digest:v34` | pi1 | telegram-bot, telegram-digest, telegram-alerts |
+| `local/telegram-digest:v37` | pi1 | telegram-bot, telegram-digest, telegram-alerts |
 | `timescale/timescaledb:2.30.1-pg16` | TX2 | TimescaleDB StatefulSet |
 | `grafana/grafana:12.2.0` | pi3 | Grafana |
 

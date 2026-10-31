@@ -196,7 +196,7 @@ kubectl -n market-data wait --for=condition=Ready pod -l app=tts-service --timeo
 
 ## Phase 4 — Wire the Telegram bot to STT/TTS (on pi1)
 
-The `telegram-bot` Deployment (image `local/telegram-digest:v34`, pinned pi1) needs
+The `telegram-bot` Deployment (image `local/telegram-digest:v37`, pinned pi1) needs
 voice-message handling added to `bot.py`:
 
 1. On receiving a voice message, download the `.ogg` file via Telegram File API

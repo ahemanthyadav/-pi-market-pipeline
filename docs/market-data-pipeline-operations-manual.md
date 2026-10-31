@@ -190,8 +190,8 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | rbi-fetcher | 0 7 * * * | local/marketdata-light:v1 | interest_rates (7 IN_* policy rates) + bond_yields (5 G-Sec tenors + 3 T-bills) + pipeline_heartbeat self-row 'rbi' |
 | headline-ner | 45 0 * * * | local/marketdata-light:v1 (TX2 only) | headline_entities + headline_events (gazetteer extraction over raw_headlines, ADR 0010) |
 | fdi-watch | 0 9 1 * * | local/marketdata-light:v1 | logs only (manual INSERT follows) |
-| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v34 (pinned pi1) | Telegram digest (read-only; no DB write) |
-| telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v34, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
+| telegram-digest | 0 8 * * * — **timeZone: Asia/Kolkata**, the only explicit-TZ job (ADR 0009) | local/telegram-digest:v37 (pinned pi1) | Telegram digest (read-only; no DB write) |
+| telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v37, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
 | llm-narrative | 40 7 * * * (Asia/Kolkata) | local/marketdata-light:v1 | llm_narratives — ML-7a AI market note via the shared llm-gateway (ADR 0022); digest shows it only if every number checks out |
 | news-embed | 0 1 * * * | local/marketdata-light:v1 | headline_embeddings — ML-2: embeds new headlines via the gateway `embed` capability, groups near-duplicates into stories (ADR 0024) |
 | ml1-anomalies | 0 2 * * * | local/marketdata-data:v1 | data_anomalies — ML-1: return/volume spikes, zero-volume bars, feed row-count + freshness drops |
@@ -455,7 +455,7 @@ kubectl -n market-data exec timescaledb-0 -- env PGPASSWORD="$PW" \
 tarball of EVERY image a manifest references, checksums in `SHA256SUMS.all` — the restore source if a node's containerd store is
 lost (incident §8). Step 4 above keeps it current; never skip the SHA256SUMS regeneration. **Post-AR-5 the archive holds only the
 live images** — `marketdata-light:v1`, `marketdata-data:v1`, `marketdata-ml:v1`, `litellm-database:1.106.0`, `marketview:v12`,
-`telegram-digest:v34` (6 tarballs, 1.4 GB, all `sha256sum -c` OK at prune time; the ~76 historical tags were removed after
+`telegram-digest:v37` (6 tarballs, 1.4 GB, all `sha256sum -c` OK at prune time; the ~76 historical tags were removed after
 verifying their checksums, and `SHA256SUMS.pi-only-images` went with them). Historical tags are no longer kept: the repo +
 `requirements.lock` can rebuild any of them, and the live-image tarballs are what a store loss actually needs.
 
