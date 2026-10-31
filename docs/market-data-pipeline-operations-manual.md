@@ -1,8 +1,8 @@
 # Market Data Pipeline — Operations Manual & System Reference
 
-> **Reconciled with `manifests/` 2026-10-30** (schedules/images checked by `ops-tools/workloads.py --check`; §6 cycle
-> re-verified end-to-end with the telegram-digest v33/v34 builds; §7 Grafana dashboard list recounted — 11).
-> **Last fully healthy cluster check: 2026-10-30** — all 4 k8s nodes Ready (pi2 cordoned), 35 CronJobs live
+> **Reconciled with `manifests/` 2026-10-31** (schedules/images checked by `ops-tools/workloads.py --check`; §6 cycle
+> re-verified end-to-end; TX2 docker build store pruned to light/ml/litellm only, tarball archive pruned to 6 live images).
+> **Last fully healthy cluster check: 2026-10-31** — all 4 k8s nodes Ready (pi2 cordoned), 35 CronJobs live
 > (`nse-fundamentals` suspended by design until the DG-03 backfill completes), TimescaleDB/Grafana/Telegram-bot
 > all Running. See §8 and pending-tasks §1 for known gaps.
 > **Repo layout (2026-10-03):** everything lives in `projects/marketdata/` —
