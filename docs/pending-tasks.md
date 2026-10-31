@@ -866,9 +866,7 @@ practice · ⚪ unproven here · ⚠️ citation not verified.
   port-forwarding page is empty — no rules exist, so the "stale WireGuard forward" in the old docs no longer describes this router.
   Nothing was reachable; nothing to remove. (If the panel has a UPnP active-mappings table, one glance there is a free extra check.)
   Detail: roadmap §11; ops manual §12.9.
-- [ ] 🔶 **Find out who messaged the bot** — the old `telegram-bot` pod's log showed a chat NOT on the allow-list sending `/status`
-  (ignored; the allow-list works). Worth knowing who it was. 2026-10-12 08:46 UTC: the current pod's log shows a group chat (`/top`, `/status`,
-  `/gold`) and a private chat (`/start`) being ignored just before the two `/adduser` calls — probably the person now added as `sailu`; owner to confirm, then close.
+- [x] ✅ **Find out who messaged the bot — resolved 2026-10-31.** It was `sailu`; `bot_users` already has 2 active rows named `sailu` (one private chat, one group chat). Allow-list confirmed working (the stranger chat was ignored). Item closed.
 - [x] ✅ 2026-10-12 pi2 cordon dated: taint `node.kubernetes.io/unschedulable` `timeAdded` = 2026-10-10 06:11:25 UTC (during the outage
   recovery). Reason inferred from timing, not recorded — owner may confirm; **keep it cordoned** (1 GB control plane).
 
