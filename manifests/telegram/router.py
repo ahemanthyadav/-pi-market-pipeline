@@ -57,6 +57,13 @@ def route(text: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         cmd = m.group(1).lower()
         args = m.group(3).strip()
         if cmd in nicknames.KEYWORD_COMMANDS:
+            # If any word in args is a nickname, route to stock instead
+            arg_words = args.split()
+            for word in arg_words:
+                if word in nicknames.NICKNAMES:
+                    sym = nicknames.NICKNAMES[word]
+                    if sym != "none":
+                        return "stock", sym, "nickname"
             return cmd, args, "exact"
         # Not a real command — treat the rest as regular text for nickname/keyword checks
         t = args

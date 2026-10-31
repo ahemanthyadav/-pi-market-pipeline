@@ -122,6 +122,7 @@ Each is ~20 min *inside* an already-happening §6 cycle.
 | EV-10…14 → EV-17/18 composite v2 | 2+ sessions | data gates CLEARED 2026-10-26 (EV-1 US + EV-9 live); next = EV-0 §5 re-run on point-in-time membership, then per-universe rules = owner |
 | ~~G-20 factor returns~~ | ✅ done 2026-10-26 (`factors-fetcher:v1` live, terms verified; EV-0 §5 test-4 extension rides the next scoring change) | done |
 | G-21 extra signals | ~1 session each | each must pass EV-0 §5 |
+| **Orin Nano STT/TTS voice node** | ~2–3 sessions | Add Orin Nano as k3s worker (taint `hardware=orin`), build `stt-service`/`tts-service` images on TX2, deploy via §6 cycle, wire `bot.py` to voice messages (docs: `docs/orin-nano-stt-tts-runbook.md`) |
 | ~~Auto/FMCG + MIDCAP150 fetcher~~ | ✅ done 2026-10-26 (`nse-fetcher:v7`, series live 2015→today) | done |
 | ML-0 experiment infra / ML-1 anomaly v1 | 1–2 sessions | shares EV-0 harness |
 | ML-3 vol / ML-5 peers / ML-4 regime | ~1 session each | ML-4 descriptive-only until EV-0 shows value |
