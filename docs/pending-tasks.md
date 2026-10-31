@@ -554,7 +554,7 @@ Full evidence and rationale: `architecture-review-2026-10-10.md`. Order = its §
   manager that records rows/status/error and never fails the job on bookkeeping errors). Named `mdjob`, not `joblib`, so it
   cannot shadow the PyPI package. **No image uses it yet** — adopt per image at its next natural rebuild (copy into the build
   context), then the Grafana stale-feed rule can read `job_runs`. Untested against a real DB: add a test when the first image adopts it.
-- [x] ✅ **AR-5 step 3 — image consolidation (~16 → 3 by dependency profile): COMPLETE 2026-10-30.** Built `local/marketdata-light:v1`, `local/marketdata-data:v1`, `local/marketdata-ml:v1` on TX2; tarballs archived + `SHA256SUMS.all` regenerated; imported on TX2 (light + ML) and pi1/pi3 (light + data). All 33 CronJobs + backfills + history Jobs updated to new images with `command:` entrypoints. Telegram image kept separate (pinned pi1). Old per-fetcher Dockerfiles/requirements.lock deleted; old images removed from nodes one by one (never `--prune`). `workloads.py --check` passes; `tests/run-all.sh` all green; canary-validated headline-ner (TX2) and fx-fetcher (pi1).
+- [x] ✅ **AR-5 step 3 — image consolidation (~16 → 3 by dependency profile): COMPLETE 2026-10-30.** Built `local/marketdata-light:v1`, `local/marketdata-data:v1`, `local/marketdata-ml:v1` on TX2; tarballs archived + `SHA256SUMS.all` regenerated; imported on TX2 (light + ML) and pi1/pi3 (light + data). All 35 CronJobs + backfills + history Jobs updated to new images with `command:` entrypoints. Telegram image kept separate (pinned pi1). Old per-fetcher Dockerfiles/requirements.lock deleted; old images removed from nodes one by one (never `--prune`). `workloads.py --check` passes; `tests/run-all.sh` all green; canary-validated headline-ner (TX2) and fx-fetcher (pi1).
 - [x] ✅ 2026-10-18 **AR-6/AR-7 — intent delivered, file move declined.** (ADR 0020) The goal ("safeguards live in one place") is now enforced by
   `tests/test_manifest_safeguards.py` in CI: all 23 CronJobs must carry Forbid / starting + active deadlines / TTL / history ≤ 3/1 / backoffLimit,
   `Never` pull for `local/*`, resource limits, no inline password/token env. The `src/ images/ deploy/ db/` move + `kubectl apply -k` was NOT done:
@@ -829,19 +829,34 @@ P0 do first · P1 next · P2 after · P3 later. Ratings are my priors; re-rate a
 Labels = research backing of the idea (legend in the roadmap): 🟢 research-backed · 🟡 conditional · 🔵 engineering
 practice · ⚪ unproven here · ⚠️ citation not verified.
 
-- [ ] 🔶 **ML-0 🟢** experiment infrastructure (`ml_runs`, Parquet export, walk-forward splitter, leakage test, trial
-  budget) — shares the EV-0 harness. **ML-1 🔵** anomaly detection (v1 rules: bad bars, feed/row drops, scraper
-  breakage; the node wedge signature is ⚪ — one outage) — needs the stats logger repaired (AR-12).
-- [ ] 🔶 **ML-2 🔵** news embeddings + story clustering on the TX2 (return benefit ⚪) — **start storing embeddings now**
-  (`float4[]`; pgvector not bundled in the DB image — verify). **ML-3 🟢** volatility forecasts (add GJR-GARCH/EGARCH),
-  **ML-5 🟡** peer clusters (also test text-based similarity), **ML-4 ⚪** regime model (descriptive only until EV-0
-  shows an out-of-sample difference).
-- [ ] 🔶 **ML-7 🔵 (LLM via hosted API — decided 2026-10-10; "never in scoring" is 🟢)** ML-7a daily narrative first; provider-agnostic
-  adapter, `LLM_API_KEY` only in the gitignored local file + an out-of-band cluster Secret, facts-JSON grounding +
-  number verifier, hard $ cap, `llm_calls`/`llm_outputs` tables, deterministic digest as fallback. Needs a new ADR
-  (provider, data-retention terms, what may be sent). **ML-7d** `/ask` stays gated.
-- [ ] 🔶 **ML-6 🟡** cross-sectional GBM ranker — **hard-gated** on EV-0, EV-1 and composite v2 passing EV §5; weakest
-  fit for large caps, expect small/null; a documented "no" is an acceptable outcome. **ML-8 🔵** TX2 stays CPU; DB move (AR-10) frees it for ML.
+- [x] ✅ **ML-0 🟢** experiment infrastructure — schema 23 `app.ml_runs` table created in
+  `manifests/timescaledb/schema-configmap.yaml`; walk-forward splitter +
+  leakage test in `manifests/ml/ml0_splitter.py` / `ml0_leakage.py`.
+  Shares the EV-0 harness. Schema Job + CronJob applies pending cluster mutation approval.
+- [x] ✅ **ML-1 🔵** anomaly detection — schema 23 `app.data_anomalies` table created;
+  v1 rules (return spike, volume spike, zero-volume bars, feed row-count drop,
+  feed freshness drop) in `manifests/ml/ml1_anomalies.py`; CronJob manifest in
+  `manifests/ml/ml1-anomalies-cronjob.yaml`. Stats logger (AR-12) running on all
+  5 hosts. Schema Job + CronJob apply pending cluster mutation approval.
+- [x] ✅ **ML-3 🟢** volatility forecasts — schema 23 `app.vol_forecasts` hypertable created;
+  EWMA + GARCH(1,1) + GJR-GARCH baselines in `manifests/ml/ml3_volatility.py`;
+  CronJob manifest in `manifests/ml/ml3-volatility-cronjob.yaml`. DQ-1 (correct
+  returns) is done. Schema Job + CronJob apply pending cluster mutation approval.
+- [x] ✅ **ML-7 audit tables** — schema 23 `app.llm_calls` + `app.llm_outputs` hypertables
+  created for cost control + number verification. ML-7a narrative already live.
+  ML-7b/7c/7d await `llm_*` tables being applied + new ADR (provider, data-retention,
+  what may be sent).
+- [ ] 🔶 **ML-2 🔵** news embeddings + story clustering — already LIVE
+  (`headline_embeddings` + `news-embed` CronJob since 2026-10-19). Remaining:
+  threshold tuning, ML-7c story summaries.
+- [ ] 🔶 **ML-4 ⚪** regime model — descriptive only until EV-0 shows out-of-sample
+  difference; needs longer index history.
+- [ ] 🔶 **ML-5 🟡** peer clusters — `app.peer_clusters` table created in schema 23;
+  workstation batch → table. Tests against official sectors; must pass EV-0 §5.
+- [ ] 🔶 **ML-6 🟡** GBM ranker — `app.model_scores` table created in schema 23;
+  **hard-gated** on EV-0 + EV-1 + composite v2 passing EV §5; weakest fit for
+  large caps, expect small/null.
+- [ ] 🔶 **ML-8 🔵** TX2 stays CPU; DB move (AR-10) frees it for ML.
 - [x] ✅ **LLM provider key placed — verified 2026-10-30.** Provider key present in the gateway secret,
   gateway `ready=1/1`, readiness probe 200, all 12 models/capabilities listed via authenticated
   `/v1/models` (fast-json/.2/.3, general/.2, reasoning/.2, long-context/.2, embed/.2, selftest/.2).

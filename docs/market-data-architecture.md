@@ -2,7 +2,7 @@
 
 > **Status:** live in production on the home k3s cluster. Updated 2026-10-18 (screener v12, health v5, roles,
 > chunk merge, data foundations — plan: `engineering-plan-2026-10-18.md`). Reconciled with `manifests/` 2026-10-10
-> (33 CronJobs since 2026-10-26; `ops-tools/workloads.py --check` keeps the tables honest). **Live state re-verified
+> (35 CronJobs since 2026-10-26; `ops-tools/workloads.py --check` keeps the tables honest). **Live state re-verified
 > 2026-10-17: all 4 k8s nodes Ready (pi2 control-plane cordoned), every CronJob then deployed (23) active, TimescaleDB,
 > Grafana, and Telegram bot all Running.** (see ops manual §8 and pending-tasks for known gaps).
 > Doc map: this file = **architecture** (what the system is);
@@ -78,7 +78,7 @@ flowchart LR
     end
 
     subgraph K8S["k3s cluster · namespace market-data · Tailscale-only perimeter"]
-        JOBS["33 CronJobs + 2 Deployments<br/>(fetchers · scorers · screener chain · telegram)"]
+        JOBS["35 CronJobs + 2 Deployments<br/>(fetchers · scorers · screener chain · telegram)"]
         TSDB[("TimescaleDB 2.30.1-pg16<br/>single instance · TX2 sda4 SSD")]
         GRAF["Grafana 12 (pi3)<br/>6 dashboards · 3 alert rules"]
         TGB["Telegram digest CronJob +<br/>two-way listener Deployment (pi1)"]
@@ -255,7 +255,7 @@ whole DB via `pg_dump`.*
 |---|---|---|
 | Orchestration | k3s (server v1.36.4+k3s1; TX2 agent pinned v1.35.3+k3s1) | Whole cluster |
 | DNS | Pi-hole v6.4.3 + unbound | pi0 |
-| Scheduling | k3s CronJobs (33 live); no workflow engine by design (pi2 RAM) | Pi workers / TX2 |
+| Scheduling | k3s CronJobs (35 live); no workflow engine by design (pi2 RAM) | Pi workers / TX2 |
 | Storage | TimescaleDB 2.30.1-pg16 (Postgres 16.15) | TX2, sda4 SSD |
 | Ingestion | Python 3.12-slim images: `yfinance`, `pandas`, `psycopg[binary]`, `feedparser`, `fredapi` | Pi workers |
 | Sentiment/NLP | FinBERT on CPU (TX2 inference needs no GPU at this volume) | TX2 only |
@@ -630,6 +630,8 @@ layer (JOINs on ticker/symbol), not in DDL.*
 | telegram-alerts | 45 2 * * * (node-local) | local/telegram-digest:v34, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only; silent when nothing changed) |
 | llm-narrative | 40 7 * * * (Asia/Kolkata) | local/marketdata-light:v1 | llm_narratives — ML-7a AI market note via the shared llm-gateway (ADR 0022); digest shows it only if every number checks out |
 | news-embed | 0 1 * * * | local/marketdata-light:v1 | headline_embeddings — ML-2: embeds new headlines via the gateway `embed` capability, groups near-duplicates into stories (ADR 0024) |
+| ml1-anomalies | 0 2 * * * | local/marketdata-data:v1 | data_anomalies — ML-1: return/volume spikes, zero-volume bars, feed row-count + freshness drops |
+| ml3-volatility | 0 3 * * * | local/marketdata-data:v1 | vol_forecasts — ML-3: EWMA + GARCH(1,1) + GJR-GARCH volatility forecasts |
 | pg-backup | 30 1 * * * | timescale/timescaledb:2.30.1-pg16 (pi3) | pi3 SSD dumps |
 | pipeline-health | 45 1 * * * | local/marketdata-light:v1 | pipeline_heartbeat (14 feeds incl. rbi; stock prices/scores 96 h since v5) |
 | intraday-fetcher | 10 * * * * | local/marketdata-data:v1 | fx_rates (hourly FX) + intraday_prices (GC/SI/CL/DXY) |

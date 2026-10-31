@@ -32,7 +32,7 @@ well-accepted" work.
    (EV-19 PEAD, EV-20 fundamental quality/value panels), per the house rule.
 
 ## Consequences
-- 33 CronJobs; one more tiny image (`research-fetcher`, requests + stdlib XML).
+- 35 CronJobs; one more tiny image (`research-fetcher`, requests + stdlib XML).
 - A journal feed dying (or more bot walls) degrades per-source with a WARN,
   like the news RSS feeds (F13 pattern).
 - The radar is metadata-only (titles/authors/links) — abstracts and full text

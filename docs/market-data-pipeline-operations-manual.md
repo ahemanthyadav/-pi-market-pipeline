@@ -2,7 +2,7 @@
 
 > **Reconciled with `manifests/` 2026-10-30** (schedules/images checked by `ops-tools/workloads.py --check`; §6 cycle
 > re-verified end-to-end with the telegram-digest v33/v34 builds; §7 Grafana dashboard list recounted — 11).
-> **Last fully healthy cluster check: 2026-10-30** — all 4 k8s nodes Ready (pi2 cordoned), 33 CronJobs live
+> **Last fully healthy cluster check: 2026-10-30** — all 4 k8s nodes Ready (pi2 cordoned), 35 CronJobs live
 > (`nse-fundamentals` suspended by design until the DG-03 backfill completes), TimescaleDB/Grafana/Telegram-bot
 > all Running. See §8 and pending-tasks §1 for known gaps.
 > **Repo layout (2026-10-03):** everything lives in `projects/marketdata/` —
@@ -194,6 +194,8 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
 | telegram-alerts | 45 2 * * * (node-local, after the screener chain) | local/telegram-digest:v34, `args: alerts.py` (pinned pi1) | Telegram change alerts (read-only): screener top-20 entries/exits, watchlist moves/crossings/news events; silent when nothing changed (added 2026-10-10) |
 | llm-narrative | 40 7 * * * (Asia/Kolkata) | local/marketdata-light:v1 | llm_narratives — ML-7a AI market note via the shared llm-gateway (ADR 0022); digest shows it only if every number checks out |
 | news-embed | 0 1 * * * | local/marketdata-light:v1 | headline_embeddings — ML-2: embeds new headlines via the gateway `embed` capability, groups near-duplicates into stories (ADR 0024) |
+| ml1-anomalies | 0 2 * * * | local/marketdata-data:v1 | data_anomalies — ML-1: return/volume spikes, zero-volume bars, feed row-count + freshness drops |
+| ml3-volatility | 0 3 * * * | local/marketdata-data:v1 | vol_forecasts — ML-3: EWMA + GARCH(1,1) + GJR-GARCH volatility forecasts |
 
 ### Always-on / one-shot resources
 
@@ -233,6 +235,13 @@ Applied with `kubectl apply` after a `kubectl diff` review; it did not change `s
   replace only line 8 — the ConfigMap reference further down must keep its name). The permission config denies deleting
   anything named `timescaledb…` (rule 5), so the old Job cannot be deleted and re-created. Schema 09 (multi-user bot) was applied
   this way on 2026-10-12 as `schema-multiuser-09`; a first attempt (`timescaledb-schema-09`, ConfigMap name rewritten by a too-broad
+   **Schema 23 — ML tables (2026-10-31):** added `app.ml_runs`, `app.data_anomalies`,
+   `app.vol_forecasts`, `app.regime_labels`, `app.peer_clusters`, `app.model_scores`,
+   `app.llm_calls`, `app.llm_outputs` (all additive, idempotent CREATE IF NOT EXISTS).
+   Applied as `schema-ml-23` via the same re-running procedure. Grants `pipeline_rw`
+   write access on `app.*` (AR-8); `grafana_ro`/`telegram_app` keep SELECT-only via
+   default privileges.
+
   sed) never started and was suspended, not deleted.
 - Intraday (2026-10-03): `intraday-fetcher` hourly at :10 — yfinance 1h×2d
   candles; FX → `fx_rates` (hourly rows, coexists with daily), gold/silver/
@@ -477,7 +486,7 @@ kubectl get nodes
 
 # 2. CronJob schedules present?
 kubectl get cronjobs -n market-data
-# Should show 33 CronJobs: nse-fetcher, fiidii-fetcher, yfinance-fetcher, … nse-fundamentals,
+# Should show 35 CronJobs: nse-fetcher, fiidii-fetcher, yfinance-fetcher, … nse-fundamentals,
 # fx-fetcher, yields-fetcher, rates-fetcher, news-fetcher, sentiment-scorer,
 # ta-compute, pg-backup, pipeline-health, intraday-fetcher, fdi-watch,
 # universe-refresh, stock-prices, stock-fundamentals, stock-metrics,

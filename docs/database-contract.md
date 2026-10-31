@@ -48,7 +48,7 @@ marketview's screener/sectors/markets/multibagger/strategy queries.
 | `grafana_ro` | SELECT everywhere (default privileges) | Grafana, marketview |
 | `telegram_app` | SELECT + writes ONLY on `watchlist`, `bot_users` | Telegram bot |
 | `litellm` | its own gateway state | llm-gateway |
-| `pipeline_rw` *(pending)* | read/write data tables, no DDL/roles | all 33 CronJobs after AR-8 |
+| `pipeline_rw` *(pending)* | read/write data tables, no DDL/roles | all 35 CronJobs after AR-8 |
 
 **AR-8 is the one open gap** and is owner-run by design (the agent permission
 system refuses secret-store writes): the exact `kubectl create secret` +

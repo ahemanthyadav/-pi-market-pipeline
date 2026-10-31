@@ -832,3 +832,114 @@ data:
       LEFT JOIN universe_constituents c ON c.symbol = e.symbol AND c.active
       WHERE e.event_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 30
       GROUP BY e.symbol;
+  23-ml-tables.sql: |
+    -- ML experiment infrastructure and model outputs (ML roadmap 2026-10-10,
+    -- ADR 0032 contract: app-state tables live in the `app` schema).
+    -- All tables additive; idempotent CREATE IF NOT EXISTS. Written by ML
+    -- CronJobs (marketdata-data:v1 image) and workstation batch scripts.
+    -- pipeline_rw (AR-8) needs INSERT on these; grafana_ro/telegram_app keep
+    -- SELECT-only via default privileges below.
+    CREATE SCHEMA IF NOT EXISTS app;
+    GRANT USAGE ON SCHEMA app TO pipeline_rw;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA app TO pipeline_rw;
+    ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA app
+      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO pipeline_rw;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT ON TABLES TO grafana_ro;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT ON TABLES TO telegram_app;
+
+    -- ML-0 experiment infrastructure: one row per experiment run.
+    CREATE TABLE IF NOT EXISTS app.ml_runs (
+      run_id        TEXT PRIMARY KEY,
+      name          TEXT NOT NULL,
+      git_sha       TEXT NOT NULL,
+      params        JSONB NOT NULL DEFAULT '{}',
+      data_window   TSTZRANGE,
+      data_hash     TEXT,
+      seed          INT,
+      metrics       JSONB NOT NULL DEFAULT '{}',
+      artifact_path TEXT,
+      artifact_hash TEXT,
+      started_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      ended_at      TIMESTAMPTZ
+    );
+
+    -- ML-1 anomaly detection: data quality + node health flags.
+    CREATE TABLE IF NOT EXISTS app.data_anomalies (
+      kind     TEXT NOT NULL,       -- bad_bar | feed_drop | row_count_drop | scraper_drop | node_wedge
+      subject  TEXT NOT NULL,       -- symbol | feed | node
+      ts       TIMESTAMPTZ NOT NULL,
+      score    DOUBLE PRECISION,
+      details  JSONB NOT NULL DEFAULT '{}',
+      PRIMARY KEY (kind, subject, ts)
+    );
+    CREATE INDEX IF NOT EXISTS ix_data_anomalies_ts ON app.data_anomalies (ts);
+
+    -- ML-3 volatility forecasts: EWMA + GARCH(1,1) + GJR-GARCH/EGARCH baselines.
+    CREATE TABLE IF NOT EXISTS app.vol_forecasts (
+      symbol   TEXT NOT NULL,
+      ts       TIMESTAMPTZ NOT NULL,
+      model    TEXT NOT NULL,       -- ewma | garch | gjr_garch | egarch
+      horizon  INT NOT NULL,        -- days ahead
+      forecast DOUBLE PRECISION NOT NULL,
+      PRIMARY KEY (symbol, ts, model, horizon)
+    );
+    SELECT create_hypertable('app.vol_forecasts', 'ts', if_not_exists => TRUE);
+    SELECT set_chunk_time_interval('app.vol_forecasts', INTERVAL '365 days');
+
+    -- ML-4 regime labels (descriptive only until EV-0 shows out-of-sample value).
+    CREATE TABLE IF NOT EXISTS app.regime_labels (
+      ts         TIMESTAMPTZ NOT NULL,
+      model      TEXT NOT NULL,
+      regime     INT NOT NULL,
+      probability DOUBLE PRECISION,
+      PRIMARY KEY (ts, model)
+    );
+    SELECT create_hypertable('app.regime_labels', 'ts', if_not_exists => TRUE);
+    SELECT set_chunk_time_interval('app.regime_labels', INTERVAL '365 days');
+
+    -- ML-5 peer clusters: correlation + text-based clusters per symbol.
+    CREATE TABLE IF NOT EXISTS app.peer_clusters (
+      symbol  TEXT NOT NULL,
+      cluster INT NOT NULL,
+      method  TEXT NOT NULL,       -- correlation | text | hybrid
+      as_of   DATE NOT NULL,
+      PRIMARY KEY (symbol, method, as_of)
+    );
+
+    -- ML-6 model scores (hard-gated on EV-0 + EV-1 + composite v2 passing §5).
+    CREATE TABLE IF NOT EXISTS app.model_scores (
+      symbol TEXT NOT NULL,
+      ts     TIMESTAMPTZ NOT NULL,
+      model  TEXT NOT NULL,
+      score  DOUBLE PRECISION NOT NULL,
+      PRIMARY KEY (symbol, ts, model)
+    );
+    SELECT create_hypertable('app.model_scores', 'ts', if_not_exists => TRUE);
+    SELECT set_chunk_time_interval('app.model_scores', INTERVAL '365 days');
+
+    -- ML-7 audit: every LLM call and output, for cost control + number verification.
+    CREATE TABLE IF NOT EXISTS app.llm_calls (
+      ts         TIMESTAMPTZ NOT NULL DEFAULT now(),
+      kind       TEXT NOT NULL,       -- narrative | ask | embedding
+      provider   TEXT NOT NULL,
+      model      TEXT NOT NULL,
+      prompt_hash TEXT NOT NULL,
+      tokens_in  INT,
+      tokens_out INT,
+      cost       DOUBLE PRECISION,
+      status     TEXT NOT NULL,
+      latency_s  DOUBLE PRECISION,
+      PRIMARY KEY (ts, kind, provider, model, prompt_hash)
+    );
+    SELECT create_hypertable('app.llm_calls', 'ts', if_not_exists => TRUE);
+    SELECT set_chunk_time_interval('app.llm_calls', INTERVAL '365 days');
+
+    CREATE TABLE IF NOT EXISTS app.llm_outputs (
+      kind      TEXT NOT NULL,       -- narrative | story_summary | ask_response
+      scope     TEXT NOT NULL,
+      ts        TIMESTAMPTZ NOT NULL DEFAULT now(),
+      text      TEXT NOT NULL,
+      facts_hash TEXT NOT NULL,
+      verified  BOOLEAN NOT NULL DEFAULT FALSE,
+      PRIMARY KEY (kind, scope, ts)
+    );
