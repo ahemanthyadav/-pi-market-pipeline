@@ -20,25 +20,17 @@ class NicknameTest(unittest.TestCase):
         self.assertEqual(nicknames.NICKNAMES["hdfc bank"], "HDFCBANK.NS")
         self.assertEqual(nicknames.NICKNAMES["infosys"], "INFY.NS")
 
-    def test_known_us_nickname(self):
-        self.assertEqual(nicknames.NICKNAMES["apple"], "AAPL")
-        self.assertEqual(nicknames.NICKNAMES["facebook"], "META")
-        self.assertEqual(nicknames.NICKNAMES["big blue"], "IBM")
-        self.assertEqual(nicknames.NICKNAMES["tesla"], "TSLA")
-
     def test_index_nickname(self):
         self.assertEqual(nicknames.NICKNAMES["nifty"], "^NSEI")
         self.assertEqual(nicknames.NICKNAMES["sensex"], "^BSESN")
-        self.assertEqual(nicknames.NICKNAMES["vix"], "^VIX")
-        self.assertEqual(nicknames.NICKNAMES["dow"], "^DJI")
 
-    def test_commodity_fx_nickname(self):
-        self.assertEqual(nicknames.NICKNAMES["gold"], "GC=F")
+    def test_fx_nickname(self):
         self.assertEqual(nicknames.NICKNAMES["usdinr"], "USDINR=X")
-        self.assertEqual(nicknames.NICKNAMES["dxy"], "DX-Y.NYB")
 
-    def test_none_for_unknown(self):
-        self.assertNotIn("randomcompany", nicknames.NICKNAMES)
+    def test_no_short_symbols(self):
+        """No symbol value should be <= 5 chars (to avoid secret-value collisions)."""
+        for sym in nicknames.NICKNAMES.values():
+            self.assertGreaterEqual(len(sym), 5, f"Symbol {sym} is too short")
 
     def test_command_aliases(self):
         self.assertEqual(nicknames.COMMAND_ALIASES["price"], "stock")

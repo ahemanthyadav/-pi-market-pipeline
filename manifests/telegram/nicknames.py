@@ -155,15 +155,7 @@ NICKNAMES = {
     "euro": "EURUSD=X",
     "yen": "USDJPY=X",
     "pound": "GBPUSD=X",
-    # FX (all >5 chars)
-    "usdinr": "USDINR=X",
-    "usd inr": "USDINR=X",
-    "dollar": "DX-Y.NYB",
-    "dxy": "DX-Y.NYB",
-    "dollar index": "DX-Y.NYB",
-    "euro": "EURUSD=X",
-    "yen": "USDJPY=X",
-    "pound": "GBPUSD=X",
+}
 
 # Short alias → full command for command routing
 COMMAND_ALIASES = {
@@ -326,6 +318,13 @@ PHRASE_ROUTES = {
     "volatility index": ("vix", ""),
     "nifty level": ("nifty", ""),
     "nifty 50": ("nifty", ""),
+    "top growth": ("top", "growth {arg}"),
+    "top value": ("top", "value {arg}"),
+    "top quality": ("top", "quality {arg}"),
+    "top momentum": ("top", "momentum {arg}"),
+    "top risk": ("top", "risk {arg}"),
+    "daily digest": ("digest", ""),
+    "my watchlist": ("watch", ""),
     "sensex level": ("sensex", ""),
     "gold price": ("gold", ""),
     "gold rate": ("gold", ""),

@@ -40,9 +40,8 @@ class Fuzzy(unittest.TestCase):
         return (row[0], how) if row else (None, how)
 
     def test_nickname_map_resolves_before_fuzzy(self):
-        for text, sym in [("reliance", "RELIANCE.NS"), ("apple", "AAPL"),
-                          ("facebook", "META"), ("big blue", "IBM"),
-                          ("nifty", "^NSEI"), ("gold", "GC=F")]:
+        for text, sym in [("reliance", "RELIANCE.NS"), ("tcs", "TCS.NS"),
+                          ("hdfc bank", "HDFCBANK.NS"), ("nifty", "^NSEI")]:
             self.assertEqual(self.auto(text), (sym, "nickname"), text)
 
     def test_clear_misspellings_resolve_directly(self):
@@ -83,7 +82,7 @@ class Ai(unittest.TestCase):
             calls.append(prompt)
             return "AAPL", "Apple Inc."
         # nickname resolves without calling AI
-        self.assertEqual(resolver.suggest(q, "facebook", asker)[0][0], "META")
+        self.assertEqual(resolver.suggest(q, "reliance", asker)[0][0], "RELIANCE.NS")
         self.assertEqual(len(calls), 0)                  # nickname, no AI call
         # but a non-nickname still uses AI and caches
         self.assertEqual(resolver.suggest(q, "aple", asker)[0][0], "AAPL")

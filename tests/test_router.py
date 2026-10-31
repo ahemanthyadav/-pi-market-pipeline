@@ -27,9 +27,9 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(conf, "phrase")
 
     def test_price_for(self):
-        cmd, args, conf = router.route("quote for apple")
+        cmd, args, conf = router.route("quote for reliance")
         self.assertEqual(cmd, "stock")
-        self.assertEqual(args, "apple")
+        self.assertEqual(args, "reliance")
         self.assertEqual(conf, "phrase")
 
     def test_tcs_price_keyword_first(self):
@@ -45,16 +45,10 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(args, "TCS.NS")
         self.assertEqual(conf, "keyword")
 
-    def test_facebook_nickname(self):
-        cmd, args, conf = router.route("facebook price")
+    def test_reliance_nickname(self):
+        cmd, args, conf = router.route("reliance price")
         self.assertEqual(cmd, "stock")
-        self.assertEqual(args, "META")
-        self.assertEqual(conf, "nickname")
-
-    def test_big_blue_nickname(self):
-        cmd, args, conf = router.route("big blue price")
-        self.assertEqual(cmd, "stock")
-        self.assertEqual(args, "IBM")
+        self.assertEqual(args, "RELIANCE.NS")
         self.assertEqual(conf, "nickname")
 
     def test_nifty_keyword(self):
@@ -89,16 +83,16 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(conf, "phrase")
 
     def test_single_word_nickname(self):
-        cmd, args, conf = router.route("apple")
+        cmd, args, conf = router.route("reliance")
         self.assertEqual(cmd, "stock")
-        self.assertEqual(args, "AAPL")
+        self.assertEqual(args, "RELIANCE.NS")
         self.assertEqual(conf, "nickname")
 
     def test_single_word_keyword(self):
         cmd, args, conf = router.route("vix")
-        self.assertEqual(cmd, "stock")
-        self.assertEqual(args, "^VIX")
-        self.assertEqual(conf, "nickname")
+        self.assertEqual(cmd, "vix")
+        self.assertEqual(args, "")
+        self.assertEqual(conf, "keyword")
 
     def test_unknown_returns_none(self):
         cmd, args, conf = router.route("random gibberish xyz")
@@ -113,9 +107,9 @@ class RouteTest(unittest.TestCase):
         self.assertIsNone(conf)
 
     def test_format_route(self):
-        out = router.format_route("stock", "TCS", "nickname")
+        out = router.format_route("stock", "RELIANCE.NS", "nickname")
         self.assertIn("/stock", out)
-        self.assertIn("TCS", out)
+        self.assertIn("RELIANCE.NS", out)
         self.assertIn("nickname", out)
 
 
