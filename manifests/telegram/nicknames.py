@@ -155,6 +155,15 @@ NICKNAMES = {
     "euro": "EURUSD=X",
     "yen": "USDJPY=X",
     "pound": "GBPUSD=X",
+    # FX (all >5 chars)
+    "usdinr": "USDINR=X",
+    "usd inr": "USDINR=X",
+    "dollar": "DX-Y.NYB",
+    "dxy": "DX-Y.NYB",
+    "dollar index": "DX-Y.NYB",
+    "euro": "EURUSD=X",
+    "yen": "USDJPY=X",
+    "pound": "GBPUSD=X",
 
 # Short alias → full command for command routing
 COMMAND_ALIASES = {
